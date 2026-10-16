@@ -6,6 +6,7 @@
  */
 import { validateContract, type ActionDefinition, type ActionResult } from '@iar/contracts';
 import { ActionIdempotencyLedger } from '@iar/runtime';
+import { WorkflowEventLog } from './event-log.js';
 import { PolicyGate, confirmationScopeHash } from './policy-gate.js';
 import { type ExecuteRequest, type WorkflowResult, type WorkflowRun } from './types.js';
 import { failure, isRecord, isTerminal, success, validAction, validRunId } from './workflow-support.js';
@@ -16,6 +17,8 @@ export type ActionExecutionDependencies = {
   runs: Map<string, WorkflowRun>;
   /** 原子 Action 幂等账本。 */
   ledger: ActionIdempotencyLedger;
+  /** Action 结果和拒绝路径的事件 sink。 */
+  eventLog: WorkflowEventLog;
 };
 
 /**
@@ -63,25 +66,40 @@ export class ActionExecutionService {
    */
   private preflight(input: ExecuteRequest): ExecutionPreflight {
     // 外部请求和 Action 必须先通过普通对象与公共 Schema 边界。
-    if (!isRecord(input) || !isRecord(input.action)) return rejected('workflow_input_invalid');
+    if (!isRecord(input) || !isRecord(input.action)) return this.reject(input, 'workflow_input_invalid');
     // runId、executor 和 retryable 不允许依赖 TypeScript 类型擦除后的值。
-    if (!validAction(input.action) || !validRunId(input.runId)) return rejected('policy_input_invalid');
-    if (typeof input.executor !== 'function' || !validRetryable(input.retryable)) return rejected('workflow_input_invalid');
+    if (!validAction(input.action) || !validRunId(input.runId)) return this.reject(input, 'policy_input_invalid');
+    if (typeof input.executor !== 'function' || !validRetryable(input.retryable)) return this.reject(input, 'workflow_input_invalid');
     const run = this.dependencies.runs.get(input.runId);
     // 未知 run 不得创建隐式执行上下文。
-    if (!run) return rejected('workflow_not_found');
+    if (!run) return this.reject(input, 'workflow_not_found');
     // Action 只能绑定发起它的 Workflow 实例。
-    if (input.action.runId !== input.runId) return rejected('action_run_mismatch');
+    if (input.action.runId !== input.runId) return this.reject(input, 'action_run_mismatch');
     const policy = this.policy.evaluate(input, run.confirmation);
     // duplicate replay 也必须重新经过当前授权、能力和 confirmation 校验。
-    if (!policy.ok) return rejected(policy.reasonCode);
+    if (!policy.ok) return this.reject(input, policy.reasonCode);
     const replay = this.replayKnown(input.action);
     if (replay) return { ok: true, run, replay };
     // 终态只允许已经通过 Policy 的既有结果重放。
-    if (isTerminal(run.status)) return rejected('workflow_terminal');
+    if (isTerminal(run.status)) return this.reject(input, 'workflow_terminal');
     // waiting 必须先显式 retry/resume，不能绕过恢复边界。
-    if (run.status === 'waiting') return rejected('workflow_waiting');
+    if (run.status === 'waiting') return this.reject(input, 'workflow_waiting');
     return { ok: true, run };
+  }
+
+  /**
+   * 记录合法 Action 的前置拒绝并返回稳定结果。
+   * @param input - 未信任的执行请求
+   * @param reasonCode - 宿主可消费的稳定拒绝原因
+   * @returns 前置检查失败结果
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-17
+   */
+  private reject(input: ExecuteRequest, reasonCode: string): ExecutionPreflight {
+    const run = isRecord(input) && validRunId(input.runId) ? this.dependencies.runs.get(input.runId) : undefined;
+    const actionMatchesRun = isRecord(input) && validAction(input.action) && validRunId(input.runId) && input.action.runId === input.runId;
+    if (run && actionMatchesRun) this.dependencies.eventLog.actionFailed(input.action, reasonCode, reasonCode);
+    return rejected(reasonCode);
   }
 
   /**
@@ -96,10 +114,14 @@ export class ActionExecutionService {
   private async executeApproved(input: ExecuteRequest, run: WorkflowRun): Promise<WorkflowResult<ActionResult>> {
     const started = await this.startIdempotent(input.action);
     // 幂等账本异常不能伪装成重复提交。
-    if (started.reasonCode) return failure(started.reasonCode);
+    if (started.reasonCode) {
+      this.dependencies.eventLog.actionFailed(input.action, started.reasonCode, started.reasonCode);
+      return failure(started.reasonCode);
+    }
     // 已有记录必须先校验 Action 身份，再决定重放结果。
     if (!started.ok) return this.duplicateResult(input.action, started.existing);
     this.actionIdentities.set(input.action.idempotencyKey, structuredClone(input.action));
+    this.dependencies.eventLog.actionStarted(input.action);
     // ledger.start 是异步边界，完成后必须重新确认没有 cancel/timeout 竞态。
     if (run.status !== 'running') return this.recordStateRace(input, run);
     return this.callExecutor(input, run);
@@ -133,11 +155,19 @@ export class ActionExecutionService {
    */
   private duplicateResult(action: ActionDefinition, existing: ActionDefinition): WorkflowResult<ActionResult> {
     // 同一幂等键不能绑定不同的 Action 身份或输入。
-    if (confirmationScopeHash(action) !== confirmationScopeHash(existing)) return failure('idempotency_key_conflict');
+    if (confirmationScopeHash(action) !== confirmationScopeHash(existing)) {
+      this.dependencies.eventLog.actionFailed(action, 'idempotency_key_conflict', 'idempotency_key_conflict');
+      return failure('idempotency_key_conflict');
+    }
     const result = this.actionResults.get(action.idempotencyKey);
     // 已有完整结果时直接返回深拷贝，禁止第二次副作用。
-    if (result) return { ok: true, value: structuredClone(result), reasonCode: 'action_duplicate' };
+    if (result) {
+      if (result.status === 'failed') this.dependencies.eventLog.actionFailed(action, result.errorCode ?? 'action.failed', 'action_duplicate');
+      else this.dependencies.eventLog.actionCompleted(action, result, 'action_duplicate');
+      return { ok: true, value: structuredClone(result), reasonCode: 'action_duplicate' };
+    }
     // 只有 Action 记录而没有结果时，表示第一次执行仍未收敛。
+    this.dependencies.eventLog.actionFailed(action, 'action.in_progress', 'action_in_progress');
     return { ok: false, reasonCode: 'action_in_progress', existing: structuredClone(existing) };
   }
 
@@ -195,6 +225,8 @@ export class ActionExecutionService {
       run.status = input.retryable === true ? 'waiting' : 'failed';
     }
     this.actionResults.set(input.action.idempotencyKey, structuredClone(result));
+    if (result.status === 'failed') this.dependencies.eventLog.actionFailed(input.action, result.errorCode ?? 'action.failed', result.errorCode ?? 'action_failed');
+    else this.dependencies.eventLog.actionCompleted(input.action, result);
     return success(structuredClone(result));
   }
 
@@ -217,6 +249,7 @@ export class ActionExecutionService {
     run.status = 'failed';
     this.actionIdentities.set(input.action.idempotencyKey, structuredClone(input.action));
     this.actionResults.set(input.action.idempotencyKey, result);
+    this.dependencies.eventLog.actionFailed(input.action, errorCode, reasonCode);
     return failure(reasonCode);
   }
 
@@ -236,6 +269,7 @@ export class ActionExecutionService {
     run.lastError = { code: run.lastError?.code ?? 'workflow.state_changed', retryable: false };
     this.actionIdentities.set(input.action.idempotencyKey, structuredClone(input.action));
     this.actionResults.set(input.action.idempotencyKey, result);
+    this.dependencies.eventLog.actionFailed(input.action, 'workflow.state_changed', 'workflow_state_changed');
     return failure('workflow_state_changed');
   }
 }

@@ -4,9 +4,10 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { type ActionResult } from '@iar/contracts';
+import { type ActionResult, type EventEnvelope } from '@iar/contracts';
 import { ActionIdempotencyLedger } from '@iar/runtime';
 import { ActionExecutionService } from './action-execution.js';
+import { WorkflowEventLog } from './event-log.js';
 import { confirmationScopeHash } from './policy-gate.js';
 import { cloneWorkflowRun, type ConfirmationRequest, type ExecuteRequest, type FailureRequest, type WorkflowRequest, type WorkflowResult, type WorkflowRun } from './types.js';
 import { failure, isRecord, isTerminal, validAction, validConfirmationInput, validDefinition, validFailureInput, validRunId, validTransitionInput, success, workflowDefinition } from './workflow-support.js';
@@ -15,6 +16,8 @@ import { failure, isRecord, isTerminal, validAction, validConfirmationInput, val
 export type LocalWorkflowOptions = {
   /** 可复用的 Action 幂等账本。 */
   ledger?: ActionIdempotencyLedger;
+  /** 可注入的本地可重放事件 sink。 */
+  eventLog?: WorkflowEventLog;
 };
 
 /**
@@ -28,6 +31,7 @@ export type LocalWorkflowOptions = {
 export class LocalWorkflow {
   private readonly runs = new Map<string, WorkflowRun>();
   private readonly execution: ActionExecutionService;
+  private readonly eventLog: WorkflowEventLog;
 
   /**
    * 创建本地 Workflow 服务。
@@ -37,7 +41,18 @@ export class LocalWorkflow {
    * @date 2026-10-17
    */
   public constructor(options: LocalWorkflowOptions = {}) {
-    this.execution = new ActionExecutionService({ runs: this.runs, ledger: options.ledger ?? new ActionIdempotencyLedger() });
+    this.eventLog = options.eventLog ?? new WorkflowEventLog();
+    this.execution = new ActionExecutionService({ runs: this.runs, ledger: options.ledger ?? new ActionIdempotencyLedger(), eventLog: this.eventLog });
+  }
+
+  /**
+   * 返回本地 Workflow 产生的深拷贝事件。
+   * @returns 版本化 EventEnvelope 快照
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-17
+   */
+  public get events(): readonly EventEnvelope[] {
+    return this.eventLog.events;
   }
 
   /**
@@ -55,6 +70,7 @@ export class LocalWorkflow {
     if (this.runs.has(request.runId)) return failure('workflow_exists');
     const run: WorkflowRun = { runId: request.runId, workflowId: request.definition.workflowId, definition: structuredClone(request.definition), currentStep: request.definition.initialState, status: 'running', attempts: 0, confirmation: { state: 'not_required' } };
     this.runs.set(request.runId, run);
+    this.eventLog.workflowStarted(run);
     return success(cloneWorkflowRun(run));
   }
 
@@ -95,6 +111,7 @@ export class LocalWorkflow {
     if (!transition) return failure('workflow_transition_invalid');
     run.currentStep = transition.to;
     run.status = definition.terminalStates.includes(transition.to) ? 'completed' : 'running';
+    this.eventLog.workflowTransitioned(run);
     return success(cloneWorkflowRun(run));
   }
 
@@ -121,6 +138,7 @@ export class LocalWorkflow {
     if (input.scopeHash !== confirmationScopeHash(input.action)) return failure('confirmation_scope_mismatch');
     run.action = structuredClone(input.action);
     run.confirmation = { state: 'confirmed', scopeHash: input.scopeHash, confirmedAt: input.confirmedAt };
+    this.eventLog.workflowTransitioned(run);
     return success(cloneWorkflowRun(run));
   }
 
@@ -154,6 +172,7 @@ export class LocalWorkflow {
     if (isTerminal(run.status)) return failure('workflow_terminal');
     run.lastError = { code: input.errorCode, retryable: input.retryable };
     run.status = input.retryable ? 'waiting' : 'failed';
+    this.eventLog.workflowTransitioned(run);
     return success(cloneWorkflowRun(run));
   }
 
@@ -177,6 +196,7 @@ export class LocalWorkflow {
     if (run.status !== 'waiting' || !run.lastError?.retryable) return failure('workflow_not_retryable');
     run.status = 'running';
     run.attempts += 1;
+    this.eventLog.workflowTransitioned(run);
     return success(cloneWorkflowRun(run));
   }
 
@@ -212,6 +232,7 @@ export class LocalWorkflow {
     if (isTerminal(run.status)) return failure('workflow_terminal');
     run.status = 'cancelled';
     run.lastError = { code: 'workflow.cancelled', retryable: false };
+    this.eventLog.workflowTransitioned(run);
     return success(cloneWorkflowRun(run));
   }
 
@@ -232,6 +253,7 @@ export class LocalWorkflow {
     // 终态不能被 resume 绕过。
     if (isTerminal(run.status)) return failure('workflow_terminal');
     if (run.status === 'waiting') run.status = 'running';
+    this.eventLog.workflowTransitioned(run);
     return success(cloneWorkflowRun(run));
   }
 }
