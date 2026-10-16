@@ -1,0 +1,42 @@
+{
+  "apiVersion": "iar.dev/v1",
+  "schemaVersion": "iar.plugin-manifest/v1",
+  "pluginId": "dip-api-stop-v1",
+  "pluginKind": "function",
+  "scope": "function",
+  "functionId": "dip.service.stop",
+  "version": "1.0.0",
+  "description": "调用 DIP API 停止指定服务",
+  "capabilities": ["dip.service.write"],
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "serviceId": { "type": "string", "minLength": 1 }
+    },
+    "required": ["serviceId"],
+    "additionalProperties": false
+  },
+  "outputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+      "accepted": { "type": "boolean" }
+    },
+    "required": ["accepted"],
+    "additionalProperties": false
+  },
+  "lifecycle": {
+    "entrypoint": "./dist/index.js",
+    "onLoad": "onLoad",
+    "onEnable": "onEnable",
+    "onDisable": "onDisable",
+    "onUnload": "onUnload"
+  },
+  "policy": {
+    "riskLevel": "high",
+    "requiresConfirmation": true,
+    "allowedCapabilities": ["dip.service.write"]
+  },
+  "dependencies": []
+}

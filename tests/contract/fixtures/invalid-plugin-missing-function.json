@@ -1,0 +1,19 @@
+{
+  "apiVersion": "iar.dev/v1",
+  "schemaVersion": "iar.plugin-manifest/v1",
+  "pluginId": "broken-stop-v1",
+  "pluginKind": "function",
+  "scope": "function",
+  "version": "1.0.0",
+  "description": "缺少 Function 归属的插件",
+  "capabilities": ["dip.service.write"],
+  "inputSchema": { "type": "object" },
+  "outputSchema": { "type": "object" },
+  "lifecycle": { "entrypoint": "./dist/index.js" },
+  "policy": {
+    "riskLevel": "high",
+    "requiresConfirmation": true,
+    "allowedCapabilities": ["dip.service.write"]
+  },
+  "dependencies": []
+}

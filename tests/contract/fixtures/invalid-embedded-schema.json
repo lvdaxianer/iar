@@ -1,0 +1,20 @@
+{
+  "apiVersion": "iar.dev/v1",
+  "schemaVersion": "iar.plugin-manifest/v1",
+  "pluginId": "broken-schema-v1",
+  "pluginKind": "function",
+  "scope": "function",
+  "functionId": "dip.service.stop",
+  "version": "1.0.0",
+  "description": "嵌入 Schema 无效的插件",
+  "capabilities": [],
+  "inputSchema": { "type": "not-a-json-schema-type" },
+  "outputSchema": { "type": "object" },
+  "lifecycle": { "entrypoint": "./dist/index.js" },
+  "policy": {
+    "riskLevel": "low",
+    "requiresConfirmation": false,
+    "allowedCapabilities": []
+  },
+  "dependencies": []
+}

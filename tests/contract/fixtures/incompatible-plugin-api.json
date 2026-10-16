@@ -1,0 +1,20 @@
+{
+  "apiVersion": "iar.dev/v0",
+  "schemaVersion": "iar.plugin-manifest/v1",
+  "pluginId": "old-stop-v1",
+  "pluginKind": "function",
+  "scope": "function",
+  "functionId": "dip.service.stop",
+  "version": "1.0.0",
+  "description": "使用旧 API 版本的插件",
+  "capabilities": [],
+  "inputSchema": { "type": "object" },
+  "outputSchema": { "type": "object" },
+  "lifecycle": { "entrypoint": "./dist/index.js" },
+  "policy": {
+    "riskLevel": "low",
+    "requiresConfirmation": false,
+    "allowedCapabilities": []
+  },
+  "dependencies": []
+}
