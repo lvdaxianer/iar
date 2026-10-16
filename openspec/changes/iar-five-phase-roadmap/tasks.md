@@ -34,7 +34,7 @@
 - Broader verification: `npm run lint && npm run build && npm test`。
 - Handoff evidence: 路由决策 fixture、候选/排除证据、Policy/Workflow 状态图、`test1` 验收回放和幂等测试报告。
 
-- [ ] 2.1 在 `packages/rule-engine/` 实现 FunctionRule/PluginRule、`ALL`/`ANY`/`NONE`、未知字段策略、优先级/特异性冲突处理，并记录匹配和排除证据；验证冲突进入 `needs_clarification` 而不是静默覆盖。
+- [x] 2.1 在 `packages/rule-engine/` 实现 FunctionRule/PluginRule、`ALL`/`ANY`/`NONE`、未知字段策略、优先级/特异性冲突处理，并记录匹配和排除证据；验证冲突进入 `needs_clarification` 而不是静默覆盖。
 - [ ] 2.2 在 `packages/decision/` 实现 Mock DecisionProvider 和统一 choice/score/rejection/noul 结果校验；验证低于阈值、候选为空、候选不可区分时不返回可执行选择。
 - [ ] 2.3 在 `packages/runtime/` 串联 SemanticFrame → Function 候选/决策 → Plugin 候选/决策，并再次校验 Function 归属、启用状态、租户、环境和能力；验证 Plugin 决策不能增加 capability 或绕过 disabled 过滤。
 - [ ] 2.4 在 `packages/workflow/` 实现本地确定性状态机、Policy Gate、确认范围/hash、retryable 错误分类、超时、取消、resume 和 Action 幂等；验证高风险动作未确认/未授权时不调用 executor。
