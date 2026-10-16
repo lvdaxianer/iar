@@ -149,7 +149,8 @@ export class DurableWorkflowEngine implements WorkflowRuntimeContract {
       const loaded = await loadRun(this.context, input.runId);
       // 恢复失败时不允许把未知快照交给 executor。
       if (!loaded.ok) return failure(loaded.reasonCode);
-      return replayOrExecute(this.context, loaded.value, input, executor);
+      // 必须 await 公开异步边界，才能把持久化失败映射为稳定错误码。
+      return await replayOrExecute(this.context, loaded.value, input, executor);
     } catch {
       invalidateRun(this.context, safeRunId(input));
       return failure('durable_persistence_failed');
