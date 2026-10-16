@@ -373,6 +373,8 @@ entrypoint: ./dist/index.js
 
 可复制的完整示例见 [`references/插件Manifest示例.yaml`](./references/插件Manifest示例.yaml)。
 
+Phase 1 的可安装 fake plugin、Handler 调用、启停/卸载和事件重放样例见 [`references/fake-plugin-demo.md`](./references/fake-plugin-demo.md)。
+
 ### 6.4 Hook、状态事件与订阅
 
 这里明确区分四个概念：

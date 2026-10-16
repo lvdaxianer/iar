@@ -10,7 +10,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node scripts/run-tests.mjs"
+    "test": "npm run build && node scripts/run-tests.mjs",
+    "demo:fake-plugin": "npm run build && node scripts/run-fake-plugin-demo.mjs"
   },
   "engines": {
     "node": ">=24"
