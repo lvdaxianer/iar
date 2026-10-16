@@ -2,5 +2,13 @@
   "name": "@iar/storage",
   "version": "0.1.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "types": "../../dist/packages/storage/src/index.d.ts",
+  "dependencies": {
+    "@iar/contracts": "0.1.0"
+  }
 }

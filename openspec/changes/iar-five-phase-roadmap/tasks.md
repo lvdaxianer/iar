@@ -16,7 +16,7 @@
 - [x] 1.1 创建 npm workspace、TypeScript 编译配置、包目录和测试命令；验证 `npm install`、`npm run build` 与空测试基线成功，且构建产物未进入版本控制。
 - [x] 1.2 在 `packages/contracts/` 定义 `Function`、`PluginManifest`、`Rule`、`Workflow`、`Action`、`Decision`、`BehaviorContext`、事件和错误码的版本化 Schema/类型；验证合法 fixture 通过、缺少必填字段和版本不兼容 fixture 被拒绝。
 - [x] 1.3 在 `packages/plugin-sdk/` 与 `packages/plugin-host/` 实现 Manifest 校验、Function 归属、依赖排序、注册表和 discovered → validated → installed → enabled → draining/disabled → unloaded 生命周期；验证错误安装不改变注册表，卸载撤销当前能力但保留事件。
-- [ ] 1.4 在 `packages/storage/` 实现 EventStore、SnapshotStore、RegistryStore 接口及内存/SQLite 适配器；在 `packages/runtime/` 实现 BehaviorContext 投影、关键字段哈希和事件重放；验证相同事件序列得到相同状态，重复幂等键不产生第二次 Action。
+- [x] 1.4 在 `packages/storage/` 实现 EventStore、SnapshotStore、RegistryStore 接口及内存/SQLite 适配器；在 `packages/runtime/` 实现 BehaviorContext 投影、关键字段哈希和事件重放；验证相同事件序列得到相同状态，重复幂等键不产生第二次 Action。
 - [ ] 1.5 实现 `packages/subscriptions/` 的内部 before Hook 与异步 StateEvent 订阅调度，包含优先级、过滤、超时、重试、失败策略、递归深度和订阅幂等键；验证 fail-open observer 不阻断主流程、fail-closed permission handler 能阻断动作。
 - [ ] 1.6 实现上下文压缩候选结果的 Schema、事件引用、工作流、确认状态和关键哈希校验；验证压缩改变 `subject`、`pluginId`、`currentStep` 或确认范围时保留旧视图并写入 `context.compaction_failed`。
 - [ ] 1.7 完成 Phase 1 契约/replay 测试和文档样例同步；验证 `npm run lint && npm run build && npm test` 全部通过，并交付可安装、启停、卸载、重放的 fake plugin 演示。
