@@ -1,0 +1,14 @@
+{
+  "name": "@iar/decision",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.js",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./index.js"
+  },
+  "dependencies": {
+    "@iar/contracts": "0.1.0"
+  }
+}
