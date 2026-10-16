@@ -59,7 +59,7 @@
 - [x] 3.3 在 `packages/adapters/fastify/` 提供创建 run、提交 input、提交 confirm、查询 run、install/enable/disable plugin API；验证所有响应包含 trace/run/version/error 字段且不会暴露内部 Prompt、密钥或完整敏感上下文。
 - [x] 3.4 实现 `examples/knowledge-query/`、`examples/ticket-create/`、`examples/human-transfer/` 三个 contract-tested 插件；验证每个插件只属于一个 Function，输入/输出 Schema、能力和确认策略与 manifest 一致。
 - [x] 3.5 添加 Mock Provider、API contract、插件 contract 和示例端到端测试；验证真实 Provider 不可用时 Mock/安全错误路径仍能完成本地确定性测试。
-- [ ] 3.6 完成 Phase 3 broader verification；验证 `npm run lint && npm run build && npm test` 通过，并记录 API 兼容性和模型 profile 版本策略。
+- [x] 3.6 完成 Phase 3 broader verification；验证 `npm run lint && npm run build && npm test` 通过，并记录 API 兼容性和模型 profile 版本策略。
 
 ## 4. Phase 4 — 服务化、隔离执行与观测
 
