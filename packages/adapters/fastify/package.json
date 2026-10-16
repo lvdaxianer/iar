@@ -1,0 +1,24 @@
+{
+  "name": "@iar/adapters-fastify",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.js",
+  "types": "../../../dist/packages/adapters/fastify/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./index.js"
+    },
+    "./http-boundary": {
+      "types": "./src/http-boundary.ts",
+      "import": "./http-boundary.js"
+    }
+  },
+  "dependencies": {
+    "@iar/contracts": "0.1.0",
+    "@iar/plugin-host": "0.1.0",
+    "@iar/workflow": "0.1.0",
+    "fastify": "^5.6.0"
+  }
+}
