@@ -1,0 +1,16 @@
+# >>> project-hygiene (managed, do not edit by hand) >>>
+.DS_Store
+Thumbs.db
+*.log
+logs/
+coverage/
+*.lcov
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+*.pem
+*.key
+.Codex/worktrees/
+# <<< project-hygiene (managed) <<<
