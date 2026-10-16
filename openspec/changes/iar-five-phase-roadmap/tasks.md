@@ -57,7 +57,7 @@
 - [x] 3.1 在 `config/models.yaml` 和 `packages/decision/` 建立 `ModelProfile`、role 配置、timeout/retry/fallback、structured output、请求脱敏和 profile/model 版本审计；验证 API key、raw prompt 和 raw user input 不进入模型请求日志。
 - [x] 3.2 实现 `ModelGateway` 的 Semantic Extractor、JEV Function Decision、JEV Plugin Decision、Context Compactor 和 Response Generator 适配器；验证 Provider 超时、Schema 错误、阈值拒绝和 fallback 都映射为稳定错误/事件。
 - [x] 3.3 在 `packages/adapters/fastify/` 提供创建 run、提交 input、提交 confirm、查询 run、install/enable/disable plugin API；验证所有响应包含 trace/run/version/error 字段且不会暴露内部 Prompt、密钥或完整敏感上下文。
-- [ ] 3.4 实现 `examples/knowledge-query/`、`examples/ticket-create/`、`examples/human-transfer/` 三个 contract-tested 插件；验证每个插件只属于一个 Function，输入/输出 Schema、能力和确认策略与 manifest 一致。
+- [x] 3.4 实现 `examples/knowledge-query/`、`examples/ticket-create/`、`examples/human-transfer/` 三个 contract-tested 插件；验证每个插件只属于一个 Function，输入/输出 Schema、能力和确认策略与 manifest 一致。
 - [ ] 3.5 添加 Mock Provider、API contract、插件 contract 和示例端到端测试；验证真实 Provider 不可用时 Mock/安全错误路径仍能完成本地确定性测试。
 - [ ] 3.6 完成 Phase 3 broader verification；验证 `npm run lint && npm run build && npm test` 通过，并记录 API 兼容性和模型 profile 版本策略。
 
