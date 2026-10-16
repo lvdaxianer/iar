@@ -9,6 +9,9 @@
   },
   "types": "../../dist/packages/runtime/src/index.d.ts",
   "dependencies": {
-    "@iar/contracts": "0.1.0"
+    "@iar/contracts": "0.1.0",
+    "@iar/decision": "0.1.0",
+    "@iar/plugin-host": "0.1.0",
+    "@iar/rule-engine": "0.1.0"
   }
 }

@@ -6,7 +6,10 @@
   "main": "./index.js",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./index.js"
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./index.js"
+    }
   },
   "dependencies": {
     "@iar/contracts": "0.1.0"
