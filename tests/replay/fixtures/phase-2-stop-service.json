@@ -1,0 +1,111 @@
+[
+  {
+    "schemaVersion": "iar.event/v1",
+    "eventId": "evt-stop-test1-1",
+    "eventName": "workflow.started",
+    "occurredAt": "2026-10-17T00:00:00.000Z",
+    "runId": "run-stop-test1",
+    "correlationId": "corr-stop-test1",
+    "payload": {
+      "subjectId": "test1",
+      "subjectType": "dip.service",
+      "intent": "service.stop",
+      "services": [
+        { "id": "test1", "type": "dip.service" },
+        { "id": "test2", "type": "dip.service" },
+        { "id": "test3", "type": "dip.service" }
+      ]
+    }
+  },
+  {
+    "schemaVersion": "iar.event/v1",
+    "eventId": "evt-stop-test1-2",
+    "eventName": "decision.created",
+    "occurredAt": "2026-10-17T00:00:01.000Z",
+    "runId": "run-stop-test1",
+    "correlationId": "corr-stop-test1",
+    "causationId": "evt-stop-test1-1",
+    "payload": {
+      "functionId": "dip.service.stop",
+      "pluginId": "dip-api-stop-v1",
+      "functionChoice": "dip.service.stop",
+      "pluginChoice": "dip-api-stop-v1",
+      "candidateIds": ["dip.service.stop", "dip-api-stop-v1"]
+    }
+  },
+  {
+    "schemaVersion": "iar.event/v1",
+    "eventId": "evt-stop-test1-3",
+    "eventName": "workflow.transitioned",
+    "occurredAt": "2026-10-17T00:00:02.000Z",
+    "runId": "run-stop-test1",
+    "correlationId": "corr-stop-test1",
+    "causationId": "evt-stop-test1-2",
+    "payload": {
+      "workflowId": "dip-stop-v1",
+      "currentStep": "awaiting_confirmation",
+      "status": "waiting",
+      "idempotencyKey": "stop:run-stop-test1:test1",
+      "actionName": "stop",
+      "actionStatus": "resolved",
+      "slots": { "serviceId": { "value": "test1", "status": "confirmed", "sourceEventId": "evt-stop-test1-1" } },
+      "pending": { "kind": "confirmation", "status": "required" },
+      "confirmation": { "state": "required", "scopeHash": "sha256:37ea2572fb165367e3fed04c0b8be445ae499eea458f86ad5bc7967ca12c4fdc" }
+    }
+  },
+  {
+    "schemaVersion": "iar.event/v1",
+    "eventId": "evt-stop-test1-4",
+    "eventName": "workflow.transitioned",
+    "occurredAt": "2026-10-17T00:00:03.000Z",
+    "runId": "run-stop-test1",
+    "correlationId": "corr-stop-test1",
+    "causationId": "evt-stop-test1-3",
+    "payload": {
+      "workflowId": "dip-stop-v1",
+      "currentStep": "executing",
+      "status": "running",
+      "idempotencyKey": "stop:run-stop-test1:test1",
+      "actionName": "stop",
+      "actionStatus": "resolved",
+      "slots": { "serviceId": { "value": "test1", "status": "confirmed", "sourceEventId": "evt-stop-test1-1" } },
+      "pending": { "kind": "confirmation", "status": "none" },
+      "confirmation": { "state": "confirmed", "scopeHash": "sha256:37ea2572fb165367e3fed04c0b8be445ae499eea458f86ad5bc7967ca12c4fdc", "confirmedAt": "2026-10-17T00:00:03.000Z" }
+    }
+  },
+  {
+    "schemaVersion": "iar.event/v1",
+    "eventId": "evt-stop-test1-5",
+    "eventName": "action.started",
+    "occurredAt": "2026-10-17T00:00:04.000Z",
+    "runId": "run-stop-test1",
+    "correlationId": "corr-stop-test1",
+    "causationId": "evt-stop-test1-4",
+    "payload": {
+      "actionId": "action-stop-test1",
+      "functionId": "dip.service.stop",
+      "pluginId": "dip-api-stop-v1",
+      "idempotencyKey": "stop:run-stop-test1:test1",
+      "actionName": "stop",
+      "actionStatus": "resolved"
+    }
+  },
+  {
+    "schemaVersion": "iar.event/v1",
+    "eventId": "evt-stop-test1-6",
+    "eventName": "action.completed",
+    "occurredAt": "2026-10-17T00:00:05.000Z",
+    "runId": "run-stop-test1",
+    "correlationId": "corr-stop-test1",
+    "causationId": "evt-stop-test1-5",
+    "payload": {
+      "actionId": "action-stop-test1",
+      "functionId": "dip.service.stop",
+      "pluginId": "dip-api-stop-v1",
+      "idempotencyKey": "stop:run-stop-test1:test1",
+      "actionName": "stop",
+      "actionStatus": "executed",
+      "output": { "serviceId": "test1", "stopped": true }
+    }
+  }
+]
