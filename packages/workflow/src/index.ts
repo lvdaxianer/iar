@@ -3,3 +3,5 @@
 export * from './types.js';
 export * from './policy-gate.js';
 export * from './local-workflow.js';
+export * from './event-log.js';
+// Workflow 入口同时暴露状态、策略、执行和事件回放边界。

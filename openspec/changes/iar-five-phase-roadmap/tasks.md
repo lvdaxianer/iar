@@ -39,7 +39,7 @@
 - [x] 2.3 在 `packages/runtime/` 串联 SemanticFrame → Function 候选/决策 → Plugin 候选/决策，并再次校验 Function 归属、启用状态、租户、环境和能力；验证 Plugin 决策不能增加 capability 或绕过 disabled 过滤。
 - [x] 2.4 在 `packages/workflow/` 实现本地确定性状态机、Policy Gate、确认范围/hash、retryable 错误分类、超时、取消、resume 和 Action 幂等；验证高风险动作未确认/未授权时不调用 executor。
 - [x] 2.5 添加 `tests/routing/`、`tests/workflow/` 和 replay fixture；验证“列出三个 DIP 服务后停止第一个服务”恢复 `test1`，先选 `dip.service.stop` 再选已授权插件，并在确认后只执行一次。
-- [ ] 2.6 完成 Phase 2 集成验证；验证 `npm run lint && npm run build && npm test` 通过，所有 Action 结果和拒绝路径均产生可重放事件。
+- [x] 2.6 完成 Phase 2 集成验证；验证 `npm run lint && npm run build && npm test` 通过，所有 Action 结果和拒绝路径均产生可重放事件。
 
 ## 3. Phase 3 — 模型适配、API 与示例插件
 
