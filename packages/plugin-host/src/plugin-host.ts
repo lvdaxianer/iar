@@ -17,7 +17,6 @@ import { createRecord, pluginIdOf, prepareInstall, validateInstallSet, type Inst
 import { canTransition, findActiveDependent, findDependent, findUnavailableDependency } from './plugin-lifecycle.js';
 import { cloneManifest, cloneRecord, hostError } from './plugin-host-support.js';
 import type { PluginHostOptions, PluginHostResult, PluginRecord } from './types.js';
-
 /**
  * 管理当前插件能力和不可变生命周期事件。
  *
@@ -27,13 +26,10 @@ import type { PluginHostOptions, PluginHostResult, PluginRecord } from './types.
 export class PluginHost {
   /** 当前注册表中的插件记录。 */
   private readonly records = new Map<string, PluginRecord>();
-
   /** 已知 Function ID，用于安装时校验插件归属。 */
   private readonly functionIds: ReadonlySet<string>;
-
   /** 所有成功或拒绝的生命周期事件，卸载不会删除历史。 */
   private readonly eventLog = new PluginEventLog();
-
   /**
    * 创建一个带有静态 Function 边界的 PluginHost。
    *
@@ -44,7 +40,6 @@ export class PluginHost {
   public constructor(options: PluginHostOptions) {
     this.functionIds = new Set(options.functionIds);
   }
-
   /**
    * 返回当前插件记录，不暴露注册表内部 Map。
    *
@@ -57,7 +52,6 @@ export class PluginHost {
     const record = this.records.get(pluginId);
     return record ? cloneRecord(record) : undefined;
   }
-
   /**
    * 返回事件日志的深拷贝快照，调用方不能修改内部历史。
    *
@@ -68,7 +62,6 @@ export class PluginHost {
   public get events(): readonly EventEnvelope[] {
     return this.eventLog.events;
   }
-
   /**
    * 返回一个插件的历史生命周期事件副本。
    *
@@ -80,7 +73,6 @@ export class PluginHost {
   public history(pluginId: string): EventEnvelope[] {
     return this.eventLog.history(pluginId);
   }
-
   /**
    * 安装单个插件，并保持与批量安装相同的原子语义。
    *
@@ -95,7 +87,6 @@ export class PluginHost {
     const record = result.value[0];
     return record ? { ok: true, value: record } : this.reject(pluginIdOf(input), hostError(ERROR_CODES.CONTRACT_VALIDATION_FAILED, '安装结果为空'));
   }
-
   /**
    * 校验、排序并原子安装一组插件。
    *
@@ -110,7 +101,6 @@ export class PluginHost {
     if (!preparation.ok) return this.reject(pluginIdOf(preparation.error.details?.pluginId), preparation.error);
     return this.commitInstall(preparation.value);
   }
-
   /**
    * 对完整校验结果执行排序、注册和生命周期事件提交。
    *
@@ -128,7 +118,6 @@ export class PluginHost {
     if (!validation.ok) return this.reject(pluginIdOf(validation.error.details?.pluginId), validation.error);
     return this.commitRecords(order.value, preparation.handlers);
   }
-
   /**
    * 将已排序的插件记录一次性写入注册表并发出阶段事件。
    *
@@ -146,7 +135,6 @@ export class PluginHost {
     records.forEach((record) => this.eventLog.lifecycle(record.manifest, 'installed'));
     return { ok: true, value: records.map(cloneRecord) };
   }
-
   /**
    * 启用已安装或重新启用的插件。
    *
@@ -158,7 +146,6 @@ export class PluginHost {
   public enable(pluginId: string): PluginHostResult<PluginRecord> {
     return this.transition(pluginId, 'enabled');
   }
-
   /**
    * 进入 draining，阻止新的执行但保留历史记录。
    *
@@ -170,7 +157,6 @@ export class PluginHost {
   public beginDrain(pluginId: string): PluginHostResult<PluginRecord> {
     return this.transition(pluginId, 'draining');
   }
-
   /**
    * 禁用插件当前能力，但保留注册记录供后续重新启用。
    *
@@ -182,7 +168,6 @@ export class PluginHost {
   public disable(pluginId: string): PluginHostResult<PluginRecord> {
     return this.transition(pluginId, 'disabled');
   }
-
   /**
    * 卸载插件当前能力，同时保留不可变生命周期历史。
    *
@@ -207,7 +192,23 @@ export class PluginHost {
     this.eventLog.lifecycle(record.manifest, 'unloaded', record.state);
     return { ok: true, value: cloneManifest(record.manifest) };
   }
-
+  /**
+   * 丢弃尚未启用的安装中间态，仅供上层事务补偿清理使用。
+   *
+   * @param pluginId - 插件稳定标识
+   * @returns 被丢弃的 Manifest 或稳定错误
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-17
+   */
+  public discardInstalled(pluginId: string): PluginHostResult<PluginManifest> {
+    const record = this.records.get(pluginId);
+    // 只有未启用的安装中间态可被事务补偿路径丢弃。
+    if (!record || record.state !== 'installed') return this.reject(pluginId, hostError(ERROR_CODES.INVALID_LIFECYCLE_TRANSITION, '只允许清理 installed 中间态', { pluginId }));
+    // 删除注册表记录前先保留不可变卸载事件。
+    this.records.delete(pluginId);
+    this.eventLog.lifecycle(record.manifest, 'unloaded', record.state);
+    return { ok: true, value: cloneManifest(record.manifest) };
+  }
   /**
    * 返回指定 Function 的启用业务插件，系统插件永远被排除。
    *
@@ -223,7 +224,6 @@ export class PluginHost {
       .sort((left, right) => compareStableIds(left.manifest.pluginId, right.manifest.pluginId))
       .map(cloneRecord);
   }
-
   /**
    * 解析单个候选并为 Function 归属失败留下可审计错误。
    *

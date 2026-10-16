@@ -95,7 +95,7 @@
 
 - [x] 5.1 建立长流程准入门槛和 `WorkflowRuntime` adapter contract；验证短动作继续使用本地状态机，只有 timer/cross-service/compensation 等明确需求才进入 durable adapter。
 - [x] 5.2 实现 Temporal-compatible durable adapter 的 step persistence、retry/cancel/timeout、worker-loss resume 和 IAR event/policy/idempotency 关联；验证 worker 丢失后从最后持久步骤恢复且不重复副作用。
-- [ ] 5.3 实现带签名、版本、依赖、能力变更审批和可回滚记录的远程插件分发；验证签名无效、版本不兼容或 capability 扩大时安装/升级被拒绝。
+- [x] 5.3 实现带签名、版本、依赖、能力变更审批和可回滚记录的远程插件分发；验证签名无效、版本不兼容或 capability 扩大时安装/升级被拒绝。
 - [ ] 5.4 实现跨语言 ABI 和多租户 control plane；验证远程插件仍遵守同一 Manifest、Schema、tenant、Policy Gate、审计和生命周期契约。
 - [ ] 5.5 添加 durable/distribution/compatibility tests 和故障演练；验证 `npm run lint && npm run build && npm test` 通过，并完成从本地 Workflow 到 durable adapter 的迁移/回滚演示。
 
