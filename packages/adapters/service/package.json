@@ -12,6 +12,10 @@
   },
   "types": "../../../dist/packages/adapters/service/src/index.d.ts",
   "dependencies": {
+    "@iar/adapters-fastify": "0.1.0",
+    "@iar/contracts": "0.1.0",
+    "@iar/plugin-host": "0.1.0",
+    "@iar/runtime": "0.1.0",
     "@iar/storage": "0.1.0"
   }
 }

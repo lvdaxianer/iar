@@ -6,3 +6,4 @@
  */
 export * from './types.js';
 export * from './tenant-storage-service.js';
+export * from './api.js';
