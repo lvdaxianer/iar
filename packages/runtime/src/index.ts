@@ -9,3 +9,4 @@ export * from './compaction.js';
 export type { CompactionResult } from '@iar/contracts';
 export * from './replay.js';
 export * from './action-idempotency.js';
+export * from './routing.js';
