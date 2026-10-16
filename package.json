@@ -5,7 +5,8 @@
   "description": "Intent Action Runtime",
   "type": "module",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "packages/adapters/*"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -18,6 +19,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "pg-mem": "^3.0.14",
     "typescript": "^7.0.2"
   },
   "dependencies": {

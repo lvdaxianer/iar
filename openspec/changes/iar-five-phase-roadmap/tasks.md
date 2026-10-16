@@ -74,7 +74,7 @@
 - Broader verification: `npm run lint && npm run build && npm test` plus adapter integration tests against disposable local services。
 - Handoff evidence: tenant isolation matrix、executor cleanup test、redaction snapshot、CLI transcript、Embedded/Service contract comparison。
 
-- [ ] 4.1 实现 PostgreSQL-backed EventStore/SnapshotStore/RegistryStore 和 Service adapter；验证同一 contract test 在 SQLite 与 PostgreSQL 适配器上通过，并且租户不可读取或选择其他租户的 registry/event。
+- [x] 4.1 实现 PostgreSQL-backed EventStore/SnapshotStore/RegistryStore 和 Service adapter；验证同一 contract test 在 SQLite 与 PostgreSQL 适配器上通过，并且租户不可读取或选择其他租户的 registry/event。
 - [ ] 4.2 实现 Sidecar transport、Service API 和 `packages/cli/` 的 install/enable/disable/inspect/replay 命令；验证 Embedded、Sidecar、Service 对同一 deterministic fixture 返回等价状态和错误。
 - [ ] 4.3 实现 Worker/Sidecar/container PluginExecutor 的能力范围、超时、取消、资源限制、凭据隔离、版本固定和清理逻辑；验证不可信插件超时/卸载后不保留 active subscription。
 - [ ] 4.4 实现 `packages/observability/` 与 system logging plugin 的 trace/metric/structured-log/audit 字段、敏感字段脱敏和 fail-open observer 策略；验证 API key、authorization、rawPrompt、rawUserInput 不出现在日志快照。

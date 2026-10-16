@@ -73,3 +73,12 @@ export class StorageValidationError extends Error {
     this.name = 'StorageValidationError';
   }
 }
+
+/** PostgreSQL、SQLite 等外部持久化失败时使用的稳定错误。 */
+export class StoragePersistenceError extends Error {
+  /** 创建不泄露底层驱动细节的持久化错误。 */
+  public constructor(message: string) {
+    super(message);
+    this.name = 'StoragePersistenceError';
+  }
+}
