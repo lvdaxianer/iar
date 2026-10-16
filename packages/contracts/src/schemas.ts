@@ -5,6 +5,7 @@
  * @date 2026-10-17
  */
 import type { TSchema } from '@sinclair/typebox';
+import { CompactionReferenceSchema, CompactionResultSchema } from './schema-compaction.js';
 import {
   // Action 请求 Schema。
   ActionDefinitionSchema,
@@ -71,6 +72,8 @@ export const CONTRACT_SCHEMAS = {
   actionResult: ActionResultSchema,
   // 事件投影状态。
   behaviorContext: BehaviorContextSchema,
+  // 上下文压缩候选结果。
+  compactionResult: CompactionResultSchema,
   // 模型和规则决策。
   decision: DecisionResultSchema,
   // 稳定错误边界。
@@ -135,3 +138,14 @@ export {
   SlotValueSchema,
   SubjectReferenceSchema
 };
+
+/** 重新导出上下文压缩 Schema。 */
+export {
+  CompactionEventPayloadSchema,
+  CompactionFailedEventPayloadSchema,
+  CompactionModelStateSchema,
+  CompactionReferenceSchema,
+  CompactionResultSchema,
+  COMPACTION_LIMITS,
+  REQUIRED_PRESERVED_FACTS
+} from './schema-compaction.js';

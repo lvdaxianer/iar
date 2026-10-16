@@ -14,6 +14,8 @@ export const SCHEMA_VERSIONS = {
   action: 'iar.action/v1',
   // BehaviorContext 版本覆盖事件投影状态。
   behaviorContext: 'iar.behavior-context/v1',
+  // Context compaction 版本覆盖模型返回的候选视图。
+  compactionResult: 'iar.compaction-result/v1',
   decision: 'iar.decision/v1',
   error: 'iar.error/v1',
   event: 'iar.event/v1',

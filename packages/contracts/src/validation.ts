@@ -7,6 +7,7 @@
 import { type ErrorObject, type ValidateFunction } from 'ajv';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import { ContractValidationError, ERROR_CODES, type ContractErrorResult, type ContractIssue, type ErrorCode } from './errors.js';
+import { CompactionEventPayloadSchema, CompactionFailedEventPayloadSchema } from './schema-compaction.js';
 import { CONTRACT_SCHEMAS } from './schemas.js';
 import type { PluginManifest } from './types.js';
 import { IAR_API_VERSION, SCHEMA_VERSIONS } from './versions.js';
@@ -26,6 +27,12 @@ const contractAjv = new Ajv2020({ allErrors: true, strict: false });
 const validators = Object.fromEntries(
   Object.entries(CONTRACT_SCHEMAS).map(([name, schema]) => [name, contractAjv.compile(schema)])
 ) as Record<ContractName, ValidateFunction<unknown>>;
+
+/** 上下文压缩事件的专用载荷校验器。 */
+const eventPayloadValidators = {
+  'context.compacted': contractAjv.compile(CompactionEventPayloadSchema),
+  'context.compaction_failed': contractAjv.compile(CompactionFailedEventPayloadSchema)
+} as const;
 
 /**
  * 判断输入是否为可读取字段的 JSON 对象。
@@ -137,10 +144,20 @@ function validateValidatedContract(name: ContractName, input: unknown): Validati
   const issues = validateContractSchemas(name, input);
   // 嵌入 Schema 错误使用独立错误码，便于安装路径处理。
   if (issues.length > 0) return { ok: false, error: validationError(issues, ERROR_CODES.INVALID_EMBEDDED_SCHEMA) };
+  const eventIssues = name === 'event' ? validateEventPayload(input) : [];
+  if (eventIssues.length > 0) return { ok: false, error: validationError(eventIssues) };
   const relationIssues = name === 'pluginManifest' ? validatePluginManifestRelations(input) : [];
   // 跨字段关系失败时拒绝 Manifest，但保留字段级诊断。
   if (relationIssues.length > 0) return { ok: false, error: validationError(relationIssues) };
   return { ok: true, value: input };
+}
+
+/** 按事件名称校验上下文压缩事件的专用载荷。 */
+function validateEventPayload(input: unknown): ContractIssue[] {
+  if (!isRecord(input) || typeof input.eventName !== 'string') return [];
+  const validator = eventPayloadValidators[input.eventName as keyof typeof eventPayloadValidators];
+  if (!validator || validator(input.payload)) return [];
+  return toIssues(validator.errors);
 }
 
 /**

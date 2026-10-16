@@ -5,5 +5,7 @@
  * @date 2026-10-17
  */
 export * from './context-projector.js';
+export * from './compaction.js';
+export type { CompactionResult } from '@iar/contracts';
 export * from './replay.js';
 export * from './action-idempotency.js';
