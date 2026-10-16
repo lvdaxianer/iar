@@ -1,0 +1,106 @@
+# IAR Plugin Manifest 示例
+# 该文件用于说明插件声明格式，不代表某个具体业务系统的实现。
+apiVersion: iar.dev/v1
+kind: PluginManifest
+
+pluginId: dip-api-stop-v1
+functionId: dip.service.stop
+version: 1.0.0
+displayName: DIP 服务停止插件
+description: 调用 DIP 管理接口停止一个已授权的服务实例。
+maintainers:
+  - team: platform-operations
+
+routes:
+  intents:
+    - service.stop
+  actions:
+    - stop
+  subjectTypes:
+    - dip.service
+
+requiredSlots:
+  - name: serviceId
+    type: string
+    required: true
+    description: 需要停止的 DIP 服务标识。
+  - name: reason
+    type: string
+    required: false
+    description: 停止原因，用于审计。
+
+inputSchema:
+  type: object
+  additionalProperties: false
+  required:
+    - serviceId
+  properties:
+    serviceId:
+      type: string
+      minLength: 1
+    reason:
+      type: string
+      maxLength: 500
+
+outputSchema:
+  type: object
+  additionalProperties: false
+  required:
+    - operationId
+    - status
+  properties:
+    operationId:
+      type: string
+    status:
+      type: string
+      enum:
+        - accepted
+        - stopped
+        - failed
+    message:
+      type: string
+
+capabilities:
+  - dip.service.read
+  - dip.service.write
+  - destructive.action
+
+policy:
+  riskLevel: high
+  requiresConfirmation: true
+  confirmationFields:
+    - serviceId
+    - action
+  allowedEnvironments:
+    - test
+    - staging
+  denyByDefault: true
+
+entrypoint:
+  type: node
+  module: ./dist/index.js
+  export: createPlugin
+
+healthCheck:
+  type: http
+  path: /healthz
+  timeoutMs: 1500
+
+dependencies: []
+configSchema:
+  type: object
+  additionalProperties: false
+  required:
+    - baseUrl
+  properties:
+    baseUrl:
+      type: string
+      format: uri
+    timeoutMs:
+      type: integer
+      minimum: 100
+      default: 3000
+
+compatibility:
+  iarApi: ">=1.0.0 <2.0.0"
+  node: ">=22"

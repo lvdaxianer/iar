@@ -1,0 +1,123 @@
+# IAR FunctionRule / PluginRule 示例
+# 规则只生成候选和约束，不直接执行插件。
+apiVersion: iar.dev/v1
+kind: RouteRules
+
+functionRules:
+  - ruleId: function-ticket-create-v1
+    type: FunctionRule
+    functionId: ticket.create
+    priority: 100
+    condition:
+      all:
+        - field: semantic.subject.type
+          operator: exists
+        - field: semantic.intent
+          operator: in
+          values:
+            - fault.report
+            - issue.submit
+        - field: semantic.action
+          operator: in
+          values:
+            - create
+            - submit
+    output:
+      requiredSlots:
+        - title
+        - description
+      riskLevel: medium
+      evidenceCode: explicit_ticket_request
+
+  - ruleId: function-knowledge-query-v1
+    type: FunctionRule
+    functionId: knowledge.query
+    priority: 90
+    condition:
+      all:
+        - field: semantic.action
+          operator: in
+          values:
+            - query
+            - explain
+        - field: semantic.intent
+          operator: notIn
+          values:
+            - issue.submit
+            - human.transfer
+    output:
+      requiredSlots:
+        - query
+      riskLevel: low
+      evidenceCode: information_request
+
+  - ruleId: function-human-transfer-exclusion-v1
+    type: FunctionRule
+    functionId: human.transfer
+    priority: 110
+    condition:
+      all:
+        - field: semantic.intent
+          operator: in
+          values:
+            - human.transfer
+            - contact.agent
+      none:
+        - field: context.workflow.status
+          operator: equals
+          value: completed
+    output:
+      requiredSlots:
+        - transferReason
+      riskLevel: medium
+      evidenceCode: explicit_human_request
+
+pluginRules:
+  - ruleId: plugin-ticket-internal-v1
+    type: PluginRule
+    functionId: ticket.create
+    priority: 100
+    candidatePlugins:
+      - internal-ticket-v2
+    condition:
+      all:
+        - field: runtime.environment
+          operator: in
+          values:
+            - test
+            - staging
+        - field: actor.capabilities
+          operator: contains
+          value: ticket.create
+    constraints:
+      requiredCapabilities:
+        - ticket.write
+      requiresConfirmation: false
+
+  - ruleId: plugin-ticket-approval-v1
+    type: PluginRule
+    functionId: ticket.create
+    priority: 90
+    candidatePlugins:
+      - approval-ticket-v1
+    condition:
+      any:
+        - field: semantic.slots.priority
+          operator: equals
+          value: urgent
+        - field: runtime.environment
+          operator: equals
+          value: production
+    constraints:
+      requiredCapabilities:
+        - ticket.write
+        - user.approval
+      requiresConfirmation: true
+
+evaluation:
+  operators: [ALL, ANY, NONE]
+  unknownFieldPolicy: no_match
+  conflictPolicy: needs_clarification
+  disabledPluginPolicy: exclude
+  recordMatchedRules: true
+  recordExcludedCandidates: true

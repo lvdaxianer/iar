@@ -1,0 +1,72 @@
+# IAR Hook / StateEvent 订阅示例
+# 订阅关系不是 Hook 本身，handler 可以由内置能力、Plugin、Webhook、MQ 或宿主回调提供。
+apiVersion: iar.dev/v1
+kind: HookSubscriptions
+
+subscriptions:
+  - subscriptionId: audit-function-selection
+    event: function.selected
+    filter:
+      tenantId:
+        equals: tenant_demo
+    handler:
+      type: builtin
+      name: audit.write
+    delivery: async
+    priority: 100
+    failurePolicy: fail-open
+    retryPolicy:
+      maxRetries: 2
+      backoffMs: 200
+
+  - subscriptionId: notify-action-failed
+    event: action.failed
+    filter:
+      functionId:
+        in:
+          - dip.service.stop
+          - ticket.create
+    handler:
+      type: webhook
+      ref: ops-alert-webhook
+    delivery: async
+    priority: 100
+    failurePolicy: fail-open
+    retryPolicy:
+      maxRetries: 3
+      backoffMs: 1000
+
+  - subscriptionId: log-all-run-events
+    event: run.*
+    handler:
+      type: plugin
+      pluginId: iar.observability.log
+      handler: writeStructuredLog
+    delivery: async
+    priority: 100
+    failurePolicy: fail-open
+    idempotency:
+      keyTemplate: "${eventId}:${subscriptionId}"
+
+  - subscriptionId: check-action-permission
+    event: action.before
+    filter:
+      riskLevel:
+        in:
+          - high
+          - critical
+    handler:
+      type: plugin
+      pluginId: iam.policy
+      handler: evaluateActionPermission
+    delivery: sync
+    priority: 1000
+    failurePolicy: fail-closed
+    timeoutMs: 500
+    allowDecision: true
+
+runtimePolicy:
+  maxRecursionDepth: 3
+  preserveCorrelationId: true
+  unknownEventPolicy: reject
+  disabledSubscriptionPolicy: skip

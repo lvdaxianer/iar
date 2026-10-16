@@ -1,0 +1,86 @@
+# IAR Model Profile 示例
+# 密钥只通过环境变量或 Secret Manager 注入，不写入此文件。
+apiVersion: iar.dev/v1
+kind: ModelConfig
+
+defaults:
+  semanticExtractor: semantic-default
+  functionDecision: jev-function-default
+  pluginDecision: jev-plugin-default
+  contextCompactor: compactor-default
+  responseGenerator: response-default
+
+providers:
+  general-llm:
+    type: openai-compatible
+    baseUrl: ${IAR_LLM_BASE_URL}
+    apiKey: ${IAR_LLM_API_KEY}
+  jev:
+    type: jev
+    endpoint: ${IAR_JEV_ENDPOINT}
+    apiKey: ${IAR_JEV_API_KEY}
+
+profiles:
+  semantic-default:
+    role: semanticExtractor
+    provider: general-llm
+    model: semantic-model-v1
+    temperature: 0
+    timeoutMs: 8000
+    maxRetries: 2
+    outputSchema: iar.semantic-frame/v1
+    fallbackProfile: semantic-fallback
+
+  semantic-fallback:
+    role: semanticExtractor
+    provider: general-llm
+    model: semantic-model-backup-v1
+    temperature: 0
+    timeoutMs: 10000
+    maxRetries: 1
+    outputSchema: iar.semantic-frame/v1
+
+  jev-function-default:
+    role: functionDecision
+    provider: jev
+    model: jev-choice-v1
+    decisionType: choice
+    threshold: 0.80
+    noulPolicy: needs_clarification
+    timeoutMs: 1500
+    maxRetries: 1
+
+  jev-plugin-default:
+    role: pluginDecision
+    provider: jev
+    model: jev-choice-v1
+    decisionType: choice
+    threshold: 0.85
+    noulPolicy: needs_clarification
+    timeoutMs: 1500
+    maxRetries: 1
+
+  compactor-default:
+    role: contextCompactor
+    provider: general-llm
+    model: context-compactor-v1
+    temperature: 0
+    timeoutMs: 10000
+    maxRetries: 1
+    outputSchema: iar.compaction-result/v1
+    maxSummaryChars: 1200
+
+  response-default:
+    role: responseGenerator
+    provider: general-llm
+    model: response-model-v1
+    temperature: 0.2
+    timeoutMs: 8000
+    maxRetries: 2
+    outputSchema: iar.response/v1
+
+runtimePolicy:
+  allowPluginModelOverride: false
+  requireStructuredOutput: true
+  redactSecretsBeforeRequest: true
+  recordProfileIdInDecisionEvent: true

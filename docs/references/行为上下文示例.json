@@ -1,0 +1,116 @@
+{
+  "schemaVersion": "iar.behavior-context/v1",
+  "conversation": {
+    "conversationId": "conv_01JAR0001",
+    "tenantId": "tenant_demo",
+    "locale": "zh-CN",
+    "createdAt": "2026-10-16T09:00:00Z",
+    "updatedAt": "2026-10-16T09:02:31Z"
+  },
+  "goal": {
+    "intent": "service.stop",
+    "status": "waiting_confirmation",
+    "confidence": 0.98
+  },
+  "subject": {
+    "type": "dip.service",
+    "id": "test1",
+    "name": "test1",
+    "source": "conversation_reference",
+    "referenceText": "第一个服务",
+    "resolvedFrom": {
+      "eventId": "evt_service_list_001",
+      "index": 1,
+      "listVersion": "services@2026-10-16T09:01:00Z"
+    }
+  },
+  "action": {
+    "name": "stop",
+    "verb": "停止",
+    "riskLevel": "high",
+    "idempotencyKey": "stop:conv_01JAR0001:test1"
+  },
+  "route": {
+    "functionId": "dip.service.stop",
+    "pluginId": "dip-api-stop-v1",
+    "ruleId": "dip-service-action-router@3",
+    "functionDecision": {
+      "decisionType": "function.select",
+      "choice": "dip.service.stop",
+      "score": 0.98,
+      "decisionVersion": "jev-function-router@1"
+    },
+    "pluginDecision": {
+      "decisionType": "plugin.select",
+      "choice": "dip-api-stop-v1",
+      "score": 0.94,
+      "decisionVersion": "jev-plugin-router@1"
+    }
+  },
+  "slots": {
+    "serviceId": {
+      "value": "test1",
+      "valueType": "string",
+      "source": "subject.id",
+      "confidence": 1.0,
+      "confirmed": true
+    },
+    "reason": {
+      "value": null,
+      "valueType": "string",
+      "source": null,
+      "confidence": null,
+      "confirmed": false
+    }
+  },
+  "workflow": {
+    "workflowId": "wf_01JAR0001",
+    "definition": "dip.service.stop/v1",
+    "currentStep": "await_confirmation",
+    "status": "waiting",
+    "attempt": 0,
+    "lastCompletedStep": "resolve_subject",
+    "pendingAction": "execute_plugin"
+  },
+  "pending": {
+    "kind": "confirmation",
+    "question": "确认停止服务 test1 吗？",
+    "expectedInput": "yes_no",
+    "createdAt": "2026-10-16T09:02:31Z",
+    "expiresAt": "2026-10-16T09:07:31Z"
+  },
+  "confirmation": {
+    "state": "required",
+    "scope": "service:test1/action:stop/plugin:dip-api-stop-v1",
+    "confirmedAt": null,
+    "confirmedBy": null,
+    "contextHash": "sha256:pending-context-hash"
+  },
+  "summary": {
+    "summaryVersion": "compactor@1",
+    "text": "用户要停止从服务列表第一项解析出的 DIP 服务 test1。功能为 dip.service.stop，插件为 dip-api-stop-v1，当前等待确认。",
+    "coveredEventRange": {
+      "fromEventId": "evt_0001",
+      "toEventId": "evt_0012"
+    }
+  },
+  "references": [
+    {
+      "text": "第一个服务",
+      "resolvedTo": "test1",
+      "sourceEventId": "evt_service_list_001",
+      "validUntil": "2026-10-16T09:10:00Z"
+    }
+  ],
+  "integrity": {
+    "lastEventId": "evt_0012",
+    "snapshotVersion": 7,
+    "criticalFieldsHash": "sha256:critical-fields-hash",
+    "lastCompaction": {
+      "fromEventId": "evt_0001",
+      "toEventId": "evt_0012",
+      "firstKeptEntryId": "evt_0013",
+      "validated": true
+    }
+  }
+}

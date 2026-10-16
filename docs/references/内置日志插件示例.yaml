@@ -1,0 +1,116 @@
+# IAR 内置日志 system plugin 示例
+# system plugin 通过 Hook 自动运行，不参与 Function / Plugin 路由。
+apiVersion: iar.dev/v1
+kind: PluginManifest
+
+pluginId: iar.observability.log
+pluginKind: system
+scope: runtime
+version: 1.0.0
+displayName: IAR 结构化日志插件
+description: 订阅 IAR 运行时事件，输出脱敏后的结构化日志。
+
+capabilities:
+  - observability.log
+
+handler:
+  type: builtin
+  name: writeStructuredLog
+
+subscriptions:
+  - event: run.created
+    mode: observer
+    priority: 100
+    failurePolicy: fail-open
+  - event: input.received
+    mode: observer
+    priority: 100
+    failurePolicy: fail-open
+  - event: semantic.extracted
+    mode: observer
+    priority: 100
+    failurePolicy: fail-open
+  - event: function.selected
+    mode: observer
+    priority: 100
+    failurePolicy: fail-open
+  - event: plugin.selected
+    mode: observer
+    priority: 100
+    failurePolicy: fail-open
+  - event: policy.evaluated
+    mode: observer
+    priority: 100
+    failurePolicy: fail-open
+  - event: action.before
+    mode: observer
+    priority: 100
+    failurePolicy: fail-open
+  - event: action.after
+    mode: observer
+    priority: 100
+    failurePolicy: fail-open
+  - event: action.failed
+    mode: observer
+    priority: 100
+    failurePolicy: fail-open
+  - event: context.compacted
+    mode: observer
+    priority: 100
+    failurePolicy: fail-open
+  - event: context.compaction_failed
+    mode: observer
+    priority: 100
+    failurePolicy: fail-open
+  - event: run.completed
+    mode: observer
+    priority: 100
+    failurePolicy: fail-open
+  - event: run.failed
+    mode: observer
+    priority: 100
+    failurePolicy: fail-open
+
+entrypoint:
+  type: node
+  module: ./dist/log-plugin.js
+  export: createLogPlugin
+
+configSchema:
+  type: object
+  additionalProperties: false
+  properties:
+    level:
+      type: string
+      enum:
+        - trace
+        - debug
+        - info
+        - warn
+        - error
+    destination:
+      type: string
+      enum:
+        - stdout
+        - file
+        - otlp
+    redactPaths:
+      type: array
+      items:
+        type: string
+    includePayload:
+      type: boolean
+      default: false
+
+runtimePolicy:
+  timeoutMs: 100
+  maxRetries: 0
+  defaultFailurePolicy: fail-open
+  redactBeforeEmit: true
+  neverLog:
+    - apiKey
+    - authorization
+    - rawPrompt
+    - rawUserInput
+
+dependencies: []
