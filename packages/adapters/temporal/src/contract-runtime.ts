@@ -26,8 +26,7 @@ export class ContractWorkflowRuntime implements WorkflowRuntimeContract {
    * @date 2026-10-17
    */
   public constructor(options: WorkflowRuntimeOptions) {
-    // 适配器配置必须在创建时锁定到 v1，禁止运行时降级或升级解释。
-    if (!isValidOptions(options)) throw new Error('durable_adapter_configuration_invalid');
+    assertWorkflowRuntimeOptions(options);
     this.adapterName = options.adapterName;
     this.adapterVersion = options.adapterVersion;
   }
@@ -44,6 +43,18 @@ export class ContractWorkflowRuntime implements WorkflowRuntimeContract {
     if (!isValidRequest(request)) return { ok: false, reasonCode: 'workflow_request_invalid' };
     return { ok: false, reasonCode: 'durable_adapter_not_implemented' };
   }
+}
+
+/**
+ * 校验并固定 WorkflowRuntime 的公共配置。
+ * @param options - 未信任的 adapter 配置
+ * @returns 无返回值，非法配置抛出稳定错误
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-17
+ */
+export function assertWorkflowRuntimeOptions(options: unknown): asserts options is WorkflowRuntimeOptions {
+  // 适配器配置必须在创建时锁定到 v1，禁止运行时降级或升级解释。
+  if (!isValidOptions(options)) throw new Error('durable_adapter_configuration_invalid');
 }
 
 /**
