@@ -11,6 +11,7 @@ import type { DecisionProvider, DecisionRequest, DecisionResponseFactory } from 
 
 export * from './types.js';
 export { validateDecisionOutput } from './validation.js';
+export * from './model-profile.js';
 
 /**
  * 用确定性响应工厂模拟未来 DecisionProvider。

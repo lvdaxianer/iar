@@ -1,0 +1,130 @@
+{
+  "configVersion": "iar.models/v1",
+  "profiles": [
+    {
+      "schemaVersion": "iar.model-profile/v1",
+      "profileId": "semantic-extractor-primary",
+      "profileVersion": "1.0.0",
+      "role": "semantic.extract",
+      "provider": "mock",
+      "modelId": "semantic-extractor",
+      "modelVersion": "mock-1",
+      "timeoutMs": 1500,
+      "retryPolicy": { "maxAttempts": 2, "backoffMs": 25, "retryOn": ["timeout", "provider_unavailable"] },
+      "fallbackProfileId": "semantic-extractor-fallback",
+      "structuredOutput": { "enabled": true, "schemaId": "iar.semantic-frame/v1" }
+    },
+    {
+      "schemaVersion": "iar.model-profile/v1",
+      "profileId": "semantic-extractor-fallback",
+      "profileVersion": "1.0.0",
+      "role": "semantic.extract",
+      "provider": "mock",
+      "modelId": "semantic-extractor-fallback",
+      "modelVersion": "mock-1",
+      "timeoutMs": 1000,
+      "retryPolicy": { "maxAttempts": 1, "backoffMs": 0, "retryOn": ["timeout"] },
+      "structuredOutput": { "enabled": true, "schemaId": "iar.semantic-frame/v1" }
+    },
+    {
+      "schemaVersion": "iar.model-profile/v1",
+      "profileId": "function-decision-primary",
+      "profileVersion": "1.0.0",
+      "role": "function.select",
+      "provider": "mock",
+      "modelId": "function-decision",
+      "modelVersion": "mock-1",
+      "timeoutMs": 1000,
+      "retryPolicy": { "maxAttempts": 2, "backoffMs": 20, "retryOn": ["timeout", "provider_unavailable"] },
+      "fallbackProfileId": "function-decision-fallback",
+      "structuredOutput": { "enabled": true, "schemaId": "iar.decision/v1" }
+    },
+    {
+      "schemaVersion": "iar.model-profile/v1",
+      "profileId": "function-decision-fallback",
+      "profileVersion": "1.0.0",
+      "role": "function.select",
+      "provider": "mock",
+      "modelId": "function-decision-fallback",
+      "modelVersion": "mock-1",
+      "timeoutMs": 800,
+      "retryPolicy": { "maxAttempts": 1, "backoffMs": 0, "retryOn": ["timeout"] },
+      "structuredOutput": { "enabled": true, "schemaId": "iar.decision/v1" }
+    },
+    {
+      "schemaVersion": "iar.model-profile/v1",
+      "profileId": "plugin-decision-primary",
+      "profileVersion": "1.0.0",
+      "role": "plugin.select",
+      "provider": "mock",
+      "modelId": "plugin-decision",
+      "modelVersion": "mock-1",
+      "timeoutMs": 1000,
+      "retryPolicy": { "maxAttempts": 2, "backoffMs": 20, "retryOn": ["timeout", "provider_unavailable"] },
+      "fallbackProfileId": "plugin-decision-fallback",
+      "structuredOutput": { "enabled": true, "schemaId": "iar.decision/v1" }
+    },
+    {
+      "schemaVersion": "iar.model-profile/v1",
+      "profileId": "plugin-decision-fallback",
+      "profileVersion": "1.0.0",
+      "role": "plugin.select",
+      "provider": "mock",
+      "modelId": "plugin-decision-fallback",
+      "modelVersion": "mock-1",
+      "timeoutMs": 800,
+      "retryPolicy": { "maxAttempts": 1, "backoffMs": 0, "retryOn": ["timeout"] },
+      "structuredOutput": { "enabled": true, "schemaId": "iar.decision/v1" }
+    },
+    {
+      "schemaVersion": "iar.model-profile/v1",
+      "profileId": "context-compactor-primary",
+      "profileVersion": "1.0.0",
+      "role": "context.compact",
+      "provider": "mock",
+      "modelId": "context-compactor",
+      "modelVersion": "mock-1",
+      "timeoutMs": 2000,
+      "retryPolicy": { "maxAttempts": 2, "backoffMs": 30, "retryOn": ["timeout", "provider_unavailable"] },
+      "fallbackProfileId": "context-compactor-fallback",
+      "structuredOutput": { "enabled": true, "schemaId": "iar.compaction/v1" }
+    },
+    {
+      "schemaVersion": "iar.model-profile/v1",
+      "profileId": "context-compactor-fallback",
+      "profileVersion": "1.0.0",
+      "role": "context.compact",
+      "provider": "mock",
+      "modelId": "context-compactor-fallback",
+      "modelVersion": "mock-1",
+      "timeoutMs": 1200,
+      "retryPolicy": { "maxAttempts": 1, "backoffMs": 0, "retryOn": ["timeout"] },
+      "structuredOutput": { "enabled": true, "schemaId": "iar.compaction/v1" }
+    },
+    {
+      "schemaVersion": "iar.model-profile/v1",
+      "profileId": "response-generator-primary",
+      "profileVersion": "1.0.0",
+      "role": "response.generate",
+      "provider": "mock",
+      "modelId": "response-generator",
+      "modelVersion": "mock-1",
+      "timeoutMs": 1200,
+      "retryPolicy": { "maxAttempts": 2, "backoffMs": 20, "retryOn": ["timeout", "provider_unavailable"] },
+      "fallbackProfileId": "response-generator-fallback",
+      "structuredOutput": { "enabled": true, "schemaId": "iar.response/v1" }
+    },
+    {
+      "schemaVersion": "iar.model-profile/v1",
+      "profileId": "response-generator-fallback",
+      "profileVersion": "1.0.0",
+      "role": "response.generate",
+      "provider": "mock",
+      "modelId": "response-generator-fallback",
+      "modelVersion": "mock-1",
+      "timeoutMs": 900,
+      "retryPolicy": { "maxAttempts": 1, "backoffMs": 0, "retryOn": ["timeout"] },
+      "structuredOutput": { "enabled": true, "schemaId": "iar.response/v1" }
+    }
+  ]
+}
