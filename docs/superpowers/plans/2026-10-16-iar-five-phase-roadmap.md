@@ -21,9 +21,9 @@
 
 **Files:**
 
-- Create: `package.json`、`tsconfig.json`、workspace package manifests、`packages/contracts/**`、`packages/plugin-sdk/**`、`packages/plugin-host/**`、`packages/storage/**`、`packages/subscriptions/**`、`packages/runtime/**`
+- Create: `.npmrc`、`package.json`、`package-lock.json`、`tsconfig.json`、`scripts/run-tests.mjs`、workspace package manifests、`packages/contracts/**`、`packages/plugin-sdk/**`、`packages/plugin-host/**`、`packages/storage/**`、`packages/subscriptions/**`、`packages/runtime/**`
 - Create: `tests/contract/**`、`tests/replay/**`、`docs/contracts/**`
-- Modify: `docs/README.md` only when examples need to match the final contract names
+- Modify: `.editorconfig`、`.gitattributes`、`.gitignore`、`docs/README.md` only when examples need to match the final contract names
 
 **Boundary:** 只负责公共契约、Manifest 生命周期、EventLog/Snapshot/BehaviorContext、Hook/Event 订阅和重放；不接入真实模型、HTTP、PostgreSQL、Worker、容器或 Temporal。
 

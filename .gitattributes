@@ -1,7 +1,10 @@
 # >>> project-hygiene (managed, do not edit by hand) >>>
 * text=auto eol=lf
 *.md text eol=lf
+*.ts text eol=lf
+*.mjs text eol=lf
 *.json text eol=lf
 *.yaml text eol=lf
 *.yml text eol=lf
+package-lock.json merge=union
 # <<< project-hygiene (managed) <<<
