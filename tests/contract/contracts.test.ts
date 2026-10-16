@@ -18,6 +18,19 @@ import {
   validatePluginManifest
 } from '../../packages/contracts/src/index.js';
 
+/*
+ * 合约测试覆盖版本、字段、嵌入 Schema 和跨字段策略关系。
+ * fixture 路径固定从仓库根目录解析，避免构建目录改变语义。
+ * 版本错误必须与普通结构错误保持不同稳定错误码。
+ * 嵌入 JSON Schema 必须经过 Ajv meta-schema 校验。
+ * capabilities 必须唯一，policy 能力必须属于 Manifest 能力集合。
+ * high/critical 风险插件必须显式要求确认。
+ * 通用 validateContract 与专用 validatePluginManifest 共享同一边界。
+ * parsePluginManifest 只在成功时返回强类型 Manifest。
+ * 这些断言不依赖 Host、存储、网络或模型 Provider。
+ * 它们为后续 Runtime、Policy Gate 和 Replay 提供稳定输入。
+ */
+
 /**
  * 读取 JSON fixture，保持测试输入与公共合约文档一致。
  *
@@ -29,6 +42,47 @@ import {
 function loadFixture(name: string): unknown {
   const fixturePath = join(process.cwd(), 'tests', 'contract', 'fixtures', name);
   return JSON.parse(readFileSync(fixturePath, 'utf8')) as unknown;
+}
+
+/** 用于构造跨字段校验样例的最小 Manifest 形状。 */
+type ManifestFixture = Record<string, unknown> & {
+  capabilities: string[];
+  policy: Record<string, unknown>;
+};
+
+/**
+ * 断言公开契约 Schema 注册表包含 Phase 1 全部名称。
+ *
+ * @returns 不返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-17
+ */
+function assertPublicSchemaNames(): void {
+  const expectedNames = ['action', 'actionResult', 'behaviorContext', 'decision', 'error', 'event', 'function', 'pluginManifest', 'rule', 'workflow'];
+  assert.deepEqual(Object.keys(CONTRACT_SCHEMAS).sort(), expectedNames.sort());
+}
+
+/**
+ * 断言通用 Function 校验拒绝非法嵌入 Schema。
+ *
+ * @returns 不返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-17
+ */
+function assertInvalidFunctionSchema(): void {
+  const result = validateContract('function', {
+    schemaVersion: SCHEMA_VERSIONS.function,
+    functionId: 'broken.function',
+    version: '1.0.0',
+    name: 'Broken Function',
+    description: '用于验证嵌入 Schema 拒绝路径',
+    inputSchema: { type: 'not-a-json-schema-type' },
+    outputSchema: { type: 'object' },
+    capabilities: [],
+    riskLevel: 'low'
+  });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.error.code, ERROR_CODES.INVALID_EMBEDDED_SCHEMA);
 }
 
 /** 读取合法插件 Manifest 并断言其可被解析为强类型对象。 */
@@ -88,34 +142,7 @@ test('invalid embedded schema is rejected with schema error', () => {
 });
 
 /** 所有公共 Schema 都必须能被 Ajv 编译并登记到公开映射。 */
-test('all public contract schemas are registered', () => {
-  // 公开映射必须覆盖 Phase 1 的所有契约对象。
-  const expectedNames = [
-    // Action 请求。
-    'action',
-    // Action 结果。
-    'actionResult',
-    // 行为上下文。
-    'behaviorContext',
-    // 结构化决策。
-    'decision',
-    // 稳定错误。
-    'error',
-    // 不可变事件。
-    'event',
-    // Function 定义。
-    'function',
-    // 插件 Manifest。
-    'pluginManifest',
-    // 路由规则。
-    'rule',
-    // 工作流定义。
-    'workflow'
-  ];
-
-  // 排序后比较避免对象声明顺序影响测试。
-  assert.deepEqual(Object.keys(CONTRACT_SCHEMAS).sort(), expectedNames.sort());
-});
+test('all public contract schemas are registered', () => assertPublicSchemaNames());
 
 /** 通用验证入口必须能拒绝未声明版本的行为上下文。 */
 test('generic contract validation rejects incompatible behavior context', () => {
@@ -127,26 +154,20 @@ test('generic contract validation rejects incompatible behavior context', () => 
 });
 
 /** 通用 Function 校验也必须验证输入输出 JSON Schema。 */
-test('generic function validation rejects invalid embedded schema', () => {
-  // 外层字段完整，但 inputSchema 使用了非法 JSON Schema 类型。
-  const result = validateContract('function', {
-    schemaVersion: SCHEMA_VERSIONS.function,
-    functionId: 'broken.function',
-    version: '1.0.0',
-    name: 'Broken Function',
-    description: '用于验证嵌入 Schema 拒绝路径',
-    inputSchema: { type: 'not-a-json-schema-type' },
-    outputSchema: { type: 'object' },
-    capabilities: [],
-    riskLevel: 'low'
-  });
+test('generic function validation rejects invalid embedded schema', () => assertInvalidFunctionSchema());
 
-  // 非法嵌入 Schema 不能通过通用验证入口。
-  assert.equal(result.ok, false);
-  if (!result.ok) {
-    // 错误码必须与 Manifest 校验保持一致。
-    assert.equal(result.error.code, ERROR_CODES.INVALID_EMBEDDED_SCHEMA);
-  }
+/** Manifest 的能力列表必须去重，且高风险插件必须要求确认。 */
+test('plugin policy relations are validated across fields', () => {
+  const duplicateCapabilities = structuredClone(loadFixture('valid-plugin-manifest.json')) as ManifestFixture;
+  duplicateCapabilities.capabilities = ['dip.service.write', 'dip.service.write'];
+  const duplicateResult = validatePluginManifest(duplicateCapabilities);
+  assert.equal(duplicateResult.ok, false);
+
+  const unsafePolicy = structuredClone(loadFixture('valid-plugin-manifest.json')) as ManifestFixture;
+  unsafePolicy.policy = { ...unsafePolicy.policy, riskLevel: 'critical', requiresConfirmation: false };
+  const unsafeResult = validatePluginManifest(unsafePolicy);
+  assert.equal(unsafeResult.ok, false);
+  if (!unsafeResult.ok) assert.match(JSON.stringify(unsafeResult.error.details), /requiresConfirmation/);
 });
 
 // 这些测试保持为 contract 层单元测试，不依赖宿主注册表或存储实现。

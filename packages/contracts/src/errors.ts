@@ -16,6 +16,20 @@ export const ERROR_CODES = {
   INCOMPATIBLE_API_VERSION: 'contract.incompatible_api_version',
   // 嵌入的输入输出 JSON Schema 无法编译时使用该错误。
   INVALID_EMBEDDED_SCHEMA: 'contract.invalid_embedded_schema',
+  // 生命周期状态转移不满足当前状态机时使用该错误。
+  INVALID_LIFECYCLE_TRANSITION: 'plugin.invalid_lifecycle_transition',
+  // 依赖图存在环时使用该错误。
+  PLUGIN_DEPENDENCY_CYCLE: 'plugin.dependency_cycle',
+  // 依赖未出现在输入或已安装注册表时使用该错误。
+  PLUGIN_DEPENDENCY_MISSING: 'plugin.dependency_missing',
+  // 依赖插件处于不可用状态时使用该错误。
+  PLUGIN_DEPENDENCY_UNAVAILABLE: 'plugin.dependency_unavailable',
+  // 批量安装中出现重复插件标识时使用该错误。
+  PLUGIN_DUPLICATE_ID: 'plugin.duplicate_id',
+  // 批量安装超过宿主资源边界时使用该错误。
+  PLUGIN_INSTALL_BATCH_TOO_LARGE: 'plugin.install_batch_too_large',
+  // Manifest 引用不存在的 Function 时使用该错误。
+  PLUGIN_FUNCTION_NOT_FOUND: 'plugin.function_not_found',
   // 插件 Function 与当前路由边界不一致时使用该错误。
   PLUGIN_OWNERSHIP_MISMATCH: 'plugin.ownership_mismatch',
   // 当前插件版本不可用时使用该错误。

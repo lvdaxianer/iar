@@ -56,7 +56,7 @@ export const FunctionDefinitionSchema = Type.Object({
   inputSchema: JsonSchemaSchema,
   outputSchema: JsonSchemaSchema,
   // 能力和风险供路由、策略过滤。
-  capabilities: Type.Array(Type.String({ minLength: 1 })),
+  capabilities: Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true }),
   riskLevel: RiskLevelSchema
 }, { additionalProperties: false });
 
@@ -67,7 +67,7 @@ export const PluginPolicyMetadataSchema = Type.Object({
   // 破坏性动作要求显式确认。
   requiresConfirmation: Type.Boolean(),
   // 允许能力用于限制副作用范围。
-  allowedCapabilities: Type.Array(Type.String({ minLength: 1 }))
+  allowedCapabilities: Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true })
 }, { additionalProperties: false });
 
 /** 插件生命周期入口，供宿主驱动加载和卸载。 */
@@ -94,7 +94,7 @@ export const pluginManifestFields = {
   // description 供宿主审计和候选展示。
   description: Type.String({ minLength: 1 }),
   // capabilities 不能由模型决策动态增加。
-  capabilities: Type.Array(Type.String({ minLength: 1 })),
+  capabilities: Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true }),
   // 插件输入输出必须有明确 Schema 文档。
   inputSchema: JsonSchemaSchema,
   outputSchema: JsonSchemaSchema,
@@ -103,7 +103,7 @@ export const pluginManifestFields = {
   // policy 供 Policy Gate 使用。
   policy: PluginPolicyMetadataSchema,
   // dependencies 用于确定性加载排序。
-  dependencies: Type.Array(Type.String({ minLength: 1 }))
+  dependencies: Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true })
 };
 
 // 公共字段集中定义，避免两个 Manifest 变体发生漂移。

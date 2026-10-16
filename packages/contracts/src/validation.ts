@@ -99,18 +99,72 @@ function validationError(issues: ContractIssue[], code: ErrorCode = ERROR_CODES.
  * @date 2026-10-17
  */
 export function validateContract(name: ContractName, input: unknown): ValidationResult<unknown> {
+  const versionError = validateContractVersion(name, input);
+  // Manifest 版本错误必须先于字段读取转换成稳定兼容性错误。
+  if (versionError) return { ok: false, error: versionError };
   const validator = validators[name];
   // 先校验外层字段，避免从不完整输入读取嵌入 Schema。
+  // 外层失败时不继续读取嵌入字段。
   if (!validator(input)) {
     return { ok: false, error: validationError(toIssues(validator.errors)) };
   }
-  // Function 和 Manifest 的嵌入 Schema 必须通过 Ajv meta-schema。
+  return validateValidatedContract(name, input);
+}
+
+/**
+ * 校验指定公共契约的版本字段。
+ *
+ * @param name - 公共契约名称
+ * @param input - 待校验的契约值
+ * @returns 版本错误或 undefined
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-17
+ */
+function validateContractVersion(name: ContractName, input: unknown): ContractErrorResult | undefined {
+  return name === 'pluginManifest' ? validateApiVersion(input) : undefined;
+}
+
+/**
+ * 校验已通过外层 Ajv 的契约内容。
+ *
+ * @param name - 公共契约名称
+ * @param input - 已通过外层校验的契约值
+ * @returns 嵌入 Schema、跨字段关系或成功结果
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-17
+ */
+function validateValidatedContract(name: ContractName, input: unknown): ValidationResult<unknown> {
   const issues = validateContractSchemas(name, input);
-  // 嵌入 Schema 失败使用独立错误码，便于宿主拒绝安装。
-  if (issues.length > 0) {
-    return { ok: false, error: validationError(issues, ERROR_CODES.INVALID_EMBEDDED_SCHEMA) };
-  }
+  // 嵌入 Schema 错误使用独立错误码，便于安装路径处理。
+  if (issues.length > 0) return { ok: false, error: validationError(issues, ERROR_CODES.INVALID_EMBEDDED_SCHEMA) };
+  const relationIssues = name === 'pluginManifest' ? validatePluginManifestRelations(input) : [];
+  // 跨字段关系失败时拒绝 Manifest，但保留字段级诊断。
+  if (relationIssues.length > 0) return { ok: false, error: validationError(relationIssues) };
   return { ok: true, value: input };
+}
+
+/**
+ * 校验 Manifest 内部能力声明之间的跨字段关系。
+ *
+ * @param input - 已通过 Manifest 外层 Schema 的值
+ * @returns 字段级关系问题列表
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-17
+ */
+function validatePluginManifestRelations(input: unknown): ContractIssue[] {
+  if (!isRecord(input) || !Array.isArray(input.capabilities) || !isRecord(input.policy)) return [];
+  const capabilities = new Set(input.capabilities.filter((value): value is string => typeof value === 'string'));
+  const allowedCapabilities = Array.isArray(input.policy.allowedCapabilities)
+    ? input.policy.allowedCapabilities.filter((value): value is string => typeof value === 'string')
+    : [];
+  const unauthorized = allowedCapabilities.filter((capability) => !capabilities.has(capability));
+  const issues: ContractIssue[] = unauthorized.length > 0
+    ? [{ path: '/policy/allowedCapabilities', keyword: 'subset', message: 'Policy 能力必须属于 Manifest capabilities' }]
+    : [];
+  if ((input.policy.riskLevel === 'high' || input.policy.riskLevel === 'critical') && input.policy.requiresConfirmation !== true) {
+    issues.push({ path: '/policy/requiresConfirmation', keyword: 'requiresConfirmation', message: '高风险插件必须要求确认' });
+  }
+  return issues;
 }
 
 /**
