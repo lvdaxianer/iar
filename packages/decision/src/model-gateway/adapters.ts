@@ -7,8 +7,10 @@
 import { validateContract, type CompactionResult, type DecisionResult, type JsonValue } from '@iar/contracts';
 import { validateDecisionOutput } from '../validation.js';
 import type { DecisionRequest } from '../types.js';
-import type { ModelGatewayResult, ModelInvocation, ModelOutputValidation } from './types.js';
+import { MODEL_NO_PROFILE_MESSAGE, type ModelGatewayResult, type ModelInvocation, type ModelOutputValidation } from './types.js';
 import { ModelGateway } from './gateway.js';
+import { DecisionBackendResolver } from './decision-backend.js';
+import { buildIntentDecisionInput, canonicalizeDecisionRequest } from './intent-prompt.js';
 
 /** Semantic Extractor 的最小结构化返回。 */
 export type SemanticFrame = {
@@ -33,6 +35,14 @@ export type SemanticExtractInvocation = ModelInvocation;
 
 /** JEV Decision 的调用输入。 */
 export type JevDecisionInvocation = Omit<ModelInvocation, 'input'> & { request: DecisionRequest };
+
+/**
+ * Intent Model Decision 与 JEV 共用同一受限请求输入。
+ *
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-17
+ */
+export type IntentModelDecisionInvocation = JevDecisionInvocation;
 
 /** Context Compactor 的调用输入。 */
 export type ContextCompactInvocation = Omit<ModelInvocation, 'input'> & { input: JsonValue };
@@ -75,17 +85,87 @@ export class JevDecisionAdapter {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
-  public decide(invocation: JevDecisionInvocation): Promise<ModelGatewayResult<DecisionResult>> {
-    // role 和 request.decisionType 不一致时拒绝，避免跨阶段复用输出。
-    if (!isRecord(invocation) || !isRecord(invocation.request) || !isJsonValue(invocation.request) || invocation.request.decisionType !== this.role) return Promise.resolve(invalidJevResult('JEV decision role 与请求不匹配'));
-    let request: DecisionRequest;
+  public decide(invocation: JevDecisionInvocation, profileId?: string): Promise<ModelGatewayResult<DecisionResult>> {
+    // 先建立唯一请求快照，避免 role、gateway input 和 validator 分别读取可变输入。
+    const snapshot = createDecisionInvocationSnapshot(invocation, this.role);
+    if (!snapshot) return Promise.resolve(invalidJevResult('JEV decision 输入无效'));
+    return this.gateway.invoke(this.role, { traceId: snapshot.traceId, runId: snapshot.runId, input: snapshot.request as unknown as JsonValue }, (raw) => validateDecisionResult(snapshot.request, raw), decisionOptions('jev', profileId));
+  }
+}
+
+/**
+ * 使用 ModelGateway 运行版本化 Intent Model Decision。
+ *
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-17
+ */
+export class IntentModelDecisionAdapter {
+  /**
+   * 创建绑定 decision role 的 Intent Model adapter。
+   * @param gateway - 统一模型调用边界
+   * @param role - function.select 或 plugin.select
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-17
+   */
+  public constructor(private readonly gateway: ModelGateway, private readonly role: 'function.select' | 'plugin.select') {}
+
+  /**
+   * 构造 Prompt 输入并校验 Intent Model 的统一 DecisionResult。
+   * @param invocation - trace/run 和有限候选请求
+   * @returns 受约束的 DecisionResult 或稳定模型错误
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-17
+   */
+  public decide(invocation: IntentModelDecisionInvocation, profileId?: string): Promise<ModelGatewayResult<DecisionResult>> {
+    // role 不匹配、getter 异常或请求不可复制时，在构造 Prompt 前 fail-closed。
+    const snapshot = createDecisionInvocationSnapshot(invocation, this.role);
+    if (!snapshot) return Promise.resolve(invalidDecisionResult('Intent Model decision request 无效'));
+    let input: JsonValue;
     try {
-      request = structuredClone(invocation.request);
+      input = buildIntentDecisionInput(snapshot.request);
     } catch {
-      // 函数、Proxy 等不可复制输入必须转成稳定 invalid_request。
-      return Promise.resolve(invalidJevResult('JEV decision 输入无效'));
+      // Prompt builder 的底层异常统一收敛为稳定 invalid_request。
+      return Promise.resolve(invalidDecisionResult('Intent Model decision request 无效'));
     }
-    return this.gateway.invoke(this.role, { traceId: invocation.traceId, runId: invocation.runId, input: request as unknown as JsonValue }, (raw) => validateDecisionResult(request, raw));
+    return this.gateway.invoke(this.role, { traceId: snapshot.traceId, runId: snapshot.runId, input }, (raw) => validateDecisionResult(snapshot.request, raw), decisionOptions('intent-model', profileId));
+  }
+}
+
+/**
+ * 通过 resolver 选择一个 backend 并只委托一个具体决策 adapter。
+ *
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-17
+ */
+export class UnifiedDecisionAdapter {
+  /**
+   * 创建统一决策入口。
+   * @param resolver - 按 JEV 优先级解析 backend
+   * @param jevAdapter - JEV 专用 adapter
+   * @param intentModelAdapter - Intent Model 专用 adapter
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-17
+   */
+  public constructor(private readonly resolver: DecisionBackendResolver, private readonly jevAdapter: JevDecisionAdapter, private readonly intentModelAdapter: IntentModelDecisionAdapter) {}
+
+  /**
+   * 解析 backend 并执行一次统一决策。
+   * @param invocation - trace/run 和有限候选请求
+   * @returns 不区分 backend 的统一 DecisionResult 结果
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-17
+   */
+  public decide(invocation: JevDecisionInvocation): Promise<ModelGatewayResult<DecisionResult>> {
+    // 统一入口先拒绝 malformed 请求，避免 resolver 或 provider 观察无效数据。
+    const snapshot = createDecisionInvocationSnapshot(invocation);
+    if (!snapshot) return Promise.resolve(invalidDecisionResult('统一 decision request 无效'));
+    try {
+      const resolution = this.resolver.resolve(snapshot.request.decisionType);
+      return resolution.backend === 'jev' ? this.jevAdapter.decide(snapshot, resolution.profileId) : this.intentModelAdapter.decide(snapshot, resolution.profileId);
+    } catch {
+      // resolver 配置异常不能把内部 role/profile message 暴露给调用方。
+      return Promise.resolve(noProfileResult());
+    }
   }
 }
 
@@ -218,4 +298,35 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** 构造不含原始输入的 JEV invalid_request。 @param message - 稳定错误摘要 @returns JEV 失败结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function invalidJevResult<T>(message: string): ModelGatewayResult<T> {
   return { ok: false, error: { code: 'model.invalid_request', message, retryable: false, details: {} }, audit: [], events: [] };
+}
+
+/** 创建一次决策调用快照，并把所有 Proxy/getter 异常收敛为 undefined。 @param invocation - 未信任调用 @param role - 可选期望 role @returns 安全快照或 undefined @author lvdaxianer@yeah.net @date 2026-10-17 */
+function createDecisionInvocationSnapshot(invocation: unknown, role?: 'function.select' | 'plugin.select'): JevDecisionInvocation | undefined {
+  try {
+    if (!isRecord(invocation)) return undefined;
+    const traceId = invocation.traceId;
+    const runId = invocation.runId;
+    if (!isNonEmptyString(traceId) || !isNonEmptyString(runId)) return undefined;
+    const request = canonicalizeDecisionRequest(invocation.request);
+    if (role !== undefined && request.decisionType !== role) return undefined;
+    return { traceId, runId, request };
+  } catch {
+    // Proxy、getter、循环引用和不可复制值都不能进入异步 provider 生命周期。
+    return undefined;
+  }
+}
+
+/** 创建 backend-aware gateway 选项。 @param backend - 选定 backend @param profileId - resolver 选出的 primary profile @returns gateway 选择约束 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function decisionOptions(backend: 'jev' | 'intent-model', profileId?: string): { decisionBackend: 'jev' | 'intent-model'; profileId?: string } {
+  return profileId ? { decisionBackend: backend, profileId } : { decisionBackend: backend };
+}
+
+/** 创建不含原始请求内容的统一 invalid_request。 @param message - 稳定错误摘要 @returns 决策失败结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function invalidDecisionResult<T>(message: string): ModelGatewayResult<T> {
+  return { ok: false, error: { code: 'model.invalid_request', message, retryable: false, details: {} }, audit: [], events: [] };
+}
+
+/** 创建不暴露 resolver 配置细节的 model.no_profile。 @returns 稳定配置错误结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function noProfileResult<T>(): ModelGatewayResult<T> {
+  return { ok: false, error: { code: 'model.no_profile', message: MODEL_NO_PROFILE_MESSAGE, retryable: false, details: {} }, audit: [], events: [] };
 }

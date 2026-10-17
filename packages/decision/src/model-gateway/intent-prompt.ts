@@ -58,6 +58,27 @@ class InvalidIntentDecisionRequestError extends TypeError {
  */
 class IntentDecisionSerializationError extends Error {}
 /**
+ * 标记已经过边界收敛的公开 TypeError，避免 builder 二次改写错误分类。
+ *
+ * @param message - 已脱敏的稳定错误消息
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-17
+ */
+class StableIntentDecisionRequestError extends TypeError {
+  /**
+   * 创建不携带原始异常内容的稳定请求错误。
+   *
+   * @param message - 已脱敏的稳定错误消息
+   * @returns 稳定请求错误实例
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-17
+   */
+  public constructor(message: string) {
+    super(message);
+    this.name = 'StableIntentDecisionRequestError';
+  }
+}
+/**
  * 构造交给 Intent Model 的版本化、可序列化请求。
  *
  * @param request - 包含有限候选和阈值的决策请求
@@ -67,31 +88,63 @@ class IntentDecisionSerializationError extends Error {}
  */
 export function buildIntentDecisionInput(request: DecisionRequest): JsonValue {
   try {
+    const normalizedRequest = canonicalizeDecisionRequest(request);
+    const promptRequest = { ...normalizedRequest, candidateIds: normalizedRequest.candidates.map((candidate) => candidate.candidateId) } as unknown as JsonValue;
+    return cloneJsonValue({
+      promptVersion: INTENT_DECISION_PROMPT_VERSION,
+      systemPrompt: INTENT_DECISION_SYSTEM_PROMPT,
+      request: promptRequest
+    } as unknown as JsonValue);
+  } catch (error) {
+    throw toStableRequestError(error);
+  }
+}
+
+/**
+ * 在模型调用边界创建唯一的严格 DecisionRequest 规范化快照。
+ *
+ * @param request - 未经信任的决策请求
+ * @returns 通过两次校验且已显式归一化的普通请求
+ * @throws TypeError - 输入不满足稳定请求边界时抛出不泄露原始内容的错误
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-17
+ */
+export function canonicalizeDecisionRequest(request: unknown): DecisionRequest {
+  try {
     validateDecisionRequest(request);
-    // 校验后立即复制受控快照，阻断 Proxy 在后续读取阶段改写值。
+    // 首次校验后立即复制，阻断 Proxy 或可变输入进入异步 provider 生命周期。
     let requestSnapshot: DecisionRequest;
     try {
       requestSnapshot = structuredClone(request) as DecisionRequest;
     } catch {
-      // Proxy、函数、Symbol 或不可复制对象统一收敛为稳定摘要。
+      // 不可复制对象、函数和 Symbol 统一收敛为稳定摘要。
       throw new IntentDecisionSerializationError();
     }
-    // 二次校验 structuredClone 结果，避免复制语义改变协议边界。
+    // 二次校验复制结果，避免复制语义改变协议边界。
     validateDecisionRequest(requestSnapshot);
-    const normalizedRequest = normalizeDecisionRequest(requestSnapshot);
-    return cloneJsonValue({
-      promptVersion: INTENT_DECISION_PROMPT_VERSION,
-      systemPrompt: INTENT_DECISION_SYSTEM_PROMPT,
-      request: normalizedRequest
-    });
+    return normalizeDecisionRequest(requestSnapshot);
   } catch (error) {
-    // 已知输入边界错误必须保持稳定摘要和专用错误类型。
-    if (error instanceof InvalidIntentDecisionRequestError) throw error;
-    // JSON 边界失败只允许暴露固定摘要，不能泄露底层异常 message。
-    if (error instanceof IntentDecisionSerializationError) throw stableRequestError('输入必须可 JSON 序列化');
-    // getter、Proxy 和其他运行时异常统一收敛为稳定摘要。
-    throw stableRequestError('请求结构无效');
+    throw toStableRequestError(error);
   }
+}
+
+/**
+ * 将 canonicalizer 的内部异常转换为稳定输入错误。
+ *
+ * @param error - canonicalizer 或 JSON 边界捕获的未知异常
+ * @returns 不携带原始异常内容的稳定 TypeError
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-17
+ */
+function toStableRequestError(error: unknown): TypeError {
+  // canonicalizer 已经生成稳定摘要时，builder 必须保持原有错误分类。
+  if (error instanceof StableIntentDecisionRequestError) return error;
+  // 已知输入边界错误必须保持稳定摘要和专用错误类型。
+  if (error instanceof InvalidIntentDecisionRequestError) return error;
+  // JSON 边界失败只允许暴露固定摘要，不能泄露底层异常 message。
+  if (error instanceof IntentDecisionSerializationError) return stableRequestError('输入必须可 JSON 序列化');
+  // getter、Proxy 和其他运行时异常统一收敛为稳定摘要。
+  return stableRequestError('请求结构无效');
 }
 /**
  * 通过 JSON 边界复制已经规范化的请求，确保结果可序列化且不共享引用。
@@ -159,34 +212,19 @@ function validateCandidate(candidate: unknown): asserts candidate is DecisionCan
   // riskLevel 只能使用已声明的风险级别。
   if (candidate.riskLevel !== undefined && !isRiskLevel(candidate.riskLevel)) throw invalidRequest('candidate riskLevel 无效');
 }
-/**
- * 把已校验请求显式转换为普通对象和新数组，隔离所有用户结构。
- *
- * @param request - 已通过运行时边界校验的决策请求
- * @returns 不携带用户自定义属性或 Proxy 的普通请求对象
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
-function normalizeDecisionRequest(request: DecisionRequest): JsonValue {
+/** 把已校验请求显式转换为普通对象和新数组。 @param request - 已校验请求 @returns 隔离用户结构的普通请求 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function normalizeDecisionRequest(request: DecisionRequest): DecisionRequest {
   const candidates = request.candidates.map(normalizeCandidate);
   return {
     decisionType: request.decisionType,
     decisionVersion: request.decisionVersion,
     threshold: request.threshold,
-    candidates,
-    candidateIds: request.candidates.map((candidate) => candidate.candidateId)
+    candidates
   };
 }
-/**
- * 把单个候选显式复制为普通 JSON-safe 对象。
- *
- * @param candidate - 已通过运行时边界校验的候选
- * @returns 不携带用户自定义属性或 Proxy 的候选快照
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
-function normalizeCandidate(candidate: DecisionCandidate): JsonValue {
-  const normalized: Record<string, JsonValue> = {
+/** 把单个候选显式复制为普通 JSON-safe 对象。 @param candidate - 已校验候选 @returns 隔离用户结构的候选快照 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function normalizeCandidate(candidate: DecisionCandidate): DecisionCandidate {
+  const normalized: DecisionCandidate = {
     candidateId: candidate.candidateId,
     priority: candidate.priority,
     specificity: candidate.specificity
@@ -197,37 +235,15 @@ function normalizeCandidate(candidate: DecisionCandidate): JsonValue {
   if (candidate.evidenceCodes !== undefined) normalized.evidenceCodes = [...candidate.evidenceCodes];
   return normalized;
 }
-/**
- * 判断值是否为允许的选择决策类型。
- *
- * @param value - 待判断的运行时值
- * @returns 值是否属于当前支持的决策类型
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
+/** 判断值是否为允许的选择决策类型。 @param value - 待判断值 @returns 是否属于当前支持的决策类型 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function isDecisionType(value: unknown): value is DecisionRequest['decisionType'] {
   return DECISION_TYPES.includes(value as DecisionRequest['decisionType']);
 }
-/**
- * 判断值是否为有界的非空字符串。
- *
- * @param value - 待判断的运行时值
- * @returns 值是否可安全作为 Prompt 字符串字段
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
+/** 判断值是否为有界的非空字符串。 @param value - 待判断值 @returns 是否可安全作为 Prompt 字符串 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function isBoundedNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0 && value.length <= MAX_STRING_LENGTH;
 }
-/**
- * 判断值是否为 JSON-safe 的可选稠密字符串数组。
- *
- * @param value - 待判断的可选数组
- * @param fieldName - 用于稳定错误摘要的字段名
- * @returns 值是否为安全字符串数组
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
+/** 判断值是否为 JSON-safe 的可选稠密字符串数组。 @param value - 待判断数组 @param fieldName - 稳定错误摘要字段 @returns 是否为安全字符串数组 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function isOptionalStringArray(value: unknown, fieldName: string): value is readonly string[] {
   // 未提供可选字段时保持字段缺省语义。
   if (value === undefined) return true;
@@ -240,16 +256,7 @@ function isOptionalStringArray(value: unknown, fieldName: string): value is read
     return false;
   }
 }
-/**
- * 校验数组原型、稠密性、own 属性和数据描述符。
- *
- * @param value - 未经信任的运行时数组
- * @param fieldName - 用于稳定错误摘要的字段名
- * @param maxLength - 允许的最大数组长度
- * @returns 无返回值；非法数组抛专用内部错误
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
+/** 校验数组原型、稠密性、own 属性和数据描述符。 @param value - 未信任数组 @param fieldName - 稳定错误摘要字段 @param maxLength - 最大长度 @returns 无返回值，非法数组抛内部错误 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function validateSafeDenseArray(value: unknown, fieldName: string, maxLength: number): asserts value is readonly unknown[] {
   // 必须是真数组，避免借用数组接口的对象绕过结构检查。
   if (!Array.isArray(value)) throw invalidRequest(`${fieldName} 必须是安全稠密数组`);
@@ -266,51 +273,21 @@ function validateSafeDenseArray(value: unknown, fieldName: string, maxLength: nu
     if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) throw invalidRequest(`${fieldName} 必须是安全稠密数组`);
   }
 }
-/**
- * 判断 own 属性名是否为当前数组长度内的规范索引。
- *
- * @param name - own 属性名
- * @param length - 数组长度
- * @returns 属性名是否为规范数组索引
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
+/** 判断 own 属性名是否为当前数组长度内的规范索引。 @param name - own 属性名 @param length - 数组长度 @returns 是否为规范数组索引 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function isCanonicalArrayIndex(name: string, length: number): boolean {
   const index = Number(name);
   return Number.isSafeInteger(index) && index >= 0 && index < length && String(index) === name;
 }
-/**
- * 判断值是否属于候选风险级别白名单。
- *
- * @param value - 待判断的运行时风险级别
- * @returns 值是否为合法风险级别
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
+/** 判断值是否属于候选风险级别白名单。 @param value - 待判断风险级别 @returns 是否为合法风险级别 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function isRiskLevel(value: unknown): value is DecisionCandidate['riskLevel'] {
   return RISK_LEVELS.includes(value as NonNullable<DecisionCandidate['riskLevel']>);
 }
-/**
- * 判断值是否为普通 JSON 对象。
- *
- * @param value - 待判断的运行时值
- * @returns 值是否使用 Object.prototype 且不是数组
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
+/** 判断值是否为普通 JSON 对象。 @param value - 待判断值 @returns 是否使用 Object.prototype 且不是数组 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value) && Object.getPrototypeOf(value) === Object.prototype;
 }
 
-/**
- * 判断对象是否只包含可枚举数据字段，并拒绝 symbol 扩展。
- *
- * @param value - 待检查的普通对象
- * @param keys - 允许出现的字符串字段
- * @returns 对象是否满足安全 own 属性边界
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
+/** 判断对象是否只包含可枚举数据字段，并拒绝 symbol 扩展。 @param value - 待检查对象 @param keys - 允许字段 @returns 是否满足安全 own 属性边界 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function hasSafeOwnKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   const allowed = new Set(keys);
   // symbol 属性不能进入 JSON 协议，必须全部拒绝。
@@ -325,26 +302,12 @@ function hasSafeOwnKeys(value: Record<string, unknown>, keys: readonly string[])
   });
 }
 
-/**
- * 构造内部输入边界错误。
- *
- * @param summary - 稳定的中文错误摘要
- * @returns 专用内部请求错误
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
+/** 构造内部输入边界错误。 @param summary - 稳定中文错误摘要 @returns 专用内部请求错误 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function invalidRequest(summary: string): InvalidIntentDecisionRequestError {
   return new InvalidIntentDecisionRequestError(summary);
 }
 
-/**
- * 构造不泄露原始异常内容的公开 TypeError。
- *
- * @param summary - 稳定的中文错误摘要
- * @returns 对调用方稳定的 TypeError
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
+/** 构造不泄露原始异常内容的公开 TypeError。 @param summary - 稳定中文错误摘要 @returns 对调用方稳定的 TypeError @author lvdaxianer@yeah.net @date 2026-10-17 */
 function stableRequestError(summary: string): TypeError {
-  return new TypeError(`${INVALID_REQUEST_PREFIX}${summary}`);
+  return new StableIntentDecisionRequestError(`${INVALID_REQUEST_PREFIX}${summary}`);
 }

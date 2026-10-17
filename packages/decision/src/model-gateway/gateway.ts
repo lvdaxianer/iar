@@ -4,9 +4,10 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { ModelAuditRecorder, redactModelRequest, type ModelAuditEntry, type ModelAuditOutcome, type ModelProfile, type ModelRole } from '../model-profile.js';
-import type { ModelGatewayError, ModelGatewayEvent, ModelGatewayFailure, ModelGatewayOptions, ModelGatewayResult, ModelInvocation, ModelOutputValidation, ModelProvider, ModelProviderRequest } from './types.js';
-import { ModelProviderError } from './types.js';
+import { redactModelRequest, type ModelAuditEntry, type ModelAuditOutcome, type ModelProfile, type ModelRole } from '../model-profile.js';
+import type { JsonValue } from '@iar/contracts';
+import { createDecisionAuditMetadata, resolveFallbackProfile, resolvePrimaryProfileForInvocation } from './decision-backend.js';
+import { MODEL_NO_PROFILE_MESSAGE, ModelProviderError, type ModelGatewayError, type ModelGatewayEvent, type ModelGatewayFailure, type ModelGatewayInvocationOptions, type ModelGatewayOptions, type ModelGatewayResult, type ModelInvocation, type ModelOutputValidation, type ModelProvider, type ModelProviderRequest } from './types.js';
 
 /** 仅供 gateway 内部区分 timeout race；不把原始 timer 错误暴露给调用方。 @author lvdaxianer@yeah.net @date 2026-10-17 */
 class GatewayTimeoutError extends Error {}
@@ -33,14 +34,8 @@ type AuditOptions = { role: ModelRole; invocation: ModelInvocation; profile: Mod
 
 /** provider 缺失失败参数。 */
 type FailedAttemptOptions = AuditOptions & { code: ModelGatewayEvent['errorCode']; audit: ModelAuditEntry[]; events: ModelGatewayEvent[] };
-
-// ProfileRunOptions、AttemptOptions 和 AuditOptions 统一使用命名字段。
-// 这样 retry/fallback 安全参数不会因调用顺序变化而错位。
-// OutputOptions 保证 validator 只处理当前 attempt 的 raw output。
-// FailedAttemptOptions 保留 provider 缺失时的可审计失败列表。
-// invocation snapshot 在入口创建一次，后续 attempt 只读取冻结对象。
-// provider profile snapshot 与 retry control profile 分离，避免外部 mutation。
-// auditOptions 使用命名字段，确保敏感字段 reason 仍经过 Recorder。
+/** retry loop 的已绑定 provider 参数。 */
+type RetryLoopOptions<T> = { profile: ModelProfile; audit: ModelAuditEntry[]; events: ModelGatewayEvent[]; runAttempt: (attempt: number) => Promise<AttemptResult<T>> };
 
 /** 统一封装五类模型角色的 provider 调用。 @author lvdaxianer@yeah.net @date 2026-10-17 */
 export class ModelGateway {
@@ -49,7 +44,6 @@ export class ModelGateway {
   // auditRecorder 负责统一脱敏和版本快照。
   private readonly registry: ModelGatewayOptions['registry'];
   private readonly providers: ModelGatewayOptions['providers'];
-  private readonly auditRecorder: ModelAuditRecorder;
 
   // 所有 role adapter 都通过 invoke 进入同一超时/重试/fallback 门禁。
   // provider 不直接暴露原始异常和原始请求日志。
@@ -66,7 +60,6 @@ export class ModelGateway {
   public constructor(options: ModelGatewayOptions) {
     this.registry = options.registry;
     this.providers = options.providers;
-    this.auditRecorder = new ModelAuditRecorder(options.registry);
   }
 
   /**
@@ -78,16 +71,16 @@ export class ModelGateway {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
-  public async invoke<T>(role: ModelRole, invocation: ModelInvocation, validate: (raw: unknown) => ModelOutputValidation<T>): Promise<ModelGatewayResult<T>> {
+  public async invoke<T>(role: ModelRole, invocation: ModelInvocation, validate: (raw: unknown) => ModelOutputValidation<T>, options?: ModelGatewayInvocationOptions): Promise<ModelGatewayResult<T>> {
     const inputError = validateInvocation(invocation);
     // 非 JSON 输入或空链路标识在 provider 之前 fail-closed。
     if (inputError) return { ok: false, error: inputError, audit: [], events: [] };
     const invocationSnapshot = createInvocationSnapshot(invocation);
     // 所有 retry/fallback/audit 共享同一个冻结输入快照。
     if (!invocationSnapshot) return invalidInputResult();
-    const primaryProfile = resolveProfile(this.registry, role);
+    const primaryProfile = resolvePrimaryProfileForInvocation(this.registry, role, options);
     // 未知 role 不能伪造 fallback 或 audit 版本。
-    if (!primaryProfile) return invalidRoleResult();
+    if (!primaryProfile) return options ? noProfileResult() : invalidRoleResult();
     const primary = await this.runProfile({ role, invocation: invocationSnapshot, profile: primaryProfile, validate, useFallback: false });
     // primary 成功或产生合法澄清结果时不触发 fallback。
     if (primary.ok) return primary;
@@ -105,7 +98,7 @@ export class ModelGateway {
     // 没有显式 fallback 时保留 primary 的稳定失败和审计证据。
     if (!options.profile.fallbackProfileId) return options.primary;
     // 只有 primary 失败后才解析并执行 fallback profile。
-    const fallback = await this.runFallback({ role: options.role, invocation: options.invocation, validate: options.validate, primary: options.primary });
+    const fallback = await this.runFallback({ role: options.role, invocation: options.invocation, validate: options.validate, profile: options.profile, primary: options.primary });
     // fallback 成功仍保留 primary attempt，便于审计降级原因。
     if (fallback.ok) return { ...fallback, audit: [...options.primary.audit, ...fallback.audit], events: [...options.primary.events, ...fallback.events] };
     // 两条路径均失败时返回明确 fallback_failed，不伪装 provider 成功。
@@ -129,20 +122,7 @@ export class ModelGateway {
     if (!provider) return this.failedAttempt({ role, invocation, profile, fallbackUsed: useFallback, attempt: 1, outcome: 'provider_failed', errorCode: 'model.no_provider', reason: '模型 provider 未注册', code: 'model.no_provider', audit, events });
     // provider 只能读取冻结 profile 快照，retry loop 使用原始受信任配置。
     const providerProfile = deepFreeze(structuredClone(profile));
-    let lastFailure: AttemptFailure = { code: 'model.provider_failed', message: '模型 provider 调用失败' };
-    // 每个 attempt 都复用同一调用快照，并受 profile 的有限上限约束。
-    for (let attempt = 1; attempt <= profile.retryPolicy.maxAttempts; attempt += 1) {
-      const attemptResult = await this.runAttempt({ ...options, profile: providerProfile, provider, attempt });
-      audit.push(attemptResult.audit);
-      events.push(attemptResult.event);
-      // 任一 attempt 成功后立即停止 retry，避免重复调用 provider。
-      if (attemptResult.ok) return { ok: true, value: attemptResult.value, audit, events };
-      lastFailure = attemptResult.failure;
-      // retry 只由 profile policy 放行，并受 maxAttempts 硬上限约束。
-      if (!shouldRetry(profile.retryPolicy.retryOn, lastFailure.code) || attempt === profile.retryPolicy.maxAttempts) break;
-      await waitBackoff(profile.retryPolicy.backoffMs);
-    }
-    return { ok: false, error: { code: lastFailure.code, message: lastFailure.message, retryable: lastFailure.code === 'model.timeout' || lastFailure.code === 'model.provider_failed', details: {} }, audit, events };
+    return runRetryLoop({ profile, audit, events, runAttempt: (attempt) => this.runAttempt({ ...options, profile: providerProfile, provider, attempt }) });
   }
 
   /**
@@ -191,10 +171,12 @@ export class ModelGateway {
   }
 
   /** 使用 fallback profile 执行第二条 provider 路径。 @param options - fallback 执行参数 @returns fallback 结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
-  private async runFallback<T>(options: { role: ModelRole; invocation: ModelInvocation; validate: (raw: unknown) => ModelOutputValidation<T>; primary: ModelGatewayFailure }): Promise<ModelGatewayResult<T>> {
-    const { role, invocation, validate, primary } = options;
+  private async runFallback<T>(options: { role: ModelRole; invocation: ModelInvocation; validate: (raw: unknown) => ModelOutputValidation<T>; profile: ModelProfile; primary: ModelGatewayFailure }): Promise<ModelGatewayResult<T>> {
+    const { role, invocation, validate, profile, primary } = options;
     try {
-      return await this.runProfile({ role, invocation, profile: this.registry.forRole(role, true), validate, useFallback: true });
+      const fallbackProfile = resolveFallbackProfile(this.registry, profile);
+      if (!fallbackProfile) throw new Error('fallback profile unavailable');
+      return await this.runProfile({ role, invocation, profile: fallbackProfile, validate, useFallback: true });
     } catch {
       // registry fallback 配置损坏也要保留 primary code 并稳定失败。
       return { ok: false, error: { code: 'model.fallback_failed', message: '模型 fallback 配置无效', retryable: false, details: { primaryCode: primary.error.code } }, audit: [], events: [] };
@@ -227,10 +209,12 @@ export class ModelGateway {
     }
   }
 
-  /** 记录一次不含 raw input 的 audit entry。 @param options - audit 构造参数 @returns 脱敏审计快照 @author lvdaxianer@yeah.net @date 2026-10-17 */
+  /** 记录一次不含决策原始 input 的 audit entry。 @param options - audit 构造参数 @returns 脱敏审计快照 @author lvdaxianer@yeah.net @date 2026-10-17 */
   private auditEntry(options: AuditOptions): ModelAuditEntry {
-    // metadata 只放 provider、request 和固定 reason，Recorder 负责敏感字段替换。
-    return this.auditRecorder.record({ traceId: options.invocation.traceId, runId: options.invocation.runId, role: options.role, attempt: options.attempt, outcome: options.outcome, fallbackUsed: options.fallbackUsed, metadata: { provider: options.profile.provider, request: options.invocation.input, ...(options.reason ? { reason: options.reason } : {}) } });
+    const metadata = options.role === 'function.select' || options.role === 'plugin.select'
+      ? createDecisionAuditMetadata(options.profile, options.invocation.input, options.reason)
+      : redactModelRequest({ provider: options.profile.provider, request: options.invocation.input });
+    return { traceId: options.invocation.traceId, runId: options.invocation.runId, role: options.role, profileId: options.profile.profileId, profileVersion: options.profile.profileVersion, modelId: options.profile.modelId, modelVersion: options.profile.modelVersion, attempt: options.attempt, outcome: options.outcome, fallbackUsed: options.fallbackUsed, metadata };
   }
 
   /** 记录 provider 不存在的失败 attempt。 @param options - 失败 attempt 参数 @returns 失败结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
@@ -241,6 +225,23 @@ export class ModelGateway {
     options.events.push({ eventName: 'model.failed', audit: entry, ...(options.code ? { errorCode: options.code } : {}) });
     return { ok: false, error: { code: options.code ?? 'model.no_provider', message: '模型 provider 未注册', retryable: false, details: {} }, audit: options.audit, events: options.events };
   }
+}
+
+/** 在单个 profile 内执行有界 retry loop。 @param options - retry 状态和 attempt 回调 @returns 当前 profile 的稳定结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
+async function runRetryLoop<T>(options: RetryLoopOptions<T>): Promise<ModelGatewayResult<T>> {
+  let lastFailure: AttemptFailure = { code: 'model.provider_failed', message: '模型 provider 调用失败' };
+  for (let attempt = 1; attempt <= options.profile.retryPolicy.maxAttempts; attempt += 1) {
+    const result = await options.runAttempt(attempt);
+    options.audit.push(result.audit);
+    options.events.push(result.event);
+    // 任一 attempt 成功后立即停止 retry，避免重复调用 provider。
+    if (result.ok) return { ok: true, value: result.value, audit: options.audit, events: options.events };
+    lastFailure = result.failure;
+    // retry 只由 profile policy 放行，并受 maxAttempts 硬上限约束。
+    if (!shouldRetry(options.profile.retryPolicy.retryOn, lastFailure.code) || attempt === options.profile.retryPolicy.maxAttempts) break;
+    await waitBackoff(options.profile.retryPolicy.backoffMs);
+  }
+  return { ok: false, error: { code: lastFailure.code, message: lastFailure.message, retryable: lastFailure.code === 'model.timeout' || lastFailure.code === 'model.provider_failed', details: {} }, audit: options.audit, events: options.events };
 }
 
 /** 把 provider 异常转换为不泄漏正文的稳定错误。 @param error - provider 或 timeout 异常 @returns 稳定错误摘要 @author lvdaxianer@yeah.net @date 2026-10-17 */
@@ -319,19 +320,15 @@ function getProvider(providers: unknown, name: string): ModelProvider | undefine
   }
 }
 
-/** 安全读取 role primary profile。 @param registry - profile registry @param role - 模型角色 @returns profile 或 undefined @author lvdaxianer@yeah.net @date 2026-10-17 */
-function resolveProfile(registry: ModelGatewayOptions['registry'], role: ModelRole): ModelProfile | undefined {
-  try {
-    return registry.forRole(role);
-  } catch {
-    return undefined;
-  }
-}
-
 /** 创建不带敏感 details 的 role 配置错误。 @returns 稳定 invalid_request 结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function invalidRoleResult<T>(): ModelGatewayResult<T> {
   // role 配置错误不创建 audit，避免没有合法 profile 时伪造版本。
   return { ok: false, error: { code: 'model.invalid_request', message: '模型 role 配置无效', retryable: false, details: {} }, audit: [], events: [] };
+}
+
+/** 创建不暴露配置细节的 backend 缺失结果。 @returns 稳定 model.no_profile 结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function noProfileResult<T>(): ModelGatewayResult<T> {
+  return { ok: false, error: { code: 'model.no_profile', message: MODEL_NO_PROFILE_MESSAGE, retryable: false, details: {} }, audit: [], events: [] };
 }
 
 /** 等待 profile 声明的有限退避时间。 @param backoffMs - 退避毫秒数 @returns 等待完成 Promise @author lvdaxianer@yeah.net @date 2026-10-17 */
