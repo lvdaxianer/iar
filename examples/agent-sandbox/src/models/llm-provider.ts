@@ -11,7 +11,14 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { ModelProviderError, type ModelProvider, type ModelProviderRequest } from '@iar/decision';
+import {
+  INTENT_DECISION_PROMPT_VERSION,
+  INTENT_DECISION_SYSTEM_PROMPT,
+  ModelProviderError,
+  type ModelProfileEnvironment,
+  type ModelProvider,
+  type ModelProviderRequest
+} from '@iar/decision';
 
 /** brain provider 的可注入配置。 */
 export type BrainProviderOptions = {
@@ -19,6 +26,31 @@ export type BrainProviderOptions = {
   apiKey?: string;
   /** OpenAI 兼容接口基础地址。 */
   baseUrl?: string;
+  /** 默认模型标识，profile environment 未覆盖时使用。 */
+  modelId?: string;
+};
+
+/** Intent Model provider 的可注入配置。 */
+export type IntentProviderOptions = BrainProviderOptions;
+
+/** OpenAI-compatible provider 的连接配置。 */
+export type OpenAICompatibleProviderOptions = {
+  /** 显式 API key，环境变量映射优先。 */
+  apiKey?: string;
+  /** 显式基础地址，环境变量映射优先。 */
+  baseUrl?: string;
+  /** 显式模型标识，环境变量映射优先。 */
+  modelId?: string;
+  /** 未声明 profile 映射时使用的 endpoint 环境变量。 */
+  endpointEnv: string;
+  /** 未声明 profile 映射时使用的 API key 环境变量。 */
+  apiKeyEnv: string;
+  /** 兼容旧配置使用的 API key 环境变量。 */
+  fallbackApiKeyEnv?: string;
+  /** 未声明 profile 映射时使用的模型环境变量。 */
+  modelIdEnv: string;
+  /** 未声明 endpoint 环境变量时的兼容默认地址。 */
+  defaultBaseUrl?: string;
 };
 
 /** OpenAI 兼容 chat/completions 响应的最小读取形状。 */
@@ -84,21 +116,19 @@ const COMPACTION_POLICY = `{
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-export class BrainModelProvider implements ModelProvider {
-  private readonly apiKey: string | undefined;
-  private readonly baseUrl: string;
+export class OpenAICompatibleModelProvider implements ModelProvider {
+  /** provider 级显式连接配置和默认环境变量。 */
+  protected readonly options: OpenAICompatibleProviderOptions;
 
   /**
-   * 创建 brain provider，缺 key 时保持未配置状态。
+   * 创建 OpenAI-compatible provider，缺 key 时保持未配置状态。
    *
    * @param options - API Key 与基础地址；模型标识统一由 models.brain.json 各 profile 的 modelId 决定
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
-  public constructor(options: BrainProviderOptions = {}) {
-    // 密钥只从环境变量读取：优先 IAR_LLM_API_KEY，兼容 .env.example 中的 IAR_MODEL_API_KEY。
-    this.apiKey = options.apiKey ?? process.env.IAR_LLM_API_KEY ?? process.env.IAR_MODEL_API_KEY;
-    this.baseUrl = (options.baseUrl ?? process.env.IAR_LLM_BASE_URL ?? 'https://api.moonshot.cn/v1').replace(/\/+$/, '');
+  public constructor(options: OpenAICompatibleProviderOptions) {
+    this.options = options;
   }
 
   /**
@@ -111,11 +141,10 @@ export class BrainModelProvider implements ModelProvider {
    * @date 2026-10-17
    */
   public async complete(request: ModelProviderRequest): Promise<unknown> {
-    if (!this.apiKey) throw new ModelProviderError('provider_unavailable');
-    // 模型统一取当前 profile 的 modelId，模型选择只在 models.brain.json 一处配置。
-    const model = request.profile.modelId;
+    const connection = this.resolveConnection(request.profile);
+    if (!connection.apiKey || !connection.baseUrl) throw new ModelProviderError('provider_unavailable');
     const prompt = this.buildPrompt(request);
-    const raw = await this.callChatCompletion(model, prompt.system, prompt.user, request.signal);
+    const raw = await this.callChatCompletion(connection, prompt.system, prompt.user, request.signal);
     return parseJsonContent(raw);
   }
 
@@ -127,7 +156,7 @@ export class BrainModelProvider implements ModelProvider {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
-  private buildPrompt(request: ModelProviderRequest): { system: string; user: string } {
+  protected buildPrompt(request: ModelProviderRequest): { system: string; user: string } {
     const input = asRecord(request.input);
     if (request.profile.role === 'semantic.extract') {
       return { system: SEMANTIC_SYSTEM_PROMPT, user: `用户输入：${readString(input, 'text') ?? JSON.stringify(request.input)}` };
@@ -150,15 +179,38 @@ export class BrainModelProvider implements ModelProvider {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
-  private async callChatCompletion(model: string, system: string, user: string, signal: AbortSignal): Promise<string> {
+  private resolveConnection(profile: ModelProviderRequest['profile']): { apiKey: string | undefined; baseUrl: string | undefined; model: string } {
+    const environment = profile.environment as ModelProfileEnvironment | undefined;
+    const mappedEndpoint = readEnvironment(environment?.endpoint);
+    const mappedApiKey = readEnvironment(environment?.apiKey);
+    const mappedModelId = readEnvironment(environment?.modelId);
+    const apiKey = mappedApiKey ?? nonEmpty(this.options.apiKey) ?? readEnvironment(this.options.apiKeyEnv) ?? readEnvironment(this.options.fallbackApiKeyEnv);
+    const baseUrl = mappedEndpoint ?? nonEmpty(this.options.baseUrl) ?? readEnvironment(this.options.endpointEnv) ?? this.options.defaultBaseUrl;
+    const model = mappedModelId ?? nonEmpty(this.options.modelId) ?? readEnvironment(this.options.modelIdEnv) ?? profile.modelId;
+    return { apiKey, baseUrl: baseUrl?.replace(/\/+$/, ''), model };
+  }
+
+  /**
+   * 调用 OpenAI 兼容 chat/completions 接口。
+   *
+   * @param connection - 已解析且不写入 profile 的连接信息
+   * @param system - 系统提示词
+   * @param user - 用户内容
+   * @param signal - gateway 注入的取消信号
+   * @returns choices[0].message.content 原文
+   * @throws ModelProviderError 当 HTTP 状态非 2xx 或网络失败
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-17
+   */
+  private async callChatCompletion(connection: { apiKey: string | undefined; baseUrl: string | undefined; model: string }, system: string, user: string, signal: AbortSignal): Promise<string> {
     let response: Response;
     try {
-      response = await fetch(`${this.baseUrl}/chat/completions`, {
+      response = await fetch(`${connection.baseUrl}/chat/completions`, {
         method: 'POST',
         signal,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${connection.apiKey}` },
         body: JSON.stringify({
-          model,
+          model: connection.model,
           temperature: 0.2,
           response_format: { type: 'json_object' },
           messages: [
@@ -172,11 +224,86 @@ export class BrainModelProvider implements ModelProvider {
       throw new ModelProviderError('provider_unavailable');
     }
     if (!response.ok) throw new ModelProviderError('provider_failed');
-    const payload = await response.json() as ChatCompletionResponse;
+    let payload: ChatCompletionResponse;
+    try {
+      payload = await response.json() as ChatCompletionResponse;
+    } catch {
+      throw new ModelProviderError('provider_failed');
+    }
     const content = payload.choices?.[0]?.message?.content;
     if (typeof content !== 'string' || content.length === 0) throw new ModelProviderError('provider_failed');
     return content;
   }
+}
+
+/** 普通交互模型 provider，保留既有 brain 角色的提示词协议。 */
+export class BrainModelProvider extends OpenAICompatibleModelProvider {
+  /**
+   * 创建普通交互模型 provider。
+   *
+   * @param options - API key、endpoint 和模型默认值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-17
+   */
+  public constructor(options: BrainProviderOptions = {}) {
+    super({
+      ...options,
+      endpointEnv: 'IAR_LLM_BASE_URL',
+      apiKeyEnv: 'IAR_LLM_API_KEY',
+      fallbackApiKeyEnv: 'IAR_MODEL_API_KEY',
+      modelIdEnv: 'IAR_LLM_MODEL_ID',
+      defaultBaseUrl: 'https://api.moonshot.cn/v1'
+    });
+  }
+}
+
+/**
+ * Intent Model provider，使用独立连接配置和固定版本化决策 Prompt。
+ *
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-17
+ */
+export class IntentModelProvider extends OpenAICompatibleModelProvider {
+  /**
+   * 创建 Intent Model provider。
+   *
+   * @param options - API key、endpoint 和模型默认值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-17
+   */
+  public constructor(options: IntentProviderOptions = {}) {
+    super({
+      ...options,
+      endpointEnv: 'IAR_INTENT_MODEL_ENDPOINT',
+      apiKeyEnv: 'IAR_INTENT_MODEL_API_KEY',
+      modelIdEnv: 'IAR_INTENT_MODEL_ID'
+    });
+  }
+
+  /**
+   * 固定使用 iar.intent-decision-prompt/v1 和公共 DecisionResult 输出约束。
+   *
+   * @param request - gateway 冻结的 Intent Model 请求
+   * @returns 固定系统 Prompt 与 JSON 用户内容
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-17
+   */
+  protected override buildPrompt(request: ModelProviderRequest): { system: string; user: string } {
+    return {
+      system: `${INTENT_DECISION_SYSTEM_PROMPT}\nPrompt version: ${INTENT_DECISION_PROMPT_VERSION}`,
+      user: JSON.stringify({ promptVersion: INTENT_DECISION_PROMPT_VERSION, input: request.input })
+    };
+  }
+}
+
+/** 读取 profile 声明的环境变量名对应的非空值。 */
+function readEnvironment(name: string | undefined): string | undefined {
+  return name ? nonEmpty(process.env[name]) : undefined;
+}
+
+/** 把空白配置视为未配置，避免空值覆盖有效默认值。 */
+function nonEmpty(value: string | undefined): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 }
 
 /**

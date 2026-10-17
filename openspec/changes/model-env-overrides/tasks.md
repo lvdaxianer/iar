@@ -7,9 +7,9 @@
 
 ## 2. OpenAI-compatible Providers
 
-- [ ] 2.1 Refactor the normal interaction provider to resolve endpoint, API key, and model ID from profile mapping/environment with explicit precedence and stable missing-config errors.
-- [ ] 2.2 Add an Intent Model provider using the same HTTP boundary but fixed Intent Prompt input and independent environment variables.
-- [ ] 2.3 Add deterministic HTTP tests covering endpoint, Authorization, model name, JSON-only request, timeout/error mapping, and no secret leakage.
+- [x] 2.1 Refactor the normal interaction provider to resolve endpoint, API key, and model ID from profile mapping/environment with explicit precedence and stable missing-config errors.
+- [x] 2.2 Add an Intent Model provider using the same HTTP boundary but fixed Intent Prompt input and independent environment variables.
+- [x] 2.3 Add deterministic HTTP tests covering endpoint, Authorization, model name, JSON-only request, timeout/error mapping, and no secret leakage.
 
 ## 3. Runtime/example configuration
 
