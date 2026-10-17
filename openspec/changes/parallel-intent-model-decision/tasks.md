@@ -13,9 +13,9 @@
 
 ## 3. 路由集成与失败语义
 
-- [ ] 3.1 将 Function/Plugin 决策调用改为使用 `UnifiedDecisionAdapter` 选择 backend，同时保持 Function-first、Plugin ownership、候选重建和最终授权复核不变。
-- [ ] 3.2 明确低分、澄清、空候选、非法输出和 provider failure 的处理：低分/澄清不跨 backend，非法输出按现有稳定错误收敛；跨 backend fallback 只有显式配置时才允许。
-- [ ] 3.3 保持现有 `DecisionResult`、`RouteResult` 和 API 返回字段兼容，验证 JEV 与 Intent Model 切换不会改变下游路由判断和副作用门禁。
+- [x] 3.1 将 Function/Plugin 决策调用改为使用 `UnifiedDecisionAdapter` 选择 backend，同时保持 Function-first、Plugin ownership、候选重建和最终授权复核不变。
+- [x] 3.2 明确低分、澄清、空候选、非法输出和 provider failure 的处理：低分/澄清不跨 backend，非法输出按现有稳定错误收敛；跨 backend fallback 只有显式配置时才允许。
+- [x] 3.3 保持现有 `DecisionResult`、`RouteResult` 和 API 返回字段兼容，验证 JEV 与 Intent Model 切换不会改变下游路由判断和副作用门禁。
 
 ## 4. 测试与回归证据
 

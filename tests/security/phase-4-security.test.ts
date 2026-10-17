@@ -41,12 +41,12 @@ test('tenant authorization rejects foreign tenant before host access', async () 
   await api.close();
 });
 
-test('router rejects capability expansion from the finite Manifest snapshot', () => {
+test('router rejects capability expansion from an Intent-shaped finite decision', () => {
   const host = new PluginHost({ functionIds: ['dip.service.stop'] });
   const installed = host.install(manifest({ pluginId: 'plugin-a' }));
   assert.equal(installed.ok, true);
   assert.equal(host.enable('plugin-a').ok, true);
-  const chooseFirst = new MockDecisionProvider((request) => ({ schemaVersion: SCHEMA_VERSIONS.decision, decisionType: request.decisionType, decisionVersion: request.decisionVersion, status: 'choice', choice: request.candidates[0]?.candidateId, score: 0.99, reasonCode: 'test.choice', candidateIds: request.candidates.map((candidate) => candidate.candidateId) }));
+  const chooseFirst = new MockDecisionProvider((request) => ({ schemaVersion: SCHEMA_VERSIONS.decision, decisionType: request.decisionType, decisionVersion: request.decisionVersion, status: 'choice', choice: request.candidates[0]?.candidateId, score: 0.99, reasonCode: 'intent_match', candidateIds: request.candidates.map((candidate) => candidate.candidateId) }));
   const expression = { condition: { field: 'semantic.intent', operator: 'equals' as const, value: 'service.stop' } };
   const result = new TwoStageRouter().route({ facts, tenantId: 'tenant-a', actorId: 'actor-a', environment: 'prod', functionRules: [functionRule('dip.service.stop', expression)], pluginRules: [pluginRule('plugin-a', expression, { requiredCapabilities: ['admin.escape'] })], pluginHost: host, functionProvider: chooseFirst, pluginProvider: chooseFirst, authorizePlugin: () => true });
   assert.notEqual(result.status, 'matched');

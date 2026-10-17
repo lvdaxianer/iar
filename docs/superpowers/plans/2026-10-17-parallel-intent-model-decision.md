@@ -19,6 +19,7 @@
 - Modify: \`packages/decision/src/model-gateway/types.ts\`：让 \`ModelGateway.invoke\` 接收可选 backend 选择参数，保持 \`ModelGatewayResult<T>\` 不变。
 - Modify: \`packages/decision/src/model-gateway/gateway.ts\`：按 resolver 结果加载 profile，保留现有 timeout/retry/fallback/redaction/audit 逻辑。
 - Create: \`packages/decision/src/model-gateway/decision-backend.ts\`：实现 \`DecisionBackendResolver\` 和统一 decision adapter 工厂。
+- Modify: \`packages/runtime/src/routing.ts\`：增加不破坏同步 \`route()\` 的异步模型路由入口，继续复用 Function-first、Plugin ownership 和最终授权复核。
 
 ### Intent Model adapter
 
@@ -285,6 +286,8 @@ Do not change the synchronous \`DecisionProvider\` interface or \`packages/runti
 Run the routing/security tests and assert that a model result only changes \`functionDecision\`/\`pluginDecision\` evidence. It must not modify \`PluginHost\`, capabilities, tenant, actor, environment, Policy Gate, or Workflow state.
 
 - [ ] **Step 5: Commit Task 3**
+
+Implementation note: the synchronous `DecisionProvider` and existing `TwoStageRouter.route()` contract remain unchanged. Task 3 adds a backward-compatible `routeAsync()` entry so the asynchronous `UnifiedDecisionAdapter` can be used by Function/Plugin stages without changing `RouteResult` or final authority checks.
 
 Run:
 

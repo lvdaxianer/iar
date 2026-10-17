@@ -114,6 +114,10 @@ export type ModelGatewayInvocationOptions = {
   decisionBackend?: DecisionBackend;
   /** 已由 resolver 解析出的 primary profile 标识。 */
   profileId?: string;
+  /** 是否在当前决策的 provider/transport failure 后显式允许跨 backend fallback。 */
+  crossBackendFallback?: boolean;
+  /** 跨 backend 时由目标 adapter 构造的 backend-specific provider input。 */
+  crossBackendInput?: JsonValue;
 };
 
 /** gateway 执行器的公开配置。 */

@@ -11,7 +11,7 @@
  * @date 2026-10-17
  */
 import { ERROR_CODES, type DecisionResult } from '@iar/contracts';
-import type { DecisionCandidate, DecisionProvider, DecisionRequest } from '@iar/decision';
+import { providerFailureResult, type DecisionCandidate, type DecisionProvider, type DecisionRequest, type ModelGatewayResult } from '@iar/decision';
 import type { FunctionRule, PluginRule, RuleEvaluationFacts, RuleEvaluationResult } from '@iar/rule-engine';
 import { RuleEngine } from '@iar/rule-engine';
 import type { PluginHost, PluginRecord } from '@iar/plugin-host';
@@ -27,8 +27,15 @@ type RouteEvidence = {
   pluginDecision: DecisionResult;
 };
 
-type FinalizeRouteInput = RouteEvidence & { request: RouteRequest };
+type RouteContext = Pick<RouteRequest, 'tenantId' | 'actorId' | 'environment' | 'pluginRules' | 'pluginHost' | 'authorizePlugin'>;
+type FinalizeRouteInput = RouteEvidence & { request: RouteContext };
 type MatchedRouteInput = RouteEvidence & { pluginId: string };
+
+/** 异步模型决策适配器的最小结构，UnifiedDecisionAdapter 可直接满足该接口。 */
+export type AsyncDecisionAdapter = {
+  /** 使用 trace/run 和有限候选执行一次模型决策。 */
+  decide(invocation: { traceId: string; runId: string; request: DecisionRequest }): Promise<ModelGatewayResult<DecisionResult>>;
+};
 
 /** 授权回调当前正在验证的阶段和不可变宿主记录。 */
 export type PluginAuthorizationInput = {
@@ -66,6 +73,18 @@ export type RouteRequest = {
   pluginProvider: DecisionProvider;
   /** 当前租户、actor、环境下的插件授权检查。 */
   authorizePlugin: (input: PluginAuthorizationInput) => boolean;
+};
+
+/** 使用 ModelGateway/UnifiedDecisionAdapter 的异步两阶段路由输入。 */
+export type AsyncRouteRequest = Omit<RouteRequest, 'functionProvider' | 'pluginProvider'> & {
+  /** 当前模型调用 trace 标识。 */
+  traceId: string;
+  /** 当前模型调用 run 标识。 */
+  runId: string;
+  /** Function 阶段统一模型适配器。 */
+  functionDecisionAdapter: AsyncDecisionAdapter;
+  /** Plugin 阶段统一模型适配器。 */
+  pluginDecisionAdapter: AsyncDecisionAdapter;
 };
 
 /** 两阶段路由结果，永远不代表已执行插件。 */
@@ -118,6 +137,23 @@ export class TwoStageRouter {
   }
 
   /**
+   * 使用 UnifiedDecisionAdapter 执行异步 Function-first 路由，同时复用同步路由的所有最终门禁。
+   * @param request - 带 trace/run 和 Function/Plugin 模型适配器的路由输入
+   * @returns 与同步 route 相同的 RouteResult
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-17
+   */
+  public async routeAsync(request: AsyncRouteRequest): Promise<RouteResult> {
+    const functionEvaluation = this.engine.evaluateFunctions({ facts: request.facts, rules: request.functionRules });
+    // Function 未形成可执行选择时，异步模型和同步 provider 一样不能启动 Plugin。
+    if (functionEvaluation.status !== 'matched') return evaluationResult('function', functionEvaluation);
+    const functionRequest = decisionRequest('function.select', functionEvaluation);
+    const functionDecision = await safeAsyncDecision(request.functionDecisionAdapter, request.traceId, request.runId, functionRequest);
+    if (functionDecision.status !== 'choice' || !functionDecision.choice) return decisionResult('function', functionEvaluation, functionDecision);
+    return this.routePluginAsync(request, functionEvaluation, functionDecision);
+  }
+
+  /**
    * 在唯一 Function choice 下评估插件并执行最终门禁。
    *
    * @param request - 两阶段路由输入
@@ -139,6 +175,20 @@ export class TwoStageRouter {
     if (pluginDecision.status !== 'choice' || !pluginDecision.choice) return { status: routeStatus(pluginDecision.status), reasonCode: `plugin_${pluginDecision.status}`, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision };
     return finalizePluginRoute({ request, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision });
   }
+
+  /** 使用统一异步模型适配器选择 Plugin，并复用同一候选和最终授权边界。 @param request - 异步路由输入 @param functionEvaluation - Function 规则证据 @param functionDecision - Function 统一决策 @returns 异步路由结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
+  private async routePluginAsync(request: AsyncRouteRequest, functionEvaluation: RuleEvaluationResult, functionDecision: DecisionResult): Promise<RouteResult> {
+    const functionId = functionDecision.choice as string;
+    const records = request.pluginHost.candidates(functionId);
+    const candidates = authorizeCandidates(request, records);
+    const pluginEvaluation = this.engine.evaluatePlugins({ facts: request.facts, functionId, candidates, rules: request.pluginRules });
+    // Plugin 候选为空时保持同步路由的 fail-closed 语义。
+    if (pluginEvaluation.status !== 'matched') return { ...evaluationResult('plugin', pluginEvaluation), functionId, functionEvaluation, functionDecision, pluginEvaluation };
+    const pluginRequest = decisionRequest('plugin.select', pluginEvaluation);
+    const pluginDecision = await safeAsyncDecision(request.pluginDecisionAdapter, request.traceId, request.runId, pluginRequest);
+    if (pluginDecision.status !== 'choice' || !pluginDecision.choice) return { status: routeStatus(pluginDecision.status), reasonCode: `plugin_${pluginDecision.status}`, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision };
+    return finalizePluginRoute({ request, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision });
+  }
 }
 /**
  * 将宿主记录转为规则引擎的授权候选快照。
@@ -149,7 +199,7 @@ export class TwoStageRouter {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function authorizeCandidates(request: RouteRequest, records: readonly PluginRecord[]) {
+function authorizeCandidates(request: RouteContext, records: readonly PluginRecord[]) {
   return records.map((record) => ({
     pluginId: record.manifest.pluginId,
     functionId: record.manifest.pluginKind === 'function' ? record.manifest.functionId : '',
@@ -196,7 +246,7 @@ function finalizePluginRoute(input: FinalizeRouteInput): RouteResult {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function requestContext(request: RouteRequest, record: PluginRecord) {
+function requestContext(request: RouteContext, record: PluginRecord) {
   return { tenantId: request.tenantId, actorId: request.actorId, environment: request.environment, record };
 }
 
@@ -238,6 +288,17 @@ function deepFreeze<T>(value: T): T {
  */
 function decisionRequest(decisionType: DecisionRequest['decisionType'], evaluation: RuleEvaluationResult): DecisionRequest {
   return { decisionType, decisionVersion: DECISION_VERSION, threshold: DECISION_THRESHOLD, candidates: evaluation.candidates.map(toDecisionCandidate) };
+}
+
+/** 解包 UnifiedDecisionAdapter 结果；模型 gateway 失败收敛为既有 provider_failed 决策，不暴露 provider 错误。 @param adapter - 异步决策适配器 @param traceId - 链路标识 @param runId - 运行标识 @param request - 有限候选请求 @returns 稳定 DecisionResult @author lvdaxianer@yeah.net @date 2026-10-17 */
+async function safeAsyncDecision(adapter: AsyncDecisionAdapter, traceId: string, runId: string, request: DecisionRequest): Promise<DecisionResult> {
+  try {
+    const result = await adapter.decide({ traceId, runId, request });
+    return result.ok ? result.value : providerFailureResult(request);
+  } catch {
+    // 适配器异常不能绕过路由的 DecisionResult 边界或进入公开错误正文。
+    return providerFailureResult(request);
+  }
 }
 
 /**
