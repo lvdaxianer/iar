@@ -19,5 +19,5 @@
 
 ## 4. Verification and release
 
-- [ ] 4.1 Run focused provider/profile/routing tests plus `npm run lint`, `npm run build`, `npm test`, `git diff --check`, and strict OpenSpec validation.
-- [ ] 4.2 Complete per-task audit, merge to `master`, archive the OpenSpec change, rerun final verification, and push `origin/master`.
+- [x] 4.1 Run focused provider/profile/routing tests plus `npm run lint`, `npm run build`, `npm test`, `git diff --check`, and strict OpenSpec validation.
+- [x] 4.2 Complete per-task audit, merge to `master`, archive the OpenSpec change, rerun final verification, and push `origin/master`.
