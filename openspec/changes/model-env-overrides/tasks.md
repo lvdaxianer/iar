@@ -13,9 +13,9 @@
 
 ## 3. Runtime/example configuration
 
-- [ ] 3.1 Update root and sandbox model profiles with independent normal/Intent environment mappings and non-secret defaults; keep JEV priority and mock profiles compatible.
-- [ ] 3.2 Wire both providers into the sandbox without changing public route/decision contracts; verify Intent-only and JEV-priority paths.
-- [ ] 3.3 Update `.env.example`, README, sandbox README, and implementation audit with exact variable names and precedence.
+- [x] 3.1 Update root and sandbox model profiles with independent normal/Intent environment mappings and non-secret defaults; keep JEV priority and mock profiles compatible.
+- [x] 3.2 Wire both providers into the sandbox without changing public route/decision contracts; verify Intent-only and JEV-priority paths.
+- [x] 3.3 Update `.env.example`, README, sandbox README, and implementation audit with exact variable names and precedence.
 
 ## 4. Verification and release
 

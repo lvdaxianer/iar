@@ -9,6 +9,7 @@
       "provider": "mock",
       "modelId": "semantic-extractor",
       "modelVersion": "mock-1",
+      "environment": { "endpoint": "IAR_LLM_BASE_URL", "apiKey": "IAR_LLM_API_KEY", "modelId": "IAR_LLM_MODEL_ID" },
       "timeoutMs": 1500,
       "retryPolicy": { "maxAttempts": 2, "backoffMs": 25, "retryOn": ["timeout", "provider_unavailable"] },
       "fallbackProfileId": "semantic-extractor-fallback",
@@ -22,6 +23,7 @@
       "provider": "mock",
       "modelId": "semantic-extractor-fallback",
       "modelVersion": "mock-1",
+      "environment": { "endpoint": "IAR_LLM_BASE_URL", "apiKey": "IAR_LLM_API_KEY", "modelId": "IAR_LLM_MODEL_ID" },
       "timeoutMs": 1000,
       "retryPolicy": { "maxAttempts": 1, "backoffMs": 0, "retryOn": ["timeout"] },
       "structuredOutput": { "enabled": true, "schemaId": "iar.semantic-frame/v1" }
@@ -35,6 +37,7 @@
       "provider": "mock",
       "modelId": "function-decision",
       "modelVersion": "mock-1",
+      "environment": { "endpoint": "IAR_JEV_ENDPOINT", "apiKey": "IAR_JEV_API_KEY", "modelId": "IAR_JEV_MODEL_ID" },
       "timeoutMs": 1000,
       "retryPolicy": { "maxAttempts": 2, "backoffMs": 20, "retryOn": ["timeout", "provider_unavailable"] },
       "fallbackProfileId": "function-decision-fallback",
@@ -49,6 +52,7 @@
       "provider": "mock",
       "modelId": "function-decision-fallback",
       "modelVersion": "mock-1",
+      "environment": { "endpoint": "IAR_JEV_ENDPOINT", "apiKey": "IAR_JEV_API_KEY", "modelId": "IAR_JEV_MODEL_ID" },
       "timeoutMs": 800,
       "retryPolicy": { "maxAttempts": 1, "backoffMs": 0, "retryOn": ["timeout"] },
       "structuredOutput": { "enabled": true, "schemaId": "iar.decision/v1" }
@@ -62,6 +66,7 @@
       "provider": "mock",
       "modelId": "plugin-decision",
       "modelVersion": "mock-1",
+      "environment": { "endpoint": "IAR_JEV_ENDPOINT", "apiKey": "IAR_JEV_API_KEY", "modelId": "IAR_JEV_MODEL_ID" },
       "timeoutMs": 1000,
       "retryPolicy": { "maxAttempts": 2, "backoffMs": 20, "retryOn": ["timeout", "provider_unavailable"] },
       "fallbackProfileId": "plugin-decision-fallback",
@@ -76,6 +81,7 @@
       "provider": "mock",
       "modelId": "plugin-decision-fallback",
       "modelVersion": "mock-1",
+      "environment": { "endpoint": "IAR_JEV_ENDPOINT", "apiKey": "IAR_JEV_API_KEY", "modelId": "IAR_JEV_MODEL_ID" },
       "timeoutMs": 800,
       "retryPolicy": { "maxAttempts": 1, "backoffMs": 0, "retryOn": ["timeout"] },
       "structuredOutput": { "enabled": true, "schemaId": "iar.decision/v1" }
@@ -89,6 +95,7 @@
       "provider": "intent-model",
       "modelId": "intent-model-placeholder",
       "modelVersion": "example-1",
+      "environment": { "endpoint": "IAR_INTENT_MODEL_ENDPOINT", "apiKey": "IAR_INTENT_MODEL_API_KEY", "modelId": "IAR_INTENT_MODEL_ID" },
       "timeoutMs": 1200,
       "retryPolicy": { "maxAttempts": 2, "backoffMs": 25, "retryOn": ["timeout", "provider_unavailable"] },
       "structuredOutput": { "enabled": true, "schemaId": "iar.decision/v1" }
@@ -102,6 +109,7 @@
       "provider": "intent-model",
       "modelId": "intent-model-placeholder",
       "modelVersion": "example-1",
+      "environment": { "endpoint": "IAR_INTENT_MODEL_ENDPOINT", "apiKey": "IAR_INTENT_MODEL_API_KEY", "modelId": "IAR_INTENT_MODEL_ID" },
       "timeoutMs": 1200,
       "retryPolicy": { "maxAttempts": 2, "backoffMs": 25, "retryOn": ["timeout", "provider_unavailable"] },
       "structuredOutput": { "enabled": true, "schemaId": "iar.decision/v1" }
@@ -114,6 +122,7 @@
       "provider": "mock",
       "modelId": "context-compactor",
       "modelVersion": "mock-1",
+      "environment": { "endpoint": "IAR_LLM_BASE_URL", "apiKey": "IAR_LLM_API_KEY", "modelId": "IAR_LLM_MODEL_ID" },
       "timeoutMs": 2000,
       "retryPolicy": { "maxAttempts": 2, "backoffMs": 30, "retryOn": ["timeout", "provider_unavailable"] },
       "fallbackProfileId": "context-compactor-fallback",
@@ -127,6 +136,7 @@
       "provider": "mock",
       "modelId": "context-compactor-fallback",
       "modelVersion": "mock-1",
+      "environment": { "endpoint": "IAR_LLM_BASE_URL", "apiKey": "IAR_LLM_API_KEY", "modelId": "IAR_LLM_MODEL_ID" },
       "timeoutMs": 1200,
       "retryPolicy": { "maxAttempts": 1, "backoffMs": 0, "retryOn": ["timeout"] },
       "structuredOutput": { "enabled": true, "schemaId": "iar.compaction/v1" }
@@ -139,6 +149,7 @@
       "provider": "mock",
       "modelId": "response-generator",
       "modelVersion": "mock-1",
+      "environment": { "endpoint": "IAR_LLM_BASE_URL", "apiKey": "IAR_LLM_API_KEY", "modelId": "IAR_LLM_MODEL_ID" },
       "timeoutMs": 1200,
       "retryPolicy": { "maxAttempts": 2, "backoffMs": 20, "retryOn": ["timeout", "provider_unavailable"] },
       "fallbackProfileId": "response-generator-fallback",
@@ -152,6 +163,7 @@
       "provider": "mock",
       "modelId": "response-generator-fallback",
       "modelVersion": "mock-1",
+      "environment": { "endpoint": "IAR_LLM_BASE_URL", "apiKey": "IAR_LLM_API_KEY", "modelId": "IAR_LLM_MODEL_ID" },
       "timeoutMs": 900,
       "retryPolicy": { "maxAttempts": 1, "backoffMs": 0, "retryOn": ["timeout"] },
       "structuredOutput": { "enabled": true, "schemaId": "iar.response/v1" }

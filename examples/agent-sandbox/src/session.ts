@@ -25,13 +25,18 @@ import {
 } from '@iar/contracts';
 import {
   ContextCompactorAdapter,
+  DecisionBackendResolver,
+  IntentModelDecisionAdapter,
+  JevDecisionAdapter,
   ModelGateway,
   ModelProfileRegistry,
-  MockDecisionProvider,
   ResponseGeneratorAdapter,
   SemanticExtractorAdapter,
+  UnifiedDecisionAdapter,
   loadModelProfiles,
+  type DecisionBackend,
   type DecisionRequest,
+  type ModelProvider,
   type SemanticFrame
 } from '@iar/decision';
 import { PluginHost } from '@iar/plugin-host';
@@ -40,6 +45,7 @@ import {
   BehaviorContextProjector,
   ContextCompactionService,
   TwoStageRouter,
+  type AsyncDecisionAdapter,
   type CompactionRequest,
   type RouteResult
 } from '@iar/runtime';
@@ -56,12 +62,15 @@ import { humanTransferPlugin } from '../../human-transfer/src/index.js';
 import { knowledgeQueryPlugin } from '../../knowledge-query/src/index.js';
 import { ticketCreatePlugin } from '../../ticket-create/src/index.js';
 import { SyncPluginBridge } from './execution/sync-plugin-bridge.js';
-import { BrainModelProvider } from './models/llm-provider.js';
+import { BrainModelProvider, IntentModelProvider } from './models/llm-provider.js';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
 import { sandboxFunctionRules, sandboxPluginRules } from './rules.js';
 
 /** sandbox 模式：brain 使用真实 LLM，scripted 使用离线假大脑。 */
 export type SandboxMode = 'brain' | 'scripted';
+
+/** sandbox 可选的决策 backend；默认保留 JEV 优先解析。 */
+export type SandboxDecisionBackend = DecisionBackend;
 
 /** 路由证据摘要，供调试面板展示。 */
 export type RouteEvidence = {
@@ -179,8 +188,8 @@ export class IarSandboxSession {
   private readonly mode: SandboxMode;
   private readonly pluginHost: PluginHost;
   private readonly gateway: ModelGateway;
-  private readonly functionProvider = createDecisionProvider();
-  private readonly pluginProvider = createDecisionProvider();
+  private readonly functionDecisionAdapter: AsyncDecisionAdapter;
+  private readonly pluginDecisionAdapter: AsyncDecisionAdapter;
   private readonly bridge = new SyncPluginBridge();
   private workflowEventLog = new WorkflowEventLog({ correlationId: SESSION_CORRELATION_ID });
   private workflow: LocalWorkflow;
@@ -201,19 +210,26 @@ export class IarSandboxSession {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
-  public constructor(options: { mode: SandboxMode }) {
+  public constructor(options: { mode: SandboxMode; decisionBackend?: SandboxDecisionBackend }) {
     this.mode = options.mode;
     this.pluginHost = new PluginHost({ functionIds: ['knowledge.query', 'ticket.create', 'human.transfer'] });
     for (const registration of [knowledgeQueryPlugin, ticketCreatePlugin, humanTransferPlugin]) {
       if (!this.pluginHost.install(registration).ok) throw new Error(`插件安装失败: ${registration.manifest.pluginId}`);
       if (!this.pluginHost.enable(registration.manifest.pluginId).ok) throw new Error(`插件启用失败: ${registration.manifest.pluginId}`);
     }
-    // scripted provider 同时绑定 mock 和 brain（scripted 模式下 brain profile 降级到本地假大脑）。
+    // scripted provider 负责普通交互；决策 profile 则绑定确定性 JSON provider，避免把 response/v1 当成 DecisionResult。
     const scripted = new ScriptedModelProvider();
     const brain = options.mode === 'brain' ? new BrainModelProvider() : scripted;
+    const scriptedDecision = createDecisionModelProvider();
+    const intent = options.mode === 'brain' ? new IntentModelProvider() : scriptedDecision;
     const configText = readFileSync(join(process.cwd(), 'examples', 'agent-sandbox', 'config', 'models.brain.json'), 'utf8');
-    const registry = new ModelProfileRegistry(loadModelProfiles(configText));
-    this.gateway = new ModelGateway({ registry, providers: { brain, mock: scripted } });
+    const configuredBackend = options.decisionBackend ?? readSandboxDecisionBackend();
+    const profiles = loadModelProfiles(configText).filter((profile) => profile.role !== 'function.select' && profile.role !== 'plugin.select' || configuredBackend === undefined || (profile.decisionBackend ?? 'jev') === configuredBackend);
+    const registry = new ModelProfileRegistry(profiles);
+    this.gateway = new ModelGateway({ registry, providers: { brain, mock: scriptedDecision, 'intent-model': intent } });
+    const resolver = new DecisionBackendResolver(registry);
+    this.functionDecisionAdapter = new UnifiedDecisionAdapter(resolver, new JevDecisionAdapter(this.gateway, 'function.select'), new IntentModelDecisionAdapter(this.gateway, 'function.select'));
+    this.pluginDecisionAdapter = new UnifiedDecisionAdapter(resolver, new JevDecisionAdapter(this.gateway, 'plugin.select'), new IntentModelDecisionAdapter(this.gateway, 'plugin.select'));
     this.workflow = this.createWorkflow();
   }
 
@@ -239,7 +255,9 @@ export class IarSandboxSession {
       return { status: 'failed', reply, route, reasonCode: extracted.error.code };
     }
     const frame = extracted.value;
-    const route = new TwoStageRouter().route({
+    const route = await new TwoStageRouter().routeAsync({
+      traceId,
+      runId,
       facts: buildFacts(frame),
       tenantId: 'tenant-sandbox',
       actorId: 'actor-sandbox',
@@ -247,8 +265,8 @@ export class IarSandboxSession {
       functionRules: sandboxFunctionRules,
       pluginRules: sandboxPluginRules,
       pluginHost: this.pluginHost,
-      functionProvider: this.functionProvider,
-      pluginProvider: this.pluginProvider,
+      functionDecisionAdapter: this.functionDecisionAdapter,
+      pluginDecisionAdapter: this.pluginDecisionAdapter,
       authorizePlugin: () => true
     });
     const evidence = buildEvidence(route, frame);
@@ -677,24 +695,32 @@ export class IarSandboxSession {
   }
 }
 
-/**
- * 创建把 provider 输出限制在当前候选集合的确定性 Mock provider。
- *
- * @returns 受统一 Decision 校验保护的 provider
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
-function createDecisionProvider(): MockDecisionProvider {
-  return new MockDecisionProvider((request: DecisionRequest) => ({
-    schemaVersion: SCHEMA_VERSIONS.decision,
-    decisionType: request.decisionType,
-    decisionVersion: request.decisionVersion,
-    status: 'choice',
-    choice: request.candidates[0]?.candidateId,
-    score: 0.99,
-    reasonCode: 'sandbox.choice',
-    candidateIds: request.candidates.map((candidate) => candidate.candidateId)
-  }));
+/** 读取 sandbox backend 选择，未配置时保持 JEV 优先的全量 registry。 */
+function readSandboxDecisionBackend(): SandboxDecisionBackend | undefined {
+  const value = process.env.IAR_SANDBOX_DECISION_BACKEND;
+  if (value === undefined || value.length === 0) return undefined;
+  if (value === 'jev' || value === 'intent-model') return value;
+  throw new Error('IAR_SANDBOX_DECISION_BACKEND 必须是 jev 或 intent-model');
+}
+
+/** 创建离线决策模型 provider，模拟 JEV/Intent Model 的统一 iar.decision/v1 输出。 */
+function createDecisionModelProvider(): ModelProvider {
+  return {
+    complete: async (request) => {
+      const input = request.input as { request?: DecisionRequest } & Partial<DecisionRequest>;
+      const decision = input.request ?? input as DecisionRequest;
+      return {
+        schemaVersion: SCHEMA_VERSIONS.decision,
+        decisionType: decision.decisionType,
+        decisionVersion: decision.decisionVersion,
+        status: 'choice',
+        choice: decision.candidates[0]?.candidateId,
+        score: 0.99,
+        reasonCode: 'sandbox.choice',
+        candidateIds: decision.candidates.map((candidate) => candidate.candidateId)
+      };
+    }
+  };
 }
 
 /**

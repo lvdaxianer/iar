@@ -25,6 +25,11 @@ npm run demo:sandbox
 | --- | --- | --- |
 | `IAR_LLM_API_KEY` | real 模式的 API Key（兼容 `IAR_MODEL_API_KEY`） | 无 |
 | `IAR_LLM_BASE_URL` | OpenAI 兼容接口地址 | `https://api.moonshot.cn/v1` |
+| `IAR_LLM_MODEL_ID` | 普通交互模型名称；profile 映射优先使用它 | profile `modelId` |
+| `IAR_INTENT_MODEL_ENDPOINT` | Intent Model 独立 OpenAI 兼容接口地址 | 无，缺失时 fail-closed |
+| `IAR_INTENT_MODEL_API_KEY` | Intent Model 独立 API Key | 无，缺失时 fail-closed |
+| `IAR_INTENT_MODEL_ID` | Intent Model 名称 | profile `modelId` |
+| `IAR_SANDBOX_DECISION_BACKEND` | 决策 backend：`jev` 或 `intent-model`；不设置时 JEV 优先 | JEV 优先 |
 | `IAR_SANDBOX_PORT` | 服务端口 | `8787` |
 
 ## 模型配置
@@ -33,12 +38,16 @@ npm run demo:sandbox
 
 | 字段 | 作用 |
 | --- | --- |
-| `role` | 模型角色：`semantic.extract` / `context.compact` / `response.generate` 走真实模型，`function.select` / `plugin.select` 保持 `mock`（确定性决策） |
-| `provider` | 用哪个 provider：`brain`（真实 LLM）或 `mock`（假大脑） |
-| `modelId` | **实际调用的模型名**。可以直接写模型名，也可以写 `"${IAR_SANDBOX_MODEL}"` 这样的环境变量引用（值从 `.env` 或环境变量解析，六个 brain profile 都要改） |
-| `timeoutMs` / `retryPolicy` | 超时与重试；`fallbackProfileId` 指向同角色的兜底 profile |
+| `role` | 模型角色：`semantic.extract` / `context.compact` / `response.generate` 使用普通交互模型；`function.select` / `plugin.select` 同时声明 JEV 和 Intent Model profile |
+| `decisionBackend` | 决策 profile 的 backend：`jev` 或 `intent-model`；同时存在时 JEV 固定优先 |
+| `provider` | 用哪个 provider：`brain`（普通交互模型）、`intent-model`（Intent Model）或 `mock`（离线确定性决策） |
+| `environment` | 非敏感环境变量名映射：`endpoint` / `apiKey` / `modelId`；变量值不写入 JSON |
+| `modelId` | profile 内的安全默认模型名；当 `environment.modelId` 指向的变量未设置时使用 |
+| `timeoutMs` / `retryPolicy` | 超时与重试；`fallbackProfileId` 指向同角色、同 backend 的兜底 profile |
 
-接口地址和密钥不进配置文件，用上面的环境变量。配置文件里的字符串值都支持 `"${VAR_NAME}"` 环境变量引用（由 IAR 的 `loadModelProfiles` 在加载时解析，引用的变量未设置会启动报错）；IAR 运行时的 `config/models.yaml` 同样支持该写法。
+接口地址、密钥和可变模型名通过 `environment` 映射从环境变量读取，不进配置文件。配置文件里的其他字符串值仍支持 `"${VAR_NAME}"` 环境变量引用（由 IAR 的 `loadModelProfiles` 在加载时解析，引用的变量未设置会启动报错）；IAR 运行时的 `config/models.yaml` 同样支持该写法。
+
+普通模型和 Intent Model 使用同一 OpenAI-compatible `chat/completions` JSON boundary。Intent Model 由 provider 固定注入 `iar.intent-decision-prompt/v1`，输出仍必须是 `iar.decision/v1`，因此切换 backend 不会改变路由结果结构。
 
 没有 API Key 时直接用 `npm run demo:sandbox -- --brain scripted`（或省略参数）即可离线体验。
 
