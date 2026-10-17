@@ -122,6 +122,155 @@ test('rejects invalid model profile configuration', () => {
   assert.throws(() => loadModelProfiles(withCrossRoleFallback));
 });
 
+/* 旧配置全部未声明 decisionBackend 时继续兼容，显式启用后则必须完整声明。 */
+test('keeps legacy selection profiles without decisionBackend compatible', () => {
+  const profiles = loadModelProfiles(configText());
+  const functionProfile = profiles.find((item) => item.role === 'function.select');
+  const pluginProfile = profiles.find((item) => item.role === 'plugin.select');
+  assert.ok(functionProfile);
+  assert.ok(pluginProfile);
+  assert.equal(Object.hasOwn(functionProfile, 'decisionBackend'), false);
+  assert.equal(Object.hasOwn(pluginProfile, 'decisionBackend'), false);
+});
+
+/* legacy selection 仍需按兼容 backend 校验 primary 关系，不能跳过关系图。 */
+test('rejects duplicate primary profiles in the legacy selection group', () => {
+  const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
+  config.profiles = config.profiles.filter((item) => item.role === 'function.select');
+  const primary = config.profiles[0];
+  assert.ok(primary);
+  config.profiles.push({ ...primary, profileId: 'legacy-function-secondary-primary', fallbackProfileId: undefined });
+
+  assert.throws(() => new ModelProfileRegistry(config.profiles as never), /同一 role\/decisionBackend 只能有一个 primary profile/);
+});
+
+/* 非选择 role 即使字段值为 undefined，也不能通过 own property 伪装成缺失。 */
+test('rejects an own undefined decisionBackend on non-selection roles', () => {
+  const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
+  config.profiles = config.profiles.filter((item) => item.role === 'semantic.extract');
+  const profile = config.profiles[0];
+  assert.ok(profile);
+  profile.decisionBackend = undefined;
+  assert.equal(Object.hasOwn(profile, 'decisionBackend'), true);
+
+  assert.throws(() => new ModelProfileRegistry(config.profiles as never), /模型 profile 无效/);
+});
+
+/* selection role 只有完全没有字段时才享受 legacy 兼容，显式 undefined 必须拒绝。 */
+test('rejects an own undefined decisionBackend on selection roles', () => {
+  const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
+  config.profiles = config.profiles.filter((item) => item.role === 'function.select');
+  const primary = config.profiles[0];
+  assert.ok(primary);
+  primary.decisionBackend = undefined;
+  assert.equal(Object.hasOwn(primary, 'decisionBackend'), true);
+
+  assert.throws(() => new ModelProfileRegistry(config.profiles as never), /模型 profile 无效/);
+});
+
+/* Function 和 Plugin 选择 profile 只能声明受限的决策后端。 */
+test('accepts decisionBackend on function and plugin selection profiles', () => {
+  const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
+  config.profiles.filter((item) => item.role === 'function.select').forEach((item) => { item.decisionBackend = 'jev'; });
+  config.profiles.filter((item) => item.role === 'plugin.select').forEach((item) => { item.decisionBackend = 'intent-model'; });
+
+  const profiles = loadModelProfiles(config);
+  assert.deepEqual(profiles.filter((item) => item.role === 'function.select').map((item) => item.decisionBackend), ['jev', 'jev']);
+  assert.deepEqual(profiles.filter((item) => item.role === 'plugin.select').map((item) => item.decisionBackend), ['intent-model', 'intent-model']);
+});
+
+/* 未知 backend 不得绕过决策后端白名单。 */
+test('rejects unknown decisionBackend values', () => {
+  const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
+  config.profiles = config.profiles.filter((item) => item.role === 'function.select');
+  config.profiles.forEach((item) => { item.decisionBackend = 'unknown-backend'; });
+
+  assert.throws(() => new ModelProfileRegistry(config.profiles as never), /模型 profile 无效/);
+});
+
+/* 同一 role/backend 下只能存在一个不被 fallback 引用的 primary profile。 */
+test('rejects duplicate primary profiles for the same role and decisionBackend', () => {
+  const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
+  config.profiles = config.profiles.filter((item) => item.role === 'function.select');
+  config.profiles.forEach((item) => { item.decisionBackend = 'jev'; });
+  const primary = config.profiles[0];
+  assert.ok(primary);
+  config.profiles.push({ ...primary, profileId: 'function-decision-secondary-primary', fallbackProfileId: undefined });
+
+  assert.throws(() => new ModelProfileRegistry(config.profiles as never), /同一 role\/decisionBackend 只能有一个 primary profile/);
+});
+
+/* fallback 必须保持同一 role/backend，避免隐式跨后端切换。 */
+test('rejects fallback profiles that point to another decisionBackend', () => {
+  const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
+  config.profiles = config.profiles.filter((item) => item.role === 'function.select');
+  const primary = config.profiles[0];
+  const fallback = config.profiles[1];
+  assert.ok(primary);
+  assert.ok(fallback);
+  primary.decisionBackend = 'jev';
+  fallback.decisionBackend = 'intent-model';
+
+  assert.throws(() => new ModelProfileRegistry(config.profiles as never), /fallback profile 必须保持同一 role\/decisionBackend/);
+});
+
+/* fallback 图不得形成环，否则不存在可审计的 primary 链。 */
+test('rejects fallback cycles within a role and decisionBackend group', () => {
+  const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
+  config.profiles = config.profiles.filter((item) => item.role === 'function.select');
+  const primary = config.profiles[0];
+  const fallback = config.profiles[1];
+  assert.ok(primary);
+  assert.ok(fallback);
+  primary.decisionBackend = 'jev';
+  fallback.decisionBackend = 'jev';
+  primary.fallbackProfileId = String(fallback.profileId);
+  fallback.fallbackProfileId = String(primary.profileId);
+
+  assert.throws(() => new ModelProfileRegistry(config.profiles as never), /fallback 环/);
+});
+
+/* 同一 role 的不同 backend 各自拥有 primary 时，不应被混合判重。 */
+test('allows one primary per backend within the same role', () => {
+  const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
+  config.profiles = config.profiles.filter((item) => item.role === 'function.select');
+  const primary = config.profiles[0];
+  const fallback = config.profiles[1];
+  assert.ok(primary);
+  assert.ok(fallback);
+  primary.decisionBackend = 'jev';
+  fallback.decisionBackend = 'jev';
+  const intentFallbackId = 'function-decision-intent-fallback';
+  config.profiles.push(
+    { ...primary, profileId: 'function-decision-intent-primary', decisionBackend: 'intent-model', fallbackProfileId: intentFallbackId },
+    { ...fallback, profileId: intentFallbackId, decisionBackend: 'intent-model', fallbackProfileId: undefined }
+  );
+
+  assert.doesNotThrow(() => new ModelProfileRegistry(config.profiles as never));
+});
+
+/* 非选择 role 不得携带只对决策选择有效的 backend 字段。 */
+test('rejects decisionBackend on non-selection roles', () => {
+  const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
+  config.profiles = config.profiles.filter((item) => item.role === 'semantic.extract');
+  const profile = config.profiles[0];
+  assert.ok(profile);
+  profile.decisionBackend = 'jev';
+
+  assert.throws(() => new ModelProfileRegistry(config.profiles as never), /模型 profile 无效/);
+});
+
+/* 显式启用 backend 后，选择 role 缺失字段必须 fail-closed。 */
+test('rejects selection roles missing decisionBackend in an explicit backend configuration', () => {
+  const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
+  config.profiles = config.profiles.filter((item) => item.role === 'function.select');
+  const primary = config.profiles[0];
+  assert.ok(primary);
+  primary.decisionBackend = 'jev';
+
+  assert.throws(() => new ModelProfileRegistry(config.profiles as never), /选择 role 必须声明 decisionBackend/);
+});
+
 /* 配置文本中的 ${VAR} 引用必须从环境变量解析，缺失时 fail-closed。 */
 test('resolves ${VAR} environment references and fails closed when missing', () => {
   const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
