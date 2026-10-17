@@ -6,6 +6,7 @@
  */
 import type { JsonValue } from '@iar/contracts';
 import type { ModelAuditEntry, ModelAuditOutcome, ModelProfile, ModelProfileRegistry } from '../model-profile.js';
+import type { DecisionBackend } from '../types.js';
 
 /** 供 provider 读取但不能修改的递归快照类型。 */
 export type DeepReadonly<T> = T extends (...args: never[]) => unknown ? T : T extends readonly (infer U)[] ? readonly DeepReadonly<U>[] : T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } : T;
@@ -60,7 +61,10 @@ export class ModelProviderError extends Error {
 }
 
 /** ModelGateway 对外返回的稳定错误分类。 */
-export type ModelGatewayErrorCode = 'model.invalid_request' | 'model.no_provider' | 'model.timeout' | 'model.provider_failed' | 'model.schema_invalid' | 'model.threshold_rejected' | 'model.fallback_failed';
+export type ModelGatewayErrorCode = 'model.invalid_request' | 'model.no_profile' | 'model.no_provider' | 'model.timeout' | 'model.provider_failed' | 'model.schema_invalid' | 'model.threshold_rejected' | 'model.fallback_failed';
+
+/** 决策 backend 未配置时对外使用的稳定错误摘要。 */
+export const MODEL_NO_PROFILE_MESSAGE = '决策模型 backend 未配置';
 
 /** 不暴露 provider 原始 message 的模型错误。 */
 export type ModelGatewayError = {
@@ -97,6 +101,19 @@ export type ModelInvocation = {
   runId: string;
   /** 交给 provider 的 JSON 输入。 */
   input: JsonValue;
+};
+
+/**
+ * ModelGateway 的可选决策后端选择参数。
+ *
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-17
+ */
+export type ModelGatewayInvocationOptions = {
+  /** 选择 role 使用的决策后端。 */
+  decisionBackend?: DecisionBackend;
+  /** 已由 resolver 解析出的 primary profile 标识。 */
+  profileId?: string;
 };
 
 /** gateway 执行器的公开配置。 */
