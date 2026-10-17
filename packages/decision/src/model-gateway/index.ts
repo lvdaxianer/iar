@@ -7,4 +7,5 @@
 export * from './types.js';
 export * from './gateway.js';
 export * from './adapters.js';
+export * from './decision-backend.js';
 export * from '../model-profile.js';
