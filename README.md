@@ -9,6 +9,7 @@ IAR（Intent Action Runtime）是一个面向可恢复行为执行的 TypeScript
 - 版本化 ABI、Manifest、Function/Plugin 契约与 Schema 校验
 - 基于 EventLog 的 BehaviorContext 投影、重放、压缩校验和幂等执行
 - Function → Plugin 两阶段路由，以及可解释的复合规则和类型化决策
+- JEV 优先、Intent Model 可替代的统一决策后端；两者都返回同一 `iar.decision/v1`
 - Policy Gate、确认范围、权限校验和本地 Workflow 状态机
 - Fastify API、Service、Sidecar、CLI、PostgreSQL 与 SQLite 适配器
 - 插件隔离执行、签名分发、版本升级、回滚和多租户边界
@@ -65,10 +66,35 @@ docs/                     # 完整架构说明与实现审计
 - 短动作默认使用本地确定性运行时；只有明确的定时器、跨服务或补偿需求才进入 Durable Runtime。
 - 插件卸载撤销当前注册但保留历史事件，升级失败时恢复精确的上一版本。
 
+## 决策模型兼容切换
+
+Function 和 Plugin 决策都经过 `ModelGateway` 与 `UnifiedDecisionAdapter`。JEV 与 Intent Model 是平行 backend，但下游只看到同一个 `DecisionResult`，不会因为切换模型而改变路由字段：
+
+```json
+{
+  "schemaVersion": "iar.decision/v1",
+  "decisionType": "function.select",
+  "decisionVersion": "runtime.v1",
+  "status": "choice",
+  "choice": "candidate-id",
+  "score": 0.95,
+  "reasonCode": "intent_match",
+  "candidateIds": ["candidate-id"]
+}
+```
+
+- 同一决策阶段同时配置两个 backend 时固定选择 JEV；没有 JEV primary 时才选择 Intent Model。
+- Intent Model 使用固定 Prompt `iar.intent-decision-prompt/v1`，要求只返回 JSON、原样保留有序 `candidateIds`，不得新增候选、授予能力、授权动作或执行插件。
+- 低分或歧义结果仍是 `needs_clarification`，不会自动切换成另一条可执行选择。
+- backend 只提供候选选择建议；Function-first、Plugin ownership、租户/用户/环境授权、Manifest capability 和最终 Policy/Confirmation 复核仍由 Runtime 完成。
+- 跨 backend fallback 默认关闭；只有调用方显式设置 `crossBackendFallback: true`，并且发生 provider/timeout 类失败时才允许降级。
+
+配置示例见 [`config/models.yaml`](config/models.yaml)，模型接入环境变量见 [`.env.example`](.env.example)。
+
 ## 文档与验证
 
 - [完整架构与能力边界](docs/README.md)
 - [Phase 1～5 最终实现审计](docs/implementation-audits/phase-1-5-final.md)
 - [已归档的 OpenSpec 计划](openspec/changes/archive/2026-10-17-iar-five-phase-roadmap/tasks.md)
 
-最终验证结果：`npm run lint`、`npm run build` 通过，`npm test` 为 **237/237 PASS**；Phase 5 的 durable、distribution、compatibility focused tests 为 **56/56 PASS**。
+最终验证结果：`npm run lint`、`npm run build` 通过，`npm test` 为 **296/296 PASS**；模型决策、路由和安全 focused tests 也全部通过。

@@ -74,7 +74,7 @@ test('loads versioned model profiles and keeps audit output redacted', () => {
   assert.equal(audit.modelVersion, profile.modelVersion);
   assert.equal(JSON.stringify(audit).includes('stop test1'), false);
   assert.equal(JSON.stringify(audit).includes('secret-key'), false);
-  assert.deepEqual(registry.list().map((item) => item.role), ['semantic.extract', 'semantic.extract', 'function.select', 'function.select', 'plugin.select', 'plugin.select', 'context.compact', 'context.compact', 'response.generate', 'response.generate']);
+  assert.deepEqual(registry.list().map((item) => item.role), ['semantic.extract', 'semantic.extract', 'function.select', 'function.select', 'plugin.select', 'plugin.select', 'function.select', 'plugin.select', 'context.compact', 'context.compact', 'response.generate', 'response.generate']);
   assert.equal(profile.fallbackProfileId, 'semantic-extractor-fallback');
   const fallbackAudit = new ModelAuditRecorder(registry).record({ traceId: 'trace-fallback', runId: 'run-fallback', role: profile.role, outcome: 'fallback', fallbackUsed: true, attempt: 1, metadata: { reason: 'timeout' } });
   assert.equal(fallbackAudit.profileId, 'semantic-extractor-fallback');
@@ -124,7 +124,10 @@ test('rejects invalid model profile configuration', () => {
 
 /* 旧配置全部未声明 decisionBackend 时继续兼容，显式启用后则必须完整声明。 */
 test('keeps legacy selection profiles without decisionBackend compatible', () => {
-  const profiles = loadModelProfiles(configText());
+  const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
+  config.profiles = config.profiles.filter((item) => item.profileId === 'function-decision-primary' || item.profileId === 'function-decision-fallback' || item.profileId === 'plugin-decision-primary' || item.profileId === 'plugin-decision-fallback');
+  config.profiles.forEach((item) => { delete item.decisionBackend; });
+  const profiles = loadModelProfiles(config);
   const functionProfile = profiles.find((item) => item.role === 'function.select');
   const pluginProfile = profiles.find((item) => item.role === 'plugin.select');
   assert.ok(functionProfile);
@@ -136,7 +139,7 @@ test('keeps legacy selection profiles without decisionBackend compatible', () =>
 /* legacy selection 仍需按兼容 backend 校验 primary 关系，不能跳过关系图。 */
 test('rejects duplicate primary profiles in the legacy selection group', () => {
   const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
-  config.profiles = config.profiles.filter((item) => item.role === 'function.select');
+  config.profiles = config.profiles.filter((item) => item.profileId === 'function-decision-primary' || item.profileId === 'function-decision-fallback');
   const primary = config.profiles[0];
   assert.ok(primary);
   config.profiles.push({ ...primary, profileId: 'legacy-function-secondary-primary', fallbackProfileId: undefined });
@@ -159,7 +162,7 @@ test('rejects an own undefined decisionBackend on non-selection roles', () => {
 /* selection role 只有完全没有字段时才享受 legacy 兼容，显式 undefined 必须拒绝。 */
 test('rejects an own undefined decisionBackend on selection roles', () => {
   const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
-  config.profiles = config.profiles.filter((item) => item.role === 'function.select');
+  config.profiles = config.profiles.filter((item) => item.profileId === 'function-decision-primary' || item.profileId === 'function-decision-fallback');
   const primary = config.profiles[0];
   assert.ok(primary);
   primary.decisionBackend = undefined;
@@ -171,18 +174,18 @@ test('rejects an own undefined decisionBackend on selection roles', () => {
 /* Function 和 Plugin 选择 profile 只能声明受限的决策后端。 */
 test('accepts decisionBackend on function and plugin selection profiles', () => {
   const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
-  config.profiles.filter((item) => item.role === 'function.select').forEach((item) => { item.decisionBackend = 'jev'; });
-  config.profiles.filter((item) => item.role === 'plugin.select').forEach((item) => { item.decisionBackend = 'intent-model'; });
+  config.profiles.filter((item) => item.role === 'function.select').forEach((item) => { item.decisionBackend = item.profileId === 'function-decision-primary' || item.profileId === 'function-decision-fallback' ? 'jev' : 'intent-model'; });
+  config.profiles.filter((item) => item.role === 'plugin.select').forEach((item) => { item.decisionBackend = item.profileId === 'plugin-decision-primary' || item.profileId === 'plugin-decision-fallback' ? 'jev' : 'intent-model'; });
 
   const profiles = loadModelProfiles(config);
-  assert.deepEqual(profiles.filter((item) => item.role === 'function.select').map((item) => item.decisionBackend), ['jev', 'jev']);
-  assert.deepEqual(profiles.filter((item) => item.role === 'plugin.select').map((item) => item.decisionBackend), ['intent-model', 'intent-model']);
+  assert.deepEqual(profiles.filter((item) => item.role === 'function.select').map((item) => item.decisionBackend), ['jev', 'jev', 'intent-model']);
+  assert.deepEqual(profiles.filter((item) => item.role === 'plugin.select').map((item) => item.decisionBackend), ['jev', 'jev', 'intent-model']);
 });
 
 /* 未知 backend 不得绕过决策后端白名单。 */
 test('rejects unknown decisionBackend values', () => {
   const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
-  config.profiles = config.profiles.filter((item) => item.role === 'function.select');
+  config.profiles = config.profiles.filter((item) => item.profileId === 'function-decision-primary' || item.profileId === 'function-decision-fallback');
   config.profiles.forEach((item) => { item.decisionBackend = 'unknown-backend'; });
 
   assert.throws(() => new ModelProfileRegistry(config.profiles as never), /模型 profile 无效/);
@@ -191,7 +194,7 @@ test('rejects unknown decisionBackend values', () => {
 /* 同一 role/backend 下只能存在一个不被 fallback 引用的 primary profile。 */
 test('rejects duplicate primary profiles for the same role and decisionBackend', () => {
   const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
-  config.profiles = config.profiles.filter((item) => item.role === 'function.select');
+  config.profiles = config.profiles.filter((item) => item.profileId === 'function-decision-primary' || item.profileId === 'function-decision-fallback');
   config.profiles.forEach((item) => { item.decisionBackend = 'jev'; });
   const primary = config.profiles[0];
   assert.ok(primary);
@@ -203,7 +206,7 @@ test('rejects duplicate primary profiles for the same role and decisionBackend',
 /* fallback 必须保持同一 role/backend，避免隐式跨后端切换。 */
 test('rejects fallback profiles that point to another decisionBackend', () => {
   const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
-  config.profiles = config.profiles.filter((item) => item.role === 'function.select');
+  config.profiles = config.profiles.filter((item) => item.profileId === 'function-decision-primary' || item.profileId === 'function-decision-fallback');
   const primary = config.profiles[0];
   const fallback = config.profiles[1];
   assert.ok(primary);
@@ -217,7 +220,7 @@ test('rejects fallback profiles that point to another decisionBackend', () => {
 /* fallback 图不得形成环，否则不存在可审计的 primary 链。 */
 test('rejects fallback cycles within a role and decisionBackend group', () => {
   const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
-  config.profiles = config.profiles.filter((item) => item.role === 'function.select');
+  config.profiles = config.profiles.filter((item) => item.profileId === 'function-decision-primary' || item.profileId === 'function-decision-fallback');
   const primary = config.profiles[0];
   const fallback = config.profiles[1];
   assert.ok(primary);
@@ -233,7 +236,7 @@ test('rejects fallback cycles within a role and decisionBackend group', () => {
 /* 同一 role 的不同 backend 各自拥有 primary 时，不应被混合判重。 */
 test('allows one primary per backend within the same role', () => {
   const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
-  config.profiles = config.profiles.filter((item) => item.role === 'function.select');
+  config.profiles = config.profiles.filter((item) => item.profileId === 'function-decision-primary' || item.profileId === 'function-decision-fallback');
   const primary = config.profiles[0];
   const fallback = config.profiles[1];
   assert.ok(primary);
@@ -267,6 +270,9 @@ test('rejects selection roles missing decisionBackend in an explicit backend con
   const primary = config.profiles[0];
   assert.ok(primary);
   primary.decisionBackend = 'jev';
+  const fallback = config.profiles[1];
+  assert.ok(fallback);
+  delete fallback.decisionBackend;
 
   assert.throws(() => new ModelProfileRegistry(config.profiles as never), /选择 role 必须声明 decisionBackend/);
 });

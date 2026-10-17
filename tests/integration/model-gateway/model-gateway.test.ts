@@ -156,7 +156,7 @@ function compactionResult(): CompactionResult {
 function dualDecisionRegistry(): ModelProfileRegistry {
   const profiles = loadModelProfiles(readFileSync(join(process.cwd(), 'config', 'models.yaml'), 'utf8'));
   const selection = profiles.filter((profile) => profile.role === 'function.select' || profile.role === 'plugin.select');
-  const withoutFallback = selection.filter((profile) => profile.profileId.endsWith('-primary'));
+  const withoutFallback = selection.filter((profile) => profile.profileId === 'function-decision-primary' || profile.profileId === 'plugin-decision-primary');
   assert.equal(withoutFallback.length, 2);
   const decisionProfiles = withoutFallback.map((profile) => {
     const { fallbackProfileId: _fallbackProfileId, ...primary } = profile;
@@ -171,7 +171,7 @@ function dualDecisionRegistry(): ModelProfileRegistry {
 /** 创建保留 JEV 同 backend fallback 的双 backend registry，验证 fallback 顺序。 @returns 带 JEV fallback 的 registry @author lvdaxianer@yeah.net @date 2026-10-17 */
 function dualDecisionRegistryWithJevFallback(): ModelProfileRegistry {
   const profiles = loadModelProfiles(readFileSync(join(process.cwd(), 'config', 'models.yaml'), 'utf8'));
-  const decisionProfiles = profiles.filter((profile) => profile.role === 'function.select' || profile.role === 'plugin.select').map((profile) => ({ ...profile, decisionBackend: 'jev' as const }));
+  const decisionProfiles = profiles.filter((profile) => profile.profileId === 'function-decision-primary' || profile.profileId === 'function-decision-fallback' || profile.profileId === 'plugin-decision-primary' || profile.profileId === 'plugin-decision-fallback').map((profile) => ({ ...profile, decisionBackend: 'jev' as const }));
   const primary = decisionProfiles.find((profile) => profile.profileId === 'function-decision-primary');
   assert.ok(primary);
   const { fallbackProfileId: _fallbackProfileId, ...intentProfile } = primary;

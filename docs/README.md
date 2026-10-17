@@ -233,7 +233,7 @@ IAR 将模型决策与文本生成分离：
 | `policy.evaluate` | 评估风险、权限、确认和审批条件 | 规则/策略引擎，必要时 JEV |
 | `response.generate` | 生成面向用户或宿主的自然语言结果 | 通用大模型适配器或宿主 |
 
-JEV 只接收有限候选和结构化输入，输出 `choice`、`score` 或 `noul` 等可校验结果。IAR 负责阈值、回退、审计和副作用，不把 JEV 的输出直接当成执行授权。
+JEV 和 Intent Model 都只接收有限候选和结构化输入，输出同一 `iar.decision/v1` 的 `choice`、`score` 或 `noul` 等可校验结果。IAR 负责 backend 优先级、阈值、回退、审计和副作用，不把任一模型的输出直接当成执行授权。
 
 ## 5. 两阶段功能路由
 
@@ -302,7 +302,7 @@ JEV 的输入只能是候选 Function 及其结构化描述，返回：
 
 ### 5.2 第二阶段：确定 Plugin
 
-Function 确定后，Registry 只加载该 Function 的已启用、版本固定、能力允许的插件。系统把插件的名称、描述、输入 Schema、能力和限制提供给决策适配器，由 JEV 在封闭候选集中选择：
+Function 确定后，Registry 只加载该 Function 的已启用、版本固定、能力允许的插件。系统把插件的名称、描述、输入 Schema、能力和限制提供给统一决策适配器，由 JEV 或 Intent Model 在封闭候选集中选择：
 
 ```json
 {
@@ -318,7 +318,36 @@ Function 确定后，Registry 只加载该 Function 的已启用、版本固定�
 
 插件选择后仍需经过 Policy Gate。模型只能提出选择，不能授予自己能力、修改参数约束或跳过确认。
 
-### 5.3 三类常见路由
+### 5.3 统一决策 backend 与返回契约
+
+`function.select` 和 `plugin.select` 支持两个平行 backend：JEV 与 Intent Model。它们都经过 `ModelGateway`，最终返回相同的 `ModelGatewayResult<DecisionResult>`，路由层无需知道当前使用哪一种模型。
+
+```json
+{
+  "schemaVersion": "iar.decision/v1",
+  "decisionType": "function.select",
+  "decisionVersion": "runtime.v1",
+  "status": "choice",
+  "choice": "candidate-id",
+  "score": 0.95,
+  "reasonCode": "intent_match",
+  "candidateIds": ["candidate-id"]
+}
+```
+
+规则固定如下：
+
+1. 同一 role 同时存在 JEV 和 Intent Model primary 时，resolver 只选择 JEV，不并行调用 Intent Model；
+2. JEV 缺失时才使用 Intent Model；配置示例中的 Intent profile 因 JEV 优先规则默认不会被选中；
+3. Intent Model 使用固定 Prompt 版本 `iar.intent-decision-prompt/v1`，要求 JSON-only、原样复制 `decisionType`、`decisionVersion` 和有序 `candidateIds`；
+4. Intent Model 不得新增候选、授予 capability、进行授权、调用工具或执行插件；未知 choice、候选集改写、版本不匹配和非法 JSON 都在 provider 结果边界被拒绝；
+5. 低分或不可区分候选统一收敛为 `needs_clarification`，不会跨 backend 猜测另一个 choice；
+6. backend 只产生路由证据，最终 Function-first、Plugin ownership、候选重建、tenant/actor/environment 授权、Manifest capability 和 Policy/Confirmation 复核不变；
+7. 跨 backend fallback 默认关闭，只有调用方显式设置 `crossBackendFallback: true`，并且发生 provider/timeout/no-provider 类失败时才允许尝试另一 backend。
+
+完整模型 profile 见 [`config/models.yaml`](../config/models.yaml)，环境变量占位见 [`.env.example`](../.env.example)。
+
+### 5.4 三类常见路由
 
 | 用户目标 | Function 示例 | 路由结果 |
 | --- | --- | --- |
@@ -651,12 +680,12 @@ IAR 的 Node.js 参考实现采用“轻 HTTP 框架 + 自有运行时内核”�
 | 模型角色 | 配置键 | 职责 | 是否允许执行副作用 |
 | --- | --- | --- | --- |
 | 语义模型 | `semanticExtractor` | 抽取主语、动作、意图、实体、槽位和指代关系 | 否 |
-| Function 决策模型 | `functionDecision` | 在规则给出的 Function 候选中选择或澄清 | 否 |
-| Plugin 决策模型 | `pluginDecision` | 在当前 Function 的授权插件中选择或拒绝 | 否 |
+| Function 决策模型 | `functionDecision` | 在规则给出的 Function 候选中选择或澄清；JEV 优先，Intent Model 可替代 | 否 |
+| Plugin 决策模型 | `pluginDecision` | 在当前 Function 的授权插件中选择或拒绝；JEV 优先，Intent Model 可替代 | 否 |
 | 上下文压缩模型 | `contextCompactor` | 按固定契约压缩历史消息并保留行为状态 | 否 |
 | 回复模型 | `responseGenerator` | 生成澄清问题、执行结果和用户可读说明 | 否 |
 
-其中 `functionDecision` 和 `pluginDecision` 默认使用 JEV Adapter。JEV 只返回结构化选择、评分或 `noul`，不能调用插件、修改上下文或授予权限。
+其中 `functionDecision` 和 `pluginDecision` 通过 `UnifiedDecisionAdapter` 选择 backend。默认优先 JEV；JEV 不存在时使用 Intent Model。两者只返回结构化选择、评分、澄清或 `noul`，不能调用插件、修改上下文或授予权限。
 
 ### 10.3 模型配置位置
 
@@ -679,8 +708,8 @@ config/
 IarRuntime
   -> ModelGateway
       -> semantic.extract       -> semanticExtractor Profile -> LLM Adapter
-      -> function.select         -> functionDecision Profile  -> JEV Adapter
-      -> plugin.select           -> pluginDecision Profile   -> JEV Adapter
+      -> function.select         -> functionDecision Profile  -> UnifiedDecisionAdapter (JEV > Intent Model)
+      -> plugin.select           -> pluginDecision Profile   -> UnifiedDecisionAdapter (JEV > Intent Model)
       -> response.generate       -> responseGenerator Profile -> LLM Adapter
 ```
 
@@ -694,7 +723,7 @@ IarRuntime
 | 插件宿主 | `IarPluginHost` 抽象，Cordis-inspired Adapter | 借鉴插件树、生命周期和可撤销注册；业务代码不直接依赖框架 |
 | API | Fastify | 轻量、插件化、适合复用 Schema 做校验和序列化 |
 | Schema | JSON Schema + TypeBox + Ajv | 同时覆盖 TypeScript 编译期、运行时、远程插件和模型参数校验 |
-| 决策 | JEV Adapter | 仅提供 Choice/Score/Noul 等类型化判断；不承担文本生成 |
+| 决策 | JEV + Intent Model Adapter | 返回同一 `iar.decision/v1`；仅提供 Choice/Score/Noul 等类型化判断；不承担文本生成或授权 |
 | 语义抽取 | `SemanticExtractor` 接口 + 通用模型 Adapter | 保持供应商可替换；模型输出必须先过 Schema 校验 |
 | 状态存储 | PostgreSQL；SQLite Embedded Adapter | PostgreSQL 用于服务化，SQLite 用于本地嵌入；Redis 只做缓存 |
 | 事件总线 | 进程内 typed event bus | MVP 降低依赖；跨服务时再增加消息适配器 |
