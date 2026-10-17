@@ -30,7 +30,7 @@ function configText(): string {
  */
 function selectionProfileConfig(role: 'function.select' | 'plugin.select'): Array<Record<string, unknown>> {
   const parsed = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
-  return parsed.profiles.filter((profile) => profile.role === role).map((profile) => ({ ...profile }));
+  return parsed.profiles.filter((profile) => (profile.profileId === `${role === 'function.select' ? 'function' : 'plugin'}-decision-primary` || profile.profileId === `${role === 'function.select' ? 'function' : 'plugin'}-decision-fallback`) && profile.role === role).map((profile) => ({ ...profile }));
 }
 
 /* 同一 role 同时有两个 primary 时，resolver 只能返回 JEV。 */
@@ -85,6 +85,8 @@ test('resolves legacy selection profiles as JEV without rewriting profile fields
   const fallback = profiles.find((profile) => profile.profileId === 'function-decision-fallback');
   assert.ok(primary);
   assert.ok(fallback);
+  delete primary.decisionBackend;
+  delete fallback.decisionBackend;
   const registry = new ModelProfileRegistry(loadModelProfiles({ configVersion: 'iar.models/v1', profiles: [fallback, primary] }));
 
   const resolution = new DecisionBackendResolver(registry).resolve('function.select');

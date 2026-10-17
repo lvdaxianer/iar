@@ -154,14 +154,14 @@ function routeRequest(overrides: Partial<RouteRequest> = {}): RouteRequest {
 
 /** 创建真实 UnifiedDecisionAdapter 的 Intent-only Function/Plugin pair，供异步路由集成验证。 @returns 两阶段异步模型适配器 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function intentOnlyAdapters(): { functionDecisionAdapter: AsyncDecisionAdapter; pluginDecisionAdapter: AsyncDecisionAdapter } {
-  const profiles = loadModelProfiles(readFileSync(join(process.cwd(), 'config', 'models.yaml'), 'utf8')).map((profile) => profile.role === 'function.select' || profile.role === 'plugin.select' ? { ...profile, decisionBackend: 'intent-model' as const } : profile);
+  const profiles = loadModelProfiles(readFileSync(join(process.cwd(), 'config', 'models.yaml'), 'utf8')).filter((profile) => profile.role !== 'function.select' && profile.role !== 'plugin.select' || profile.profileId === 'function-intent-model-primary' || profile.profileId === 'plugin-intent-model-primary').map((profile) => profile.role === 'function.select' || profile.role === 'plugin.select' ? { ...profile, decisionBackend: 'intent-model' as const } : profile);
   const modelRegistry = new ModelProfileRegistry(profiles);
   const provider: ModelProvider = { complete: async (request) => {
     const prompt = request.input as unknown as { request: DecisionRequest };
     const decision = prompt.request;
     return { schemaVersion: SCHEMA_VERSIONS.decision, decisionType: decision.decisionType, decisionVersion: decision.decisionVersion, status: 'choice', choice: decision.candidates[0]?.candidateId, score: 0.99, reasonCode: 'intent_match', candidateIds: decision.candidates.map((candidate) => candidate.candidateId) };
   } };
-  const gateway = new ModelGateway({ registry: modelRegistry, providers: { mock: provider } });
+  const gateway = new ModelGateway({ registry: modelRegistry, providers: { 'intent-model': provider } });
   const functionAdapter = new UnifiedDecisionAdapter(new DecisionBackendResolver(modelRegistry), new JevDecisionAdapter(gateway, 'function.select'), new IntentModelDecisionAdapter(gateway, 'function.select'));
   const pluginAdapter = new UnifiedDecisionAdapter(new DecisionBackendResolver(modelRegistry), new JevDecisionAdapter(gateway, 'plugin.select'), new IntentModelDecisionAdapter(gateway, 'plugin.select'));
   return { functionDecisionAdapter: functionAdapter, pluginDecisionAdapter: pluginAdapter };
