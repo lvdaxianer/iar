@@ -33,6 +33,7 @@
  * provider 失败、超时和 fallback 只保留稳定分类，不保留模型正文。
  * 测试覆盖请求脱敏和审计脱敏两条边界，避免调用方遗漏处理。
  * 该测试文件不验证真实 provider 适配器，真实调用属于后续任务。
+ * 配置文本支持 ${VAR} 环境变量引用，引用值在 JSON 解析前注入，缺失时必须 fail-closed。
  * 每个非法配置分支都断言抛错，保证 fail-closed 行为可回归。
  * 共享引用测试确认递归状态在兄弟节点之间被清理。
  * 敏感字段测试确认大小写无关的 denylist 行为。
@@ -119,6 +120,28 @@ test('rejects invalid model profile configuration', () => {
   assert.ok(crossRoleSource);
   crossRoleSource.fallbackProfileId = 'function-decision-fallback';
   assert.throws(() => loadModelProfiles(withCrossRoleFallback));
+});
+
+/* 配置文本中的 ${VAR} 引用必须从环境变量解析，缺失时 fail-closed。 */
+test('resolves ${VAR} environment references and fails closed when missing', () => {
+  const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
+  config.profiles = config.profiles.slice(0, 1);
+  const only = config.profiles[0];
+  assert.ok(only);
+  only.modelId = '${IAR_TEST_MODEL_ID}';
+  delete only.fallbackProfileId;
+
+  process.env.IAR_TEST_MODEL_ID = 'env-model-v1';
+  try {
+    const profiles = loadModelProfiles(JSON.stringify(config));
+    assert.equal(profiles[0]?.modelId, 'env-model-v1');
+    process.env.IAR_TEST_MODEL_ID = 'quote"back\\slash';
+    const escaped = loadModelProfiles(JSON.stringify(config));
+    assert.equal(escaped[0]?.modelId, 'quote"back\\slash');
+  } finally {
+    delete process.env.IAR_TEST_MODEL_ID;
+  }
+  assert.throws(() => loadModelProfiles(JSON.stringify(config)), /环境变量未设置/);
 });
 
 /* audit 必须拒绝未知 outcome、非 JSON metadata，并正确处理共享引用。 */

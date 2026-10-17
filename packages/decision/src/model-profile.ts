@@ -88,6 +88,9 @@ export type ModelAuditEntry = {
 
 /**
  * 从 JSON-compatible YAML 文本或对象加载并校验 ModelProfile。
+ *
+ * 文本源支持 ${VAR} 环境变量引用，引用值在 JSON 解析前注入；
+ * 引用的环境变量未设置时 fail-closed，不静默保留占位符。
  * @param source - JSON-compatible YAML 文本或配置对象
  * @returns 深拷贝的合法 profile 列表
  * @throws Error 当配置结构、版本、profile 或引用无效
@@ -225,18 +228,43 @@ export class ModelAuditRecorder {
 
 /**
  * 解析 JSON-compatible YAML 子集。
+ *
  * @param source - 配置文本
  * @returns 解析后的未知对象
+ * @throws Error 当文本不是合法子集或引用了未设置的环境变量
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
 function parseConfigText(source: string): unknown {
+  // 环境变量引用解析放在 JSON 解析之外，保证缺失引用抛出专属错误而不是被归类为格式错误。
+  const resolved = resolveEnvReferences(source);
   try {
-    return JSON.parse(source) as unknown;
+    return JSON.parse(resolved) as unknown;
   } catch {
     // 文本不是允许的 JSON-compatible YAML 子集时拒绝加载。
     throw new Error('models.yaml 必须使用 JSON-compatible YAML 子集');
   }
+}
+
+/**
+ * 把配置文本中的 ${VAR} 引用替换为对应环境变量值。
+ *
+ * 密钥和地址不写入配置文件，统一通过环境变量引用注入；
+ * 占位符位于 JSON 字符串内部，替换值必须转义引号与反斜线以保持 JSON 合法。
+ *
+ * @param source - 原始配置文本
+ * @returns 环境变量解析后的文本
+ * @throws Error 当引用的环境变量未设置
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-17
+ */
+function resolveEnvReferences(source: string): string {
+  return source.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_placeholder, name: string) => {
+    const value = process.env[name];
+    // 缺失引用必须 fail-closed，避免密钥位置被空字符串静默顶替。
+    if (value === undefined) throw new Error(`模型配置引用的环境变量未设置: ${name}`);
+    return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  });
 }
 
 /**
