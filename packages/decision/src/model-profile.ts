@@ -9,8 +9,8 @@ import type { DecisionBackend } from './types.js';
 /** Phase 3.1 允许的模型角色集合。 */
 export type ModelRole = 'semantic.extract' | 'function.select' | 'plugin.select' | 'context.compact' | 'response.generate';
 
-/** ModelProfile 的字段白名单，显式保留可选的 decisionBackend。 */
-const MODEL_PROFILE_KEYS = ['schemaVersion', 'profileId', 'profileVersion', 'role', 'decisionBackend', 'provider', 'modelId', 'modelVersion', 'timeoutMs', 'retryPolicy', 'fallbackProfileId', 'structuredOutput'] as const;
+/** ModelProfile 的字段白名单，显式保留可选的 decisionBackend 和 environment。 */
+const MODEL_PROFILE_KEYS = ['schemaVersion', 'profileId', 'profileVersion', 'role', 'decisionBackend', 'provider', 'modelId', 'modelVersion', 'timeoutMs', 'retryPolicy', 'fallbackProfileId', 'structuredOutput', 'environment'] as const;
 
 /** 模型调用的有限重试配置。 */
 export type ModelRetryPolicy = {
@@ -28,6 +28,16 @@ export type StructuredOutputConfig = {
   enabled: boolean;
   /** 结构化结果的契约标识。 */
   schemaId?: string;
+};
+
+/** 模型连接字段对应的环境变量名，不保存环境变量实际值。 */
+export type ModelProfileEnvironment = {
+  /** OpenAI-compatible endpoint 环境变量名。 */
+  endpoint?: string;
+  /** API key 环境变量名。 */
+  apiKey?: string;
+  /** 模型 ID 环境变量名。 */
+  modelId?: string;
 };
 
 /** 一个不可变、可审计的模型角色配置。 */
@@ -56,6 +66,8 @@ export type ModelProfile = {
   fallbackProfileId?: string;
   /** 结构化输出约束。 */
   structuredOutput: StructuredOutputConfig;
+  /** 非敏感环境变量名映射，实际值仅在 provider 调用时解析。 */
+  environment?: ModelProfileEnvironment;
 };
 
 /** 模型配置文件的顶层结构。 */
@@ -294,6 +306,8 @@ function parseProfile(value: unknown): ModelProfile {
   if (!isProfileIdentity(value)) throw new Error('模型 profile 无效');
   // provider、模型、超时、重试和结构化输出共同构成运行时契约。
   if (!isProfileRuntimeConfig(value)) throw new Error('模型 profile 无效');
+  // environment 只允许声明变量名，禁止把实际密钥或未知字段放进 profile。
+  if (!isProfileEnvironmentConfig(value.environment)) throw new Error('模型 profile 无效');
   // fallbackProfileId 缺失合法，显式值则必须为非空字符串。
   if (!isProfileFallbackConfig(value)) throw new Error('模型 profile 无效');
   return structuredClone(value) as ModelProfile;
@@ -312,6 +326,16 @@ function isProfileIdentity(value: Record<string, unknown>): boolean {
 /** 校验 profile 的 provider、模型和运行时约束。 @param value - 未信任 profile 对象 @returns 是否符合运行时契约 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function isProfileRuntimeConfig(value: Record<string, unknown>): boolean {
   return isNonEmptyString(value.provider) && isNonEmptyString(value.modelId) && isNonEmptyString(value.modelVersion) && isIntegerInRange(value.timeoutMs, 1, 600_000) && isRetryPolicy(value.retryPolicy) && isStructuredOutput(value.structuredOutput);
+}
+
+/** 校验 profile 的环境变量名映射。 @param value - 未知 environment 配置 @returns 是否为合法映射 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function isProfileEnvironmentConfig(value: unknown): value is ModelProfileEnvironment | undefined {
+  // 完全缺失 environment 继续兼容既有 profile。
+  if (value === undefined) return true;
+  // 显式 environment 必须是有限对象，只接受三个连接字段。
+  if (!isRecord(value) || !hasOnlyKeys(value, ['endpoint', 'apiKey', 'modelId'])) return false;
+  // own undefined、空字符串和非法变量名都必须 fail-closed。
+  return Object.values(value).every((item) => isEnvironmentVariableName(item));
 }
 
 /** 校验 profile 的 fallback 字段边界。 @param value - 未信任 profile 对象 @returns 是否符合 fallback 契约 @author lvdaxianer@yeah.net @date 2026-10-17 */
@@ -472,6 +496,11 @@ function isNonEmptyString(value: unknown): value is string {
 /** 判断配置版本是三段式语义版本。 @param value - 未知版本 @returns 是否符合 semver @author lvdaxianer@yeah.net @date 2026-10-17 */
 function isSemver(value: unknown): value is string {
   return typeof value === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value);
+}
+
+/** 判断环境变量名是否符合跨平台 shell 标识约束。 @param value - 未知变量名 @returns 是否为合法变量名 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function isEnvironmentVariableName(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
 }
 
 /** 判断 role 是否属于 Phase 3.1 允许集合。 @param value - 未知 role @returns 是否为 ModelRole @author lvdaxianer@yeah.net @date 2026-10-17 */

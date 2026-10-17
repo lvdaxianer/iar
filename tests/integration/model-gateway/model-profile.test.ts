@@ -122,6 +122,40 @@ test('rejects invalid model profile configuration', () => {
   assert.throws(() => loadModelProfiles(withCrossRoleFallback));
 });
 
+/* environment 只保存变量名，不保存 URL、密钥或模型实际值。 */
+test('accepts non-secret environment override names on model profiles', () => {
+  const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
+  config.profiles = config.profiles.slice(0, 1);
+  const profile = config.profiles[0];
+  assert.ok(profile);
+  delete profile.fallbackProfileId;
+  profile.environment = { endpoint: 'IAR_LLM_BASE_URL', apiKey: 'IAR_LLM_API_KEY', modelId: 'IAR_LLM_MODEL_ID' };
+
+  const loaded = loadModelProfiles(config);
+
+  assert.deepEqual(loaded[0]?.environment, { endpoint: 'IAR_LLM_BASE_URL', apiKey: 'IAR_LLM_API_KEY', modelId: 'IAR_LLM_MODEL_ID' });
+  assert.equal(JSON.stringify(loaded).includes('secret-value'), false);
+});
+
+/* environment 只允许 endpoint、apiKey、modelId 和合法环境变量名。 */
+test('rejects malformed environment override mappings', () => {
+  const cases = [
+    { endpoint: 'IAR-LMM-BASE_URL' },
+    { apiKey: '' },
+    { modelId: 'IAR MODEL ID' },
+    { unknown: 'IAR_UNKNOWN' }
+  ];
+  cases.forEach((environment) => {
+    const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
+    config.profiles = config.profiles.slice(0, 1);
+    const profile = config.profiles[0];
+    assert.ok(profile);
+    delete profile.fallbackProfileId;
+    profile.environment = environment;
+    assert.throws(() => loadModelProfiles(config), /模型 profile 无效/);
+  });
+});
+
 /* 旧配置全部未声明 decisionBackend 时继续兼容，显式启用后则必须完整声明。 */
 test('keeps legacy selection profiles without decisionBackend compatible', () => {
   const config = JSON.parse(configText()) as { profiles: Array<Record<string, unknown>> };
