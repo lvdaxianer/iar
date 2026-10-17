@@ -6,6 +6,9 @@
  */
 import type { DecisionResult, DecisionType, RiskLevel } from '@iar/contracts';
 
+/** 决策选择允许使用的后端标识。 */
+export type DecisionBackend = 'jev' | 'intent-model';
+
 /** 当前本地决策模块允许的两类候选选择。 */
 export type SelectionDecisionType = Extract<DecisionType, 'function.select' | 'plugin.select'>;
 

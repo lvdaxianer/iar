@@ -5,8 +5,12 @@
  * @date 2026-10-17
  */
 import type { JsonValue } from '@iar/contracts';
+import type { DecisionBackend } from './types.js';
 /** Phase 3.1 允许的模型角色集合。 */
 export type ModelRole = 'semantic.extract' | 'function.select' | 'plugin.select' | 'context.compact' | 'response.generate';
+
+/** ModelProfile 的字段白名单，显式保留可选的 decisionBackend。 */
+const MODEL_PROFILE_KEYS = ['schemaVersion', 'profileId', 'profileVersion', 'role', 'decisionBackend', 'provider', 'modelId', 'modelVersion', 'timeoutMs', 'retryPolicy', 'fallbackProfileId', 'structuredOutput'] as const;
 
 /** 模型调用的有限重试配置。 */
 export type ModelRetryPolicy = {
@@ -36,6 +40,8 @@ export type ModelProfile = {
   profileVersion: string;
   /** 模型角色。 */
   role: ModelRole;
+  /** 选择 role 使用的显式决策后端；旧配置可暂不声明。 */
+  decisionBackend?: DecisionBackend;
   /** provider 名称，不代表已调用外部服务。 */
   provider: string;
   /** 模型逻辑标识。 */
@@ -104,11 +110,12 @@ export function loadModelProfiles(source: string | unknown): ModelProfile[] {
   const profiles = parsed.profiles.map(parseProfile);
   const ids = profiles.map((profile) => profile.profileId);
   if (new Set(ids).size !== ids.length) throw new Error('模型 profileId 重复');
+  validateDecisionBackendConfiguration(profiles);
   const knownIds = new Set(ids);
   profiles.forEach((profile) => {
-    // fallback 必须存在且属于同一 role，防止跨角色降级造成版本错审计。
-    if (profile.fallbackProfileId && (!knownIds.has(profile.fallbackProfileId) || profiles.find((candidate) => candidate.profileId === profile.fallbackProfileId)?.role !== profile.role)) throw new Error(`fallback profile 引用无效: ${profile.fallbackProfileId}`);
+    validateFallbackProfile(profile, profiles, knownIds);
   });
+  validatePrimaryProfiles(profiles);
   return profiles.map((profile) => structuredClone(profile));
 }
 
@@ -275,9 +282,125 @@ function resolveEnvReferences(source: string): string {
  * @date 2026-10-17
  */
 function parseProfile(value: unknown): ModelProfile {
-  // 任一字段类型、版本或资源边界不合法时拒绝整个 profile。
-  if (!isRecord(value) || !hasOnlyKeys(value, ['schemaVersion', 'profileId', 'profileVersion', 'role', 'provider', 'modelId', 'modelVersion', 'timeoutMs', 'retryPolicy', 'fallbackProfileId', 'structuredOutput']) || value.schemaVersion !== 'iar.model-profile/v1' || !isModelRole(value.role) || !isNonEmptyString(value.profileId) || !isSemver(value.profileVersion) || !isNonEmptyString(value.provider) || !isNonEmptyString(value.modelId) || !isNonEmptyString(value.modelVersion) || !isIntegerInRange(value.timeoutMs, 1, 600_000) || !isRetryPolicy(value.retryPolicy) || !isStructuredOutput(value.structuredOutput) || (value.fallbackProfileId !== undefined && !isNonEmptyString(value.fallbackProfileId))) throw new Error('模型 profile 无效');
+  // 非对象输入无法进入后续字段校验，必须统一返回 profile 错误。
+  if (!isRecord(value)) throw new Error('模型 profile 无效');
+  // schemaVersion 和未知字段不符合契约时拒绝整个 profile。
+  if (!isProfileSchema(value)) throw new Error('模型 profile 无效');
+  // role 先完成枚举校验，后续 backend 校验才能安全区分选择 role。
+  if (!isModelRole(value.role)) throw new Error('模型 profile 无效');
+  // backend 字段只能用于选择 role，且 own undefined 也属于显式非法声明。
+  if (!isDecisionBackendForRole(value.role, value)) throw new Error('模型 profile 无效');
+  // profile 标识和版本必须满足稳定审计所需的最小格式。
+  if (!isProfileIdentity(value)) throw new Error('模型 profile 无效');
+  // provider、模型、超时、重试和结构化输出共同构成运行时契约。
+  if (!isProfileRuntimeConfig(value)) throw new Error('模型 profile 无效');
+  // fallbackProfileId 缺失合法，显式值则必须为非空字符串。
+  if (!isProfileFallbackConfig(value)) throw new Error('模型 profile 无效');
   return structuredClone(value) as ModelProfile;
+}
+
+/** 校验 profile 的版本和字段白名单。 @param value - 未信任 profile 对象 @returns 是否符合 profile 外形 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function isProfileSchema(value: Record<string, unknown>): boolean {
+  return hasOnlyKeys(value, MODEL_PROFILE_KEYS) && value.schemaVersion === 'iar.model-profile/v1';
+}
+
+/** 校验 profile 的稳定标识和语义版本。 @param value - 未信任 profile 对象 @returns 是否符合标识契约 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function isProfileIdentity(value: Record<string, unknown>): boolean {
+  return isNonEmptyString(value.profileId) && isSemver(value.profileVersion);
+}
+
+/** 校验 profile 的 provider、模型和运行时约束。 @param value - 未信任 profile 对象 @returns 是否符合运行时契约 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function isProfileRuntimeConfig(value: Record<string, unknown>): boolean {
+  return isNonEmptyString(value.provider) && isNonEmptyString(value.modelId) && isNonEmptyString(value.modelVersion) && isIntegerInRange(value.timeoutMs, 1, 600_000) && isRetryPolicy(value.retryPolicy) && isStructuredOutput(value.structuredOutput);
+}
+
+/** 校验 profile 的 fallback 字段边界。 @param value - 未信任 profile 对象 @returns 是否符合 fallback 契约 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function isProfileFallbackConfig(value: Record<string, unknown>): boolean {
+  return value.fallbackProfileId === undefined || isNonEmptyString(value.fallbackProfileId);
+}
+
+/** 校验选择 backend 的声明范围，并保留全量旧配置兼容。 @param profiles - 已解析 profile @returns 无 @throws Error 当 backend 声明不完整 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function validateDecisionBackendConfiguration(profiles: readonly ModelProfile[]): void {
+  const hasExplicitBackend = profiles.some((profile) => isSelectionRole(profile.role) && profile.decisionBackend !== undefined);
+  // 全量旧 selection profile 未声明 backend 时继续走 legacy 兼容策略。
+  if (!hasExplicitBackend) return;
+  // 一旦出现显式 backend，所有 selection profile 都必须完整声明 backend。
+  if (profiles.some((profile) => isSelectionRole(profile.role) && profile.decisionBackend === undefined)) throw new Error('选择 role 必须声明 decisionBackend');
+}
+
+/** 校验 fallback 的存在性和 backend 关系。 @param profile - 当前 profile @param profiles - 全部 profile @param knownIds - 已知 profileId 集合 @returns 无 @throws Error 当 fallback 引用无效 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function validateFallbackProfile(profile: ModelProfile, profiles: readonly ModelProfile[], knownIds: ReadonlySet<string>): void {
+  // 没有 fallback 声明时当前 profile 是链尾，无需继续解析关系。
+  if (!profile.fallbackProfileId) return;
+  const fallback = profiles.find((candidate) => candidate.profileId === profile.fallbackProfileId);
+  // fallback 必须存在且保持同一 role，避免跨角色跳转。
+  if (!knownIds.has(profile.fallbackProfileId) || !fallback || fallback.role !== profile.role) throw new Error(`fallback profile 引用无效: ${profile.fallbackProfileId}`);
+  // fallback 必须保持同一 backend，避免隐式跨后端切换。
+  if (fallback.decisionBackend !== profile.decisionBackend) throw new Error('fallback profile 必须保持同一 role/decisionBackend');
+}
+
+/** 校验 role/backend 分组的 primary 和 fallback 图。 @param profiles - 已解析 profile @returns 无 @throws Error 当关系图无效 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function validatePrimaryProfiles(profiles: readonly ModelProfile[]): void {
+  const groups = new Map<string, ModelProfile[]>();
+  // 关系校验按 role/backend 分组，legacy selection 缺失 backend 时内部归入 jev。
+  profiles.forEach((profile) => {
+    const backend = getValidationBackend(profile);
+    // 非选择 role 没有 backend 分组，不参与决策后端关系校验。
+    if (backend === undefined) return;
+    const key = `${profile.role}/${backend}`;
+    const group = groups.get(key);
+    // 已存在分组时追加 profile，否则创建该 role/backend 的首个分组。
+    if (group) group.push(profile);
+    else groups.set(key, [profile]);
+  });
+  // 每个分组独立校验 primary 唯一性与 fallback 图完整性。
+  groups.forEach((group, key) => validateProfileGroup(key, group));
+}
+
+/** 校验一个 role/backend 分组的 primary 数量和 fallback 可达性。 @param groupKey - 分组标识 @param profiles - 分组 profile @returns 无 @throws Error 当分组关系无效 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function validateProfileGroup(groupKey: string, profiles: readonly ModelProfile[]): void {
+  const profileMap = new Map(profiles.map((profile) => [profile.profileId, profile]));
+  validateNoFallbackCycles(groupKey, profiles, profileMap);
+  const fallbackIds = new Set(profiles.flatMap((profile) => profile.fallbackProfileId ? [profile.fallbackProfileId] : []));
+  const primaries = profiles.filter((profile) => !fallbackIds.has(profile.profileId));
+  // 一个 role/backend 分组不能暴露多个未被 fallback 引用的 primary。
+  if (primaries.length > 1) throw new Error('同一 role/decisionBackend 只能有一个 primary profile');
+  const primary = primaries[0];
+  // 所有 profile 都被当作 fallback 引用时，分组没有合法入口。
+  if (!primary) throw new Error(`role/decisionBackend 配置不存在合法 primary: ${groupKey}`);
+  validateFallbackReachability(groupKey, primary, profiles.length, profileMap);
+}
+
+/** 拒绝 fallback 图中的环。 @param groupKey - 分组标识 @param profiles - 分组 profile @param profileMap - profile 索引 @returns 无 @throws Error 当存在 fallback 环 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function validateNoFallbackCycles(groupKey: string, profiles: readonly ModelProfile[], profileMap: ReadonlyMap<string, ModelProfile>): void {
+  // 从每个 profile 出发检查局部路径，避免 fallback 环绕过 primary 检测。
+  profiles.forEach((profile) => {
+    const path = new Set<string>();
+    let current: ModelProfile | undefined = profile;
+    // 沿 fallback 链前进，直到链尾或发现重复节点。
+    while (current?.fallbackProfileId) {
+      // 当前节点已在本次路径中出现时，说明 fallback 图形成环。
+      if (path.has(current.profileId)) throw new Error(`fallback 环: ${groupKey}`);
+      path.add(current.profileId);
+      current = profileMap.get(current.fallbackProfileId);
+    }
+  });
+}
+
+/** 确认所有 profile 都能从 primary 的 fallback 链到达。 @param groupKey - 分组标识 @param primary - 唯一 primary @param profileCount - 分组 profile 数量 @param profileMap - profile 索引 @returns 无 @throws Error 当存在不可达 profile @author lvdaxianer@yeah.net @date 2026-10-17 */
+function validateFallbackReachability(groupKey: string, primary: ModelProfile, profileCount: number, profileMap: ReadonlyMap<string, ModelProfile>): void {
+  const reachable = new Set<string>([primary.profileId]);
+  let current = primary;
+  // 从唯一 primary 沿 fallback 链遍历，收集可审计的完整路径。
+  while (current.fallbackProfileId) {
+    const fallback = profileMap.get(current.fallbackProfileId);
+    // 缺少目标或回到已访问节点都表示关系图不可继续解析。
+    if (!fallback || reachable.has(fallback.profileId)) throw new Error(`fallback 环: ${groupKey}`);
+    reachable.add(fallback.profileId);
+    current = fallback;
+  }
+  // 分组中的每个 profile 都必须能从 primary 沿 fallback 链到达。
+  if (reachable.size !== profileCount) throw new Error(`fallback profile 必须在 primary 的 fallback 图中可达: ${groupKey}`);
 }
 
 /** 校验 retry 边界。 @param value - 未信任配置 @returns 是否合法 @author lvdaxianer@yeah.net @date 2026-10-17 */
@@ -354,6 +477,27 @@ function isSemver(value: unknown): value is string {
 /** 判断 role 是否属于 Phase 3.1 允许集合。 @param value - 未知 role @returns 是否为 ModelRole @author lvdaxianer@yeah.net @date 2026-10-17 */
 function isModelRole(value: unknown): value is ModelRole {
   return value === 'semantic.extract' || value === 'function.select' || value === 'plugin.select' || value === 'context.compact' || value === 'response.generate';
+}
+
+/** 判断 role 是否属于决策选择角色。 @param value - 未知 role @returns 是否为选择 role @author lvdaxianer@yeah.net @date 2026-10-17 */
+function isSelectionRole(value: ModelRole): boolean {
+  return value === 'function.select' || value === 'plugin.select';
+}
+
+/** 返回关系校验使用的 backend，不改变 legacy profile 的返回字段。 @param profile - 已解析 profile @returns 分组 backend 或 undefined @author lvdaxianer@yeah.net @date 2026-10-17 */
+function getValidationBackend(profile: ModelProfile): DecisionBackend | undefined {
+  // 显式 backend 直接参与关系分组，不使用 legacy 默认值覆盖它。
+  if (profile.decisionBackend !== undefined) return profile.decisionBackend;
+  // 只有旧 selection profile 使用内部 jev 兼容分组，返回对象本身不被修改。
+  return isSelectionRole(profile.role) ? 'jev' : undefined;
+}
+
+/** 校验 backend 是否只用于选择 role，并区分字段缺失与 own undefined。 @param role - 已校验 role @param value - 未知 profile 对象 @returns 是否合法 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function isDecisionBackendForRole(role: ModelRole, value: Record<string, unknown>): boolean {
+  // 完全缺失字段代表旧配置，允许后续按 jev 进行内部关系校验。
+  if (!Object.hasOwn(value, 'decisionBackend')) return true;
+  // own property 即为显式声明，undefined 或未知值都不能通过白名单校验。
+  return isSelectionRole(role) && (value.decisionBackend === 'jev' || value.decisionBackend === 'intent-model');
 }
 
 /** 判断未知数值是否为指定范围内的有限整数。 @param value - 未知数值 @param minimum - 最小值 @param maximum - 最大值 @returns 是否满足范围 @author lvdaxianer@yeah.net @date 2026-10-17 */
