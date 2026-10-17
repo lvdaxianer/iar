@@ -3,7 +3,7 @@
 ## 1. 决策后端配置与解析
 
 - [x] 1.1 在 `ModelProfile` 中增加 `decisionBackend` 和显式 primary/fallback 关系校验；验证 `function.select`、`plugin.select` 只接受 `jev` 或 `intent-model`，其他 role 拒绝非法字段，并保证同 role/backend 的配置唯一且 fallback 不跨 backend。
-- [ ] 1.2 新增 `DecisionBackendResolver`，按 `jev` → `intent-model` 顺序解析后端；验证两者同时存在时只选择 JEV、仅有 Intent Model 时选择 Intent Model、两者均无时返回稳定配置错误。
+- [x] 1.2 新增 `DecisionBackendResolver`，按 `jev` → `intent-model` 顺序解析后端；验证两者同时存在时只选择 JEV、仅有 Intent Model 时选择 Intent Model、两者均无时返回稳定配置错误。
 
 ## 2. Intent Model 统一适配器
 
