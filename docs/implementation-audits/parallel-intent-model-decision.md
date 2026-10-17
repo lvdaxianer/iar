@@ -1,8 +1,8 @@
 # Parallel Intent Model Decision Implementation Audit
 
-**Status:** PASS（Task 1–4、Task 5.1–5.2 已完成；最终审计与归档待收口）  
-**Date:** 2026-10-17  
-**Change:** `parallel-intent-model-decision`  
+**Status:** PASS（Task 1–5 全部完成，OpenSpec 归档待执行）
+**Date:** 2026-10-17
+**Change:** `parallel-intent-model-decision`
 **Integration branch:** `master`
 
 ## Task 4 per-task gate
@@ -48,6 +48,23 @@ openspec validate parallel-intent-model-decision --strict        PASS
 
 ## Repository state
 
-- Task 1–4 的实现与测试已经通过当前 Task 4 工作树验证。
-- 当前阶段未完成项：Task 5.3 的最终审计勾选与 OpenSpec 归档流程。
+- Task 1–5 的实现、测试、配置、文档和最终审计已经合并到 `master`。
+- `openspec/specs/bounded-routing/spec.md` 已同步本变更的 JEV/Intent Model 统一决策契约与 Prompt 边界。
+- 未完成项：无；仅保留 OpenSpec 归档这一工作流收口动作。
 - 主工作树中的六个预-existing untracked symlink 未修改。
+
+## Final task completion
+
+| Task | Scope | Result |
+| --- | --- | --- |
+| 1 | `decisionBackend` 配置校验与 JEV → Intent Model resolver | 完成 |
+| 2 | 版本化 Intent Prompt、Intent adapter 与统一返回契约 | 完成 |
+| 3 | Function/Plugin 异步路由接入、失败语义与授权边界 | 完成 |
+| 4 | profile、adapter、路由、安全和 fallback 回归测试 | 完成 |
+| 5 | 配置示例、`.env.example`、根 README、架构文档与审计 | 完成 |
+
+## Final review summary
+
+- Task 3 runtime review 已通过：P0/P1 为 0；审查后的 cross-backend input snapshot 已冻结，且真实 `routeAsync()` 会经过 `UnifiedDecisionAdapter`。
+- Task 4 配置/文档/test fixture review 已通过：无真实密钥、无 API/DecisionResult 破坏性变更、无超出 scope 的文件修改。
+- 兼容性结论：JEV 与 Intent Model 对下游都返回相同 `iar.decision/v1` / `DecisionResult`；JEV 存在时优先，JEV 缺失时 Intent Model 才成为 primary。

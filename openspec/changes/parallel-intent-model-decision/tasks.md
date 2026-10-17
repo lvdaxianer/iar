@@ -28,7 +28,7 @@
 
 - [x] 5.1 更新 `config/models.yaml` 与 `.env.example`，给出 JEV/Intent Model 的 provider、profile、Prompt 版本和优先级示例，不写入真实密钥。
 - [x] 5.2 更新 `docs/README.md` 与根目录 `README.md`，说明两种 backend 的统一 `DecisionResult`、JEV 优先规则、Intent Model Prompt 约束和不授予权限的边界。
-- [ ] 5.3 新增 `docs/implementation-audits/parallel-intent-model-decision.md`，记录任务完成情况、审计证据、测试结果和未完成项。
+- [x] 5.3 新增 `docs/implementation-audits/parallel-intent-model-decision.md`，记录任务完成情况、审计证据、测试结果和未完成项。
 
 ## Workflow follow-up
 
