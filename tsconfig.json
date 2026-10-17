@@ -20,7 +20,8 @@
   },
   "include": [
     "packages/**/*.ts",
-    "tests/**/*.ts"
+    "tests/**/*.ts",
+    "examples/**/*.ts"
   ],
   "exclude": [
     "dist",

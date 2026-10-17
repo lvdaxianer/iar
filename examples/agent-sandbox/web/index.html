@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IAR Agent Sandbox</title>
+<style>
+  :root {
+    --bg: #f4f6fa;
+    --panel: #ffffff;
+    --border: #e3e8f0;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --accent-soft: #dbeafe;
+    --user-bg: #2563eb;
+    --bot-bg: #ffffff;
+    --ok: #059669;
+    --warn: #d97706;
+    --err: #dc2626;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 16px; font-weight: 600; }
+  .badge {
+    font-size: 12px; padding: 2px 10px; border-radius: 999px;
+    background: var(--accent-soft); color: var(--accent); font-weight: 500;
+  }
+  .badge.scripted { background: #fef3c7; color: var(--warn); }
+  main {
+    flex: 1; display: grid; grid-template-columns: minmax(360px, 1fr) 400px;
+    gap: 16px; padding: 16px 20px; min-height: 0;
+  }
+  .chat {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  }
+  .messages { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 78%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  .msg.user { align-self: flex-end; background: var(--user-bg); color: #fff; border-bottom-right-radius: 4px; }
+  .msg.bot { align-self: flex-start; background: var(--bot-bg); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+  .msg .meta { display: block; margin-top: 6px; font-size: 11px; color: var(--muted); }
+  .confirm-box {
+    align-self: flex-start; background: #fffbeb; border: 1px solid #fde68a;
+    border-radius: 12px; padding: 12px 14px; font-size: 13px; max-width: 78%;
+  }
+  .confirm-box .actions { margin-top: 10px; display: flex; gap: 8px; }
+  .input-bar {
+    display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--border); background: #fafbfd;
+  }
+  .input-bar input {
+    flex: 1; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 14px; outline: none;
+  }
+  .input-bar input:focus { border-color: var(--accent); }
+  button {
+    cursor: pointer; border: none; border-radius: 8px; padding: 9px 16px;
+    font-size: 13px; font-weight: 500; background: var(--accent); color: #fff;
+  }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.ghost { background: #eef2f7; color: var(--text); }
+  button.danger { background: var(--err); }
+  button.ok { background: var(--ok); }
+  aside {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px;
+  }
+  aside h2 { font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: .04em; }
+  .kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; font-size: 13px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { font-family: var(--mono); font-size: 12px; word-break: break-all; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; background: var(--accent-soft); color: var(--accent); }
+  .pill.high { background: #fee2e2; color: var(--err); }
+  .events { list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+  .events li {
+    font-family: var(--mono); padding: 5px 8px; background: #f8fafc; border: 1px solid var(--border);
+    border-radius: 6px; display: flex; justify-content: space-between; gap: 8px;
+  }
+  .events li .t { color: var(--muted); flex-shrink: 0; }
+  details { border: 1px solid var(--border); border-radius: 8px; }
+  details summary {
+    cursor: pointer; padding: 8px 10px; font-size: 12px; color: var(--muted); user-select: none;
+  }
+  details pre {
+    max-height: 320px; overflow: auto; padding: 10px; font-size: 11px; font-family: var(--mono);
+    border-top: 1px solid var(--border); background: #f8fafc; border-radius: 0 0 8px 8px;
+  }
+  .toolbar { display: flex; gap: 8px; }
+  .toolbar button { flex: 1; }
+  #compactResult { font-size: 12px; line-height: 1.6; padding: 8px 10px; border-radius: 8px; display: none; }
+  #compactResult.show { display: block; }
+  #compactResult.ok { background: #ecfdf5; color: var(--ok); border: 1px solid #a7f3d0; }
+  #compactResult.fail { background: #fef2f2; color: var(--err); border: 1px solid #fecaca; }
+  .hint { font-size: 12px; color: var(--muted); line-height: 1.7; }
+</style>
+</head>
+<body>
+<header>
+  <h1>IAR Agent Sandbox</h1>
+  <span id="modeBadge" class="badge">加载中…</span>
+  <span style="flex:1"></span>
+  <span class="hint">意图 → Function → Plugin → 执行 · 全链路可调试</span>
+</header>
+<main>
+  <section class="chat">
+    <div id="messages" class="messages"></div>
+    <form id="inputBar" class="input-bar">
+      <input id="messageInput" placeholder="输入消息，例如：帮我查一下退款政策" autocomplete="off" />
+      <button id="sendBtn" type="submit">发送</button>
+    </form>
+  </section>
+  <aside>
+    <div>
+      <h2>路由</h2>
+      <dl class="kv" style="margin-top:8px">
+        <dt>Function</dt><dd id="routeFunction">-</dd>
+        <dt>Plugin</dt><dd id="routePlugin">-</dd>
+        <dt>路由状态</dt><dd id="routeStatus">-</dd>
+        <dt>语义置信度</dt><dd id="routeConfidence">-</dd>
+        <dt>决策分数</dt><dd id="routeScore">-</dd>
+      </dl>
+    </div>
+    <div>
+      <h2>最近事件</h2>
+      <ul id="eventList" class="events" style="margin-top:8px"></ul>
+    </div>
+    <details>
+      <summary>BehaviorContext（点击查看 JSON）</summary>
+      <pre id="contextJson">{}</pre>
+    </details>
+    <div>
+      <h2>上下文压缩</h2>
+      <div class="toolbar" style="margin-top:8px">
+        <button id="compactBtn" class="ghost" type="button">触发压缩</button>
+        <button id="resetBtn" class="ghost" type="button">重置会话</button>
+      </div>
+      <div id="compactResult" style="margin-top:8px"></div>
+    </div>
+    <p class="hint">
+      试试：「帮我查一下退款政策」（低风险直接执行）、「帮我提个工单，网络很卡」（高风险需确认）、「转人工」（高风险需确认）。
+    </p>
+  </aside>
+</main>
+<script>
+(function () {
+  var messagesEl = document.getElementById('messages');
+  var inputEl = document.getElementById('messageInput');
+  var sendBtn = document.getElementById('sendBtn');
+  var pendingRunId = null;
+
+  function appendMsg(role, text, meta) {
+    var div = document.createElement('div');
+    div.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
+    div.textContent = text;
+    if (meta) {
+      var span = document.createElement('span');
+      span.className = 'meta';
+      span.textContent = meta;
+      div.appendChild(span);
+    }
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return div;
+  }
+
+  function showConfirmBox(pending, onDone) {
+    var box = document.createElement('div');
+    box.className = 'confirm-box';
+    var title = document.createElement('div');
+    title.textContent = '待确认动作：' + pending.functionId + ' / ' + pending.pluginId + '（风险等级 ' + pending.riskLevel + '）';
+    var detail = document.createElement('div');
+    detail.style.cssText = 'margin-top:6px;font-family:var(--mono);font-size:11px;color:var(--muted)';
+    detail.textContent = JSON.stringify(pending.input);
+    var actions = document.createElement('div');
+    actions.className = 'actions';
+    var yes = document.createElement('button');
+    yes.className = 'ok';
+    yes.textContent = '确认执行';
+    var no = document.createElement('button');
+    no.className = 'danger';
+    no.textContent = '取消';
+    actions.appendChild(yes);
+    actions.appendChild(no);
+    box.appendChild(title);
+    box.appendChild(detail);
+    box.appendChild(actions);
+    messagesEl.appendChild(box);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    yes.onclick = function () { box.remove(); onDone(true); };
+    no.onclick = function () { box.remove(); onDone(false); };
+  }
+
+  function setBusy(busy) {
+    sendBtn.disabled = busy;
+    inputEl.disabled = busy;
+  }
+
+  function api(path, body) {
+    return fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function (res) { return res.json(); });
+  }
+
+  function handleTurnResult(result) {
+    if (result.status === 'awaiting_confirmation' && result.pending) {
+      appendMsg('bot', result.reply, '等待确认');
+      showConfirmBox(result.pending, function (accepted) {
+        setBusy(true);
+        api('/api/confirm', { accepted: accepted }).then(function (confirmResult) {
+          setBusy(false);
+          if (confirmResult.status === 'executed') {
+            appendMsg('bot', confirmResult.reply, '已执行');
+          } else if (confirmResult.status === 'cancelled') {
+            appendMsg('bot', confirmResult.reply, '已取消');
+          } else {
+            appendMsg('bot', confirmResult.reply || '操作失败', '失败');
+          }
+          refreshState();
+        });
+      });
+    } else if (result.status === 'executed') {
+      var meta = '已执行 · ' + (result.route && result.route.functionId ? result.route.functionId : '');
+      appendMsg('bot', result.reply, meta);
+    } else {
+      appendMsg('bot', result.reply, result.status === 'clarification' ? '需要澄清' : '失败');
+    }
+  }
+
+  document.getElementById('inputBar').onsubmit = function (event) {
+    event.preventDefault();
+    var text = inputEl.value.trim();
+    if (!text) return;
+    inputEl.value = '';
+    appendMsg('user', text);
+    setBusy(true);
+    api('/api/chat', { message: text }).then(function (result) {
+      setBusy(false);
+      handleTurnResult(result);
+      refreshState();
+    });
+  };
+
+  document.getElementById('compactBtn').onclick = function () {
+    var btn = this;
+    btn.disabled = true;
+    api('/api/compact').then(function (result) {
+      btn.disabled = false;
+      var el = document.getElementById('compactResult');
+      el.className = 'show ' + (result.ok ? 'ok' : 'fail');
+      if (result.ok) {
+        el.textContent = '压缩成功：' + (result.summary || '') + '（哈希 ' + result.hashBefore.slice(0, 12) + '… → ' + result.hashAfter.slice(0, 12) + '…）';
+      } else {
+        el.textContent = '压缩失败：' + (result.reasonCode || '') + ' ' + (result.error || '') + '（哈希保持不变）';
+      }
+      refreshState();
+    });
+  };
+
+  document.getElementById('resetBtn').onclick = function () {
+    api('/api/reset').then(function () {
+      messagesEl.innerHTML = '';
+      appendMsg('bot', '会话已重置，开始新的对话吧。');
+      document.getElementById('compactResult').className = '';
+      refreshState();
+    });
+  };
+
+  function refreshState() {
+    fetch('/api/state').then(function (res) { return res.json(); }).then(function (state) {
+      var badge = document.getElementById('modeBadge');
+      badge.textContent = state.mode === 'brain' ? 'brain real · 真实 LLM' : 'brain scripted · 离线假大脑';
+      badge.className = 'badge' + (state.mode === 'brain' ? '' : ' scripted');
+      var route = state.context.route || {};
+      document.getElementById('routeFunction').textContent = route.functionId || '-';
+      document.getElementById('routePlugin').textContent = route.pluginId || '-';
+      document.getElementById('routeStatus').textContent = state.context.workflow.status + ' / ' + state.context.workflow.currentStep;
+      document.getElementById('routeConfidence').textContent = state.context.intent && state.context.intent !== 'unknown'
+        ? state.context.intent
+        : '-';
+      var score = state.context.action && state.context.action.name !== 'unknown' ? state.context.action.name + '（' + state.context.action.status + '）' : '-';
+      document.getElementById('routeScore').textContent = score;
+      document.getElementById('contextJson').textContent = JSON.stringify(state.context, null, 2);
+      var list = document.getElementById('eventList');
+      list.innerHTML = '';
+      state.events.slice(-8).forEach(function (event) {
+        var li = document.createElement('li');
+        var name = document.createElement('span');
+        name.textContent = event.eventName;
+        var time = document.createElement('span');
+        time.className = 't';
+        time.textContent = event.eventId;
+        li.appendChild(name);
+        li.appendChild(time);
+        list.appendChild(li);
+      });
+    });
+  }
+
+  appendMsg('bot', '你好，我是 IAR Agent Sandbox。输入消息即可体验「意图 → Function → Plugin → 执行」全链路，右侧调试面板可查看路由证据、事件流和 BehaviorContext。');
+  refreshState();
+  setInterval(refreshState, 3000);
+})();
+</script>
+</body>
+</html>

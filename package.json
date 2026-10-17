@@ -12,7 +12,8 @@
     "build": "tsc -p tsconfig.json",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node scripts/run-tests.mjs",
-    "demo:fake-plugin": "npm run build && node scripts/run-fake-plugin-demo.mjs"
+    "demo:fake-plugin": "npm run build && node scripts/run-fake-plugin-demo.mjs",
+    "demo:sandbox": "npm run build && node scripts/run-agent-sandbox.mjs"
   },
   "engines": {
     "node": ">=24"
