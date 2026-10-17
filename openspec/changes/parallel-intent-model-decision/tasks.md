@@ -7,7 +7,7 @@
 
 ## 2. Intent Model 统一适配器
 
-- [ ] 2.1 新增版本化 Intent Model Prompt builder，输入包含 `decisionType`、`decisionVersion`、threshold、有限候选和有序 `candidateIds`；Prompt 明确禁止新增候选、授予权限、执行插件和输出 Markdown。
+- [x] 2.1 新增版本化 Intent Model Prompt builder，输入包含 `decisionType`、`decisionVersion`、threshold、有限候选和有序 `candidateIds`；Prompt 明确禁止新增候选、授予权限、执行插件和输出 Markdown。
 - [ ] 2.2 新增 `IntentModelDecisionAdapter` 与 `UnifiedDecisionAdapter`，两者都通过 `ModelGateway` 调用，并复用 `validateDecisionOutput`，确保对外只返回现有 `ModelGatewayResult<DecisionResult>`。
 - [ ] 2.3 将选定 backend、Prompt 版本、profileId、modelVersion、fallbackUsed 写入脱敏审计 metadata；模型原始 prompt、用户输入和 provider 异常不得进入公开错误或审计正文。
 
