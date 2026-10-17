@@ -91,6 +91,24 @@ Function 和 Plugin 决策都经过 `ModelGateway` 与 `UnifiedDecisionAdapter`�
 
 配置示例见 [`config/models.yaml`](config/models.yaml)，模型接入环境变量见 [`.env.example`](.env.example)。
 
+### 模型连接变量覆盖
+
+每个 `ModelProfile` 可用 `environment` 声明非敏感环境变量名：
+
+```json
+{
+  "environment": {
+    "endpoint": "IAR_LLM_BASE_URL",
+    "apiKey": "IAR_LLM_API_KEY",
+    "modelId": "IAR_LLM_MODEL_ID"
+  }
+}
+```
+
+普通交互模型默认使用 `IAR_LLM_BASE_URL`、`IAR_LLM_API_KEY`、`IAR_LLM_MODEL_ID`；Intent Model 默认使用独立的 `IAR_INTENT_MODEL_ENDPOINT`、`IAR_INTENT_MODEL_API_KEY`、`IAR_INTENT_MODEL_ID`。profile 映射中的非空变量值优先于 provider 默认值；模型名最终回退到 profile 的 `modelId`，endpoint/API key 缺失时 fail-closed。变量实际值不会进入 profile、审计或错误消息。
+
+agent-sandbox 默认同时加载 JEV 和 Intent Model，并固定 JEV 优先。设置 `IAR_SANDBOX_DECISION_BACKEND=intent-model` 可运行 Intent-only 路径；两条路径都通过同一个 `iar.decision/v1` 返回契约。
+
 ## 文档与验证
 
 - [完整架构与能力边界](docs/README.md)
