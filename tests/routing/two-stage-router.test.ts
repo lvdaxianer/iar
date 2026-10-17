@@ -59,9 +59,9 @@ import { join } from 'node:path';
 import test from 'node:test';
 import type { FunctionPluginManifest } from '../../packages/contracts/src/index.js';
 import { SCHEMA_VERSIONS } from '../../packages/contracts/src/index.js';
-import { MockDecisionProvider, type DecisionRequest } from '../../packages/decision/src/index.js';
+import { DecisionBackendResolver, IntentModelDecisionAdapter, JevDecisionAdapter, loadModelProfiles, MockDecisionProvider, ModelGateway, ModelProfileRegistry, UnifiedDecisionAdapter, type DecisionRequest, type ModelProvider } from '../../packages/decision/src/index.js';
 import { PluginHost } from '../../packages/plugin-host/src/index.js';
-import { TwoStageRouter, type RouteRequest } from '../../packages/runtime/src/index.js';
+import { TwoStageRouter, type AsyncDecisionAdapter, type RouteRequest } from '../../packages/runtime/src/index.js';
 import { facts, functionRule, pluginRule } from './rule-engine-fixtures.js';
 
 /*
@@ -152,6 +152,21 @@ function routeRequest(overrides: Partial<RouteRequest> = {}): RouteRequest {
   };
 }
 
+/** 创建真实 UnifiedDecisionAdapter 的 Intent-only Function/Plugin pair，供异步路由集成验证。 @returns 两阶段异步模型适配器 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function intentOnlyAdapters(): { functionDecisionAdapter: AsyncDecisionAdapter; pluginDecisionAdapter: AsyncDecisionAdapter } {
+  const profiles = loadModelProfiles(readFileSync(join(process.cwd(), 'config', 'models.yaml'), 'utf8')).map((profile) => profile.role === 'function.select' || profile.role === 'plugin.select' ? { ...profile, decisionBackend: 'intent-model' as const } : profile);
+  const modelRegistry = new ModelProfileRegistry(profiles);
+  const provider: ModelProvider = { complete: async (request) => {
+    const prompt = request.input as unknown as { request: DecisionRequest };
+    const decision = prompt.request;
+    return { schemaVersion: SCHEMA_VERSIONS.decision, decisionType: decision.decisionType, decisionVersion: decision.decisionVersion, status: 'choice', choice: decision.candidates[0]?.candidateId, score: 0.99, reasonCode: 'intent_match', candidateIds: decision.candidates.map((candidate) => candidate.candidateId) };
+  } };
+  const gateway = new ModelGateway({ registry: modelRegistry, providers: { mock: provider } });
+  const functionAdapter = new UnifiedDecisionAdapter(new DecisionBackendResolver(modelRegistry), new JevDecisionAdapter(gateway, 'function.select'), new IntentModelDecisionAdapter(gateway, 'function.select'));
+  const pluginAdapter = new UnifiedDecisionAdapter(new DecisionBackendResolver(modelRegistry), new JevDecisionAdapter(gateway, 'plugin.select'), new IntentModelDecisionAdapter(gateway, 'plugin.select'));
+  return { functionDecisionAdapter: functionAdapter, pluginDecisionAdapter: pluginAdapter };
+}
+
 /* Function choice 必须先成功，才允许观察 Plugin provider 请求。 */
 test('routes Function before Plugin and records both constrained decisions', () => {
   const functionCalls: DecisionRequest[] = [];
@@ -165,6 +180,36 @@ test('routes Function before Plugin and records both constrained decisions', () 
   assert.equal(functionCalls[0]?.decisionType, 'function.select');
   assert.equal(pluginCalls[0]?.decisionType, 'plugin.select');
   assert.deepEqual(pluginCalls[0]?.candidates.map((candidate) => candidate.candidateId), ['dip-api-stop-v1']);
+});
+
+/* Intent Model 只需返回相同 DecisionResult，路由器不按 backend 分支且仍执行最终门禁。 */
+test('consumes an Intent Model-shaped DecisionResult without changing route semantics', () => {
+  const intentCompatibleProvider = new MockDecisionProvider((request) => ({
+    schemaVersion: SCHEMA_VERSIONS.decision,
+    decisionType: request.decisionType,
+    decisionVersion: request.decisionVersion,
+    status: 'choice' as const,
+    choice: request.candidates[0]?.candidateId,
+    score: 0.99,
+    reasonCode: 'intent_match',
+    candidateIds: request.candidates.map((candidate) => candidate.candidateId)
+  }));
+  const result = new TwoStageRouter().route(routeRequest({ functionProvider: intentCompatibleProvider, pluginProvider: intentCompatibleProvider }));
+
+  assert.equal(result.status, 'matched');
+  assert.deepEqual(Object.keys(result.functionDecision ?? {}).sort(), ['candidateIds', 'choice', 'decisionType', 'decisionVersion', 'reasonCode', 'schemaVersion', 'score', 'status']);
+  assert.deepEqual(Object.keys(result.pluginDecision ?? {}).sort(), ['candidateIds', 'choice', 'decisionType', 'decisionVersion', 'reasonCode', 'schemaVersion', 'score', 'status']);
+});
+
+/* 异步路由入口必须真实经过 UnifiedDecisionAdapter，而不是仅用同步 Mock provider 模拟。 */
+test('routeAsync uses Intent Model adapters and preserves final route gates', async () => {
+  const { functionProvider: _functionProvider, pluginProvider: _pluginProvider, ...baseRequest } = routeRequest();
+  const result = await new TwoStageRouter().routeAsync({ ...baseRequest, traceId: 'trace-async-route', runId: 'run-async-route', ...intentOnlyAdapters() });
+
+  assert.equal(result.status, 'matched');
+  assert.equal(result.functionDecision?.reasonCode, 'intent_match');
+  assert.equal(result.pluginDecision?.reasonCode, 'intent_match');
+  assert.equal(result.pluginId, 'dip-api-stop-v1');
 });
 
 /* Function 同等级冲突必须在 Plugin 阶段前停止，避免越过澄清门禁。 */

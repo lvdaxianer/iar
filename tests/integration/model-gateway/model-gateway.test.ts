@@ -121,6 +121,9 @@ import {
   ModelProviderError,
   ResponseGeneratorAdapter,
   SemanticExtractorAdapter,
+  DecisionBackendResolver,
+  IntentModelDecisionAdapter,
+  UnifiedDecisionAdapter,
   loadModelProfiles,
   ModelProfileRegistry,
   type ModelProvider
@@ -147,6 +150,32 @@ function decisionResult(decisionType: 'function.select' | 'plugin.select', score
 function compactionResult(): CompactionResult {
   const state = createInitialContext('run-roles');
   return { schemaVersion: 'iar.compaction-result/v1', summary: 'summary', state: { subject: state.subject, intent: state.intent, action: state.action, route: state.route, slots: state.slots, workflow: state.workflow, pending: state.pending, confirmation: state.confirmation }, references: [], preservedFacts: [], warnings: [] };
+}
+
+/** 创建无同 backend fallback 的双决策 backend registry，专门验证显式跨 backend 语义。 @returns 可供 Task 3 测试使用的 registry @author lvdaxianer@yeah.net @date 2026-10-17 */
+function dualDecisionRegistry(): ModelProfileRegistry {
+  const profiles = loadModelProfiles(readFileSync(join(process.cwd(), 'config', 'models.yaml'), 'utf8'));
+  const selection = profiles.filter((profile) => profile.role === 'function.select' || profile.role === 'plugin.select');
+  const withoutFallback = selection.filter((profile) => profile.profileId.endsWith('-primary'));
+  assert.equal(withoutFallback.length, 2);
+  const decisionProfiles = withoutFallback.map((profile) => {
+    const { fallbackProfileId: _fallbackProfileId, ...primary } = profile;
+    return { ...primary, decisionBackend: 'jev' as const };
+  });
+  const functionPrimary = decisionProfiles.find((profile) => profile.role === 'function.select');
+  assert.ok(functionPrimary);
+  const intentProfile = { ...functionPrimary, profileId: 'function-intent-primary', decisionBackend: 'intent-model' as const, provider: 'intent-mock', modelId: 'intent-decision', modelVersion: 'intent-mock-1' };
+  return new ModelProfileRegistry([...profiles.filter((profile) => profile.role !== 'function.select' && profile.role !== 'plugin.select'), ...decisionProfiles, intentProfile]);
+}
+
+/** 创建保留 JEV 同 backend fallback 的双 backend registry，验证 fallback 顺序。 @returns 带 JEV fallback 的 registry @author lvdaxianer@yeah.net @date 2026-10-17 */
+function dualDecisionRegistryWithJevFallback(): ModelProfileRegistry {
+  const profiles = loadModelProfiles(readFileSync(join(process.cwd(), 'config', 'models.yaml'), 'utf8'));
+  const decisionProfiles = profiles.filter((profile) => profile.role === 'function.select' || profile.role === 'plugin.select').map((profile) => ({ ...profile, decisionBackend: 'jev' as const }));
+  const primary = decisionProfiles.find((profile) => profile.profileId === 'function-decision-primary');
+  assert.ok(primary);
+  const { fallbackProfileId: _fallbackProfileId, ...intentProfile } = primary;
+  return new ModelProfileRegistry([...profiles.filter((profile) => profile.role !== 'function.select' && profile.role !== 'plugin.select'), ...decisionProfiles, { ...intentProfile, profileId: 'function-intent-primary', decisionBackend: 'intent-model' as const, provider: 'intent-mock', modelId: 'intent-decision', modelVersion: 'intent-mock-1' }]);
 }
 
 /* role routing 必须调用五类 adapter，并保留结构化输出。 */
@@ -193,6 +222,127 @@ test('maps low JEV score to needs clarification without executing a choice', asy
     assert.equal(result.value.status, 'needs_clarification');
     assert.equal(result.events.at(-1)?.errorCode, 'model.threshold_rejected');
   }
+});
+
+/* JEV 失败默认不能把同一决策隐式切换到 Intent Model。 */
+test('does not cross backend after JEV failure unless explicitly configured', async () => {
+  const calls: string[] = [];
+  const provider: ModelProvider = { complete: async (request) => {
+    calls.push(request.profile.provider);
+    if (request.profile.provider === 'mock') throw new ModelProviderError('provider_unavailable');
+    return decisionResult('function.select');
+  } };
+  const modelRegistry = dualDecisionRegistry();
+  const gateway = new ModelGateway({ registry: modelRegistry, providers: { mock: provider, 'intent-mock': provider } });
+  const resolver = new DecisionBackendResolver(modelRegistry);
+  const adapter = new UnifiedDecisionAdapter(resolver, new JevDecisionAdapter(gateway, 'function.select'), new IntentModelDecisionAdapter(gateway, 'function.select'));
+  const result = await adapter.decide({ traceId: 'trace-no-cross', runId: 'run-no-cross', request: { decisionType: 'function.select', decisionVersion: 'test@1', threshold: 0.8, candidates: [{ candidateId: 'candidate-1', priority: 1, specificity: 1 }] } });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.error.code, 'model.provider_failed');
+  assert.deepEqual(calls, ['mock', 'mock']);
+});
+
+/* 显式跨 backend 不能跳过配置中的同 backend fallback。 */
+test('prefers same backend fallback before explicit cross backend fallback', async () => {
+  const calls: string[] = [];
+  const provider: ModelProvider = { complete: async (request) => {
+    calls.push(request.profile.profileId);
+    if (request.profile.profileId === 'function-decision-primary') throw new ModelProviderError('provider_unavailable');
+    if (request.profile.profileId === 'function-intent-primary') throw new Error('cross backend should not run');
+    return decisionResult('function.select');
+  } };
+  const modelRegistry = dualDecisionRegistryWithJevFallback();
+  const gateway = new ModelGateway({ registry: modelRegistry, providers: { mock: provider, 'intent-mock': provider } });
+  const resolver = new DecisionBackendResolver(modelRegistry);
+  const adapter = new UnifiedDecisionAdapter(resolver, new JevDecisionAdapter(gateway, 'function.select'), new IntentModelDecisionAdapter(gateway, 'function.select'), { crossBackendFallback: true });
+  const result = await adapter.decide({ traceId: 'trace-same-first', runId: 'run-same-first', request: { decisionType: 'function.select', decisionVersion: 'test@1', threshold: 0.8, candidates: [{ candidateId: 'candidate-1', priority: 1, specificity: 1 }] } });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, ['function-decision-primary', 'function-decision-primary', 'function-decision-fallback']);
+  if (result.ok) assert.deepEqual(result.audit.map((entry) => (entry.metadata as Record<string, unknown>).decisionBackend), ['jev', 'jev', 'jev']);
+});
+
+/* 显式 crossBackendFallback 才允许保留 JEV 失败证据并调用 Intent Model。 */
+test('uses explicit cross backend fallback and records both attempts', async () => {
+  const calls: string[] = [];
+  const intentInputs: JsonValue[] = [];
+  let mutationBlocked = false;
+  const provider: ModelProvider = { complete: async (request) => {
+    calls.push(request.profile.provider);
+    if (request.profile.provider === 'mock') throw new ModelProviderError('provider_unavailable');
+    intentInputs.push(request.input as JsonValue);
+    try { (request.input as unknown as { promptVersion: string }).promptVersion = 'tampered'; } catch { mutationBlocked = true; }
+    return decisionResult('function.select');
+  } };
+  const modelRegistry = dualDecisionRegistry();
+  const gateway = new ModelGateway({ registry: modelRegistry, providers: { mock: provider, 'intent-mock': provider } });
+  const resolver = new DecisionBackendResolver(modelRegistry);
+  const adapter = new UnifiedDecisionAdapter(resolver, new JevDecisionAdapter(gateway, 'function.select'), new IntentModelDecisionAdapter(gateway, 'function.select'), { crossBackendFallback: true });
+  const result = await adapter.decide({ traceId: 'trace-cross', runId: 'run-cross', request: { decisionType: 'function.select', decisionVersion: 'test@1', threshold: 0.8, candidates: [{ candidateId: 'candidate-1', priority: 1, specificity: 1 }] } });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, ['mock', 'mock', 'intent-mock']);
+  if (result.ok) {
+    const metadata = result.audit.map((entry) => entry.metadata as Record<string, unknown>);
+    assert.deepEqual(metadata.map((entry) => [entry.decisionBackend, entry.provider]), [['jev', 'mock'], ['jev', 'mock'], ['intent-model', 'intent-mock']]);
+    assert.deepEqual(result.audit.map((entry) => entry.fallbackUsed), [false, false, true]);
+    assert.equal(metadata[2]?.promptVersion, 'iar.intent-decision-prompt/v1');
+  }
+  assert.equal((intentInputs[0] as { promptVersion?: string }).promptVersion, 'iar.intent-decision-prompt/v1');
+  assert.equal(mutationBlocked, true);
+});
+
+/* 非法 JEV 输出属于 schema 边界错误，即使显式开启也不能跨 backend 重试。 */
+test('does not cross backend after schema-invalid JEV output', async () => {
+  const calls: string[] = [];
+  const provider: ModelProvider = { complete: async (request) => {
+    calls.push(request.profile.provider);
+    return request.profile.provider === 'mock' ? { invalid: true } : decisionResult('function.select');
+  } };
+  const modelRegistry = dualDecisionRegistry();
+  const gateway = new ModelGateway({ registry: modelRegistry, providers: { mock: provider, 'intent-mock': provider } });
+  const resolver = new DecisionBackendResolver(modelRegistry);
+  const adapter = new UnifiedDecisionAdapter(resolver, new JevDecisionAdapter(gateway, 'function.select'), new IntentModelDecisionAdapter(gateway, 'function.select'), { crossBackendFallback: true });
+  const result = await adapter.decide({ traceId: 'trace-schema-cross', runId: 'run-schema-cross', request: { decisionType: 'function.select', decisionVersion: 'test@1', threshold: 0.8, candidates: [{ candidateId: 'candidate-1', priority: 1, specificity: 1 }] } });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.error.code, 'model.schema_invalid');
+  assert.deepEqual(calls, ['mock']);
+});
+
+/* 显式跨 backend 两边都失败时仍返回稳定 fallback_failed，且保留两条 attempt 证据。 */
+test('keeps cross backend double failure stable and redacted', async () => {
+  const calls: string[] = [];
+  const provider: ModelProvider = { complete: async (request) => {
+    calls.push(request.profile.provider);
+    throw new Error(`raw-${request.profile.provider}-secret`);
+  } };
+  const modelRegistry = dualDecisionRegistry();
+  const gateway = new ModelGateway({ registry: modelRegistry, providers: { mock: provider, 'intent-mock': provider } });
+  const resolver = new DecisionBackendResolver(modelRegistry);
+  const adapter = new UnifiedDecisionAdapter(resolver, new JevDecisionAdapter(gateway, 'function.select'), new IntentModelDecisionAdapter(gateway, 'function.select'), { crossBackendFallback: true });
+  const result = await adapter.decide({ traceId: 'trace-cross-failed', runId: 'run-cross-failed', request: { decisionType: 'function.select', decisionVersion: 'test@1', threshold: 0.8, candidates: [{ candidateId: 'candidate-1', priority: 1, specificity: 1 }] } });
+  assert.equal(result.ok, false);
+  if (!result.ok) {
+    assert.deepEqual(result.error, { code: 'model.fallback_failed', message: '模型主 provider 和 fallback 均失败', retryable: false, details: { primaryCode: 'model.provider_failed', fallbackCode: 'model.provider_failed' } });
+    assert.equal(JSON.stringify(result).includes('raw-'), false);
+  }
+  assert.deepEqual(calls, ['mock', 'mock', 'intent-mock', 'intent-mock']);
+  assert.deepEqual(result.audit.map((entry) => entry.fallbackUsed), [false, false, true, true]);
+});
+
+/* JEV 的低分澄清是合法结果，显式跨 backend 也不能把它升级为另一条选择。 */
+test('does not cross backend after low score clarification', async () => {
+  const calls: string[] = [];
+  const provider: ModelProvider = { complete: async (request) => {
+    calls.push(request.profile.provider);
+    return request.profile.provider === 'mock' ? decisionResult('function.select', 0.1) : decisionResult('function.select');
+  } };
+  const modelRegistry = dualDecisionRegistry();
+  const gateway = new ModelGateway({ registry: modelRegistry, providers: { mock: provider, 'intent-mock': provider } });
+  const resolver = new DecisionBackendResolver(modelRegistry);
+  const adapter = new UnifiedDecisionAdapter(resolver, new JevDecisionAdapter(gateway, 'function.select'), new IntentModelDecisionAdapter(gateway, 'function.select'), { crossBackendFallback: true });
+  const result = await adapter.decide({ traceId: 'trace-low-score', runId: 'run-low-score', request: { decisionType: 'function.select', decisionVersion: 'test@1', threshold: 0.8, candidates: [{ candidateId: 'candidate-1', priority: 1, specificity: 1 }] } });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.value.status, 'needs_clarification');
+  assert.deepEqual(calls, ['mock']);
 });
 
 /* adapter 必须把 provider 的非法结构收敛为 schema_invalid，不能抛出原始异常。 */

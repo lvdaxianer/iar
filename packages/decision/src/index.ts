@@ -10,7 +10,7 @@ import { providerFailureResult, shouldInvokeProvider, validateDecisionOutput } f
 import type { DecisionProvider, DecisionRequest, DecisionResponseFactory } from './types.js';
 
 export * from './types.js';
-export { validateDecisionOutput } from './validation.js';
+export { providerFailureResult, validateDecisionOutput } from './validation.js';
 export * from './model-profile.js';
 export * from './model-gateway/index.js';
 

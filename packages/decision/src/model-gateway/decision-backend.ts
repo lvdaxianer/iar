@@ -98,6 +98,15 @@ export function resolveFallbackProfile(registry: ModelProfileRegistry, primary: 
   return fallback && fallback.role === primary.role && resolveDecisionBackend(fallback, primary.role) === resolveDecisionBackend(primary, primary.role) ? fallback : undefined;
 }
 
+/** 解析显式跨 backend fallback 的另一条 primary profile。 @param registry - profile registry @param primary - 已选 primary @returns 另一 backend 的 primary 或 undefined @author lvdaxianer@yeah.net @date 2026-10-17 */
+export function resolveCrossBackendProfile(registry: ModelProfileRegistry, primary: ModelProfile): ModelProfile | undefined {
+  // 只有 Function/Plugin decision role 才有平行 backend，其他 role 不允许跨 role 猜测。
+  if (primary.role !== 'function.select' && primary.role !== 'plugin.select') return undefined;
+  const backend = resolveDecisionBackend(primary, primary.role);
+  const alternate = backend === 'jev' ? 'intent-model' : backend === 'intent-model' ? 'jev' : undefined;
+  return alternate ? resolvePrimaryProfileByBackend(registry.list(), primary.role, alternate) : undefined;
+}
+
 /** 返回 profile 实际使用的决策 backend，并兼容 legacy selection profile。 @param profile - 已校验 profile @param role - 模型 role @returns backend 或 undefined @author lvdaxianer@yeah.net @date 2026-10-17 */
 export function resolveDecisionBackend(profile: ModelProfile, role: ModelRole): DecisionBackend | undefined {
   // 显式字段优先，避免 Intent Model 被 legacy 默认覆盖。

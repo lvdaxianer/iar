@@ -7,7 +7,7 @@
 import { validateContract, type CompactionResult, type DecisionResult, type JsonValue } from '@iar/contracts';
 import { validateDecisionOutput } from '../validation.js';
 import type { DecisionRequest } from '../types.js';
-import { MODEL_NO_PROFILE_MESSAGE, type ModelGatewayResult, type ModelInvocation, type ModelOutputValidation } from './types.js';
+import { MODEL_NO_PROFILE_MESSAGE, type ModelGatewayInvocationOptions, type ModelGatewayResult, type ModelInvocation, type ModelOutputValidation } from './types.js';
 import { ModelGateway } from './gateway.js';
 import { DecisionBackendResolver } from './decision-backend.js';
 import { buildIntentDecisionInput, canonicalizeDecisionRequest } from './intent-prompt.js';
@@ -85,11 +85,12 @@ export class JevDecisionAdapter {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
-  public decide(invocation: JevDecisionInvocation, profileId?: string): Promise<ModelGatewayResult<DecisionResult>> {
+  public decide(invocation: JevDecisionInvocation, profileId?: string, options?: Pick<ModelGatewayInvocationOptions, 'crossBackendFallback'>): Promise<ModelGatewayResult<DecisionResult>> {
     // 先建立唯一请求快照，避免 role、gateway input 和 validator 分别读取可变输入。
     const snapshot = createDecisionInvocationSnapshot(invocation, this.role);
     if (!snapshot) return Promise.resolve(invalidJevResult('JEV decision 输入无效'));
-    return this.gateway.invoke(this.role, { traceId: snapshot.traceId, runId: snapshot.runId, input: snapshot.request as unknown as JsonValue }, (raw) => validateDecisionResult(snapshot.request, raw), decisionOptions('jev', profileId));
+    const crossBackendInput = options?.crossBackendFallback === true ? buildIntentDecisionInput(snapshot.request) : undefined;
+    return this.gateway.invoke(this.role, { traceId: snapshot.traceId, runId: snapshot.runId, input: snapshot.request as unknown as JsonValue }, (raw) => validateDecisionResult(snapshot.request, raw), decisionOptions('jev', profileId, options, crossBackendInput));
   }
 }
 
@@ -116,7 +117,7 @@ export class IntentModelDecisionAdapter {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
-  public decide(invocation: IntentModelDecisionInvocation, profileId?: string): Promise<ModelGatewayResult<DecisionResult>> {
+  public decide(invocation: IntentModelDecisionInvocation, profileId?: string, options?: Pick<ModelGatewayInvocationOptions, 'crossBackendFallback'>): Promise<ModelGatewayResult<DecisionResult>> {
     // role 不匹配、getter 异常或请求不可复制时，在构造 Prompt 前 fail-closed。
     const snapshot = createDecisionInvocationSnapshot(invocation, this.role);
     if (!snapshot) return Promise.resolve(invalidDecisionResult('Intent Model decision request 无效'));
@@ -127,7 +128,8 @@ export class IntentModelDecisionAdapter {
       // Prompt builder 的底层异常统一收敛为稳定 invalid_request。
       return Promise.resolve(invalidDecisionResult('Intent Model decision request 无效'));
     }
-    return this.gateway.invoke(this.role, { traceId: snapshot.traceId, runId: snapshot.runId, input }, (raw) => validateDecisionResult(snapshot.request, raw), decisionOptions('intent-model', profileId));
+    const crossBackendInput = options?.crossBackendFallback === true ? snapshot.request as unknown as JsonValue : undefined;
+    return this.gateway.invoke(this.role, { traceId: snapshot.traceId, runId: snapshot.runId, input }, (raw) => validateDecisionResult(snapshot.request, raw), decisionOptions('intent-model', profileId, options, crossBackendInput));
   }
 }
 
@@ -138,6 +140,8 @@ export class IntentModelDecisionAdapter {
  * @date 2026-10-17
  */
 export class UnifiedDecisionAdapter {
+  /** 跨 backend fallback 只在构造时显式开启，默认关闭。 */
+  private readonly options: Pick<ModelGatewayInvocationOptions, 'crossBackendFallback'>;
   /**
    * 创建统一决策入口。
    * @param resolver - 按 JEV 优先级解析 backend
@@ -146,7 +150,9 @@ export class UnifiedDecisionAdapter {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
-  public constructor(private readonly resolver: DecisionBackendResolver, private readonly jevAdapter: JevDecisionAdapter, private readonly intentModelAdapter: IntentModelDecisionAdapter) {}
+  public constructor(private readonly resolver: DecisionBackendResolver, private readonly jevAdapter: JevDecisionAdapter, private readonly intentModelAdapter: IntentModelDecisionAdapter, options: Pick<ModelGatewayInvocationOptions, 'crossBackendFallback'> = {}) {
+    this.options = options;
+  }
 
   /**
    * 解析 backend 并执行一次统一决策。
@@ -161,7 +167,7 @@ export class UnifiedDecisionAdapter {
     if (!snapshot) return Promise.resolve(invalidDecisionResult('统一 decision request 无效'));
     try {
       const resolution = this.resolver.resolve(snapshot.request.decisionType);
-      return resolution.backend === 'jev' ? this.jevAdapter.decide(snapshot, resolution.profileId) : this.intentModelAdapter.decide(snapshot, resolution.profileId);
+      return resolution.backend === 'jev' ? this.jevAdapter.decide(snapshot, resolution.profileId, this.options) : this.intentModelAdapter.decide(snapshot, resolution.profileId, this.options);
     } catch {
       // resolver 配置异常不能把内部 role/profile message 暴露给调用方。
       return Promise.resolve(noProfileResult());
@@ -317,8 +323,10 @@ function createDecisionInvocationSnapshot(invocation: unknown, role?: 'function.
 }
 
 /** 创建 backend-aware gateway 选项。 @param backend - 选定 backend @param profileId - resolver 选出的 primary profile @returns gateway 选择约束 @author lvdaxianer@yeah.net @date 2026-10-17 */
-function decisionOptions(backend: 'jev' | 'intent-model', profileId?: string): { decisionBackend: 'jev' | 'intent-model'; profileId?: string } {
-  return profileId ? { decisionBackend: backend, profileId } : { decisionBackend: backend };
+function decisionOptions(backend: 'jev' | 'intent-model', profileId?: string, options?: Pick<ModelGatewayInvocationOptions, 'crossBackendFallback'>, crossBackendInput?: JsonValue): ModelGatewayInvocationOptions {
+  const selected: ModelGatewayInvocationOptions = profileId ? { decisionBackend: backend, profileId } : { decisionBackend: backend };
+  if (options?.crossBackendFallback !== true) return selected;
+  return { ...selected, crossBackendFallback: true, ...(crossBackendInput !== undefined ? { crossBackendInput } : {}) };
 }
 
 /** 创建不含原始请求内容的统一 invalid_request。 @param message - 稳定错误摘要 @returns 决策失败结果 @author lvdaxianer@yeah.net @date 2026-10-17 */

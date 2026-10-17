@@ -6,7 +6,7 @@
  */
 import { redactModelRequest, type ModelAuditEntry, type ModelAuditOutcome, type ModelProfile, type ModelRole } from '../model-profile.js';
 import type { JsonValue } from '@iar/contracts';
-import { createDecisionAuditMetadata, resolveFallbackProfile, resolvePrimaryProfileForInvocation } from './decision-backend.js';
+import { createDecisionAuditMetadata, resolveCrossBackendProfile, resolveFallbackProfile, resolvePrimaryProfileForInvocation } from './decision-backend.js';
 import { MODEL_NO_PROFILE_MESSAGE, ModelProviderError, type ModelGatewayError, type ModelGatewayEvent, type ModelGatewayFailure, type ModelGatewayInvocationOptions, type ModelGatewayOptions, type ModelGatewayResult, type ModelInvocation, type ModelOutputValidation, type ModelProvider, type ModelProviderRequest } from './types.js';
 
 /** 仅供 gateway 内部区分 timeout race；不把原始 timer 错误暴露给调用方。 @author lvdaxianer@yeah.net @date 2026-10-17 */
@@ -84,7 +84,7 @@ export class ModelGateway {
     const primary = await this.runProfile({ role, invocation: invocationSnapshot, profile: primaryProfile, validate, useFallback: false });
     // primary 成功或产生合法澄清结果时不触发 fallback。
     if (primary.ok) return primary;
-    return this.finishWithFallback({ role, invocation: invocationSnapshot, validate, profile: primaryProfile, primary });
+    return this.finishWithFallback({ role, invocation: invocationSnapshot, validate, profile: primaryProfile, primary, crossBackendFallback: options?.crossBackendFallback === true, ...(options?.crossBackendInput !== undefined ? { crossBackendInput: options.crossBackendInput } : {}) });
   }
 
   /**
@@ -94,11 +94,13 @@ export class ModelGateway {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
-  private async finishWithFallback<T>(options: { role: ModelRole; invocation: ModelInvocation; validate: (raw: unknown) => ModelOutputValidation<T>; profile: ModelProfile; primary: ModelGatewayFailure }): Promise<ModelGatewayResult<T>> {
+  private async finishWithFallback<T>(options: { role: ModelRole; invocation: ModelInvocation; validate: (raw: unknown) => ModelOutputValidation<T>; profile: ModelProfile; primary: ModelGatewayFailure; crossBackendFallback: boolean; crossBackendInput?: JsonValue }): Promise<ModelGatewayResult<T>> {
     // 没有显式 fallback 时保留 primary 的稳定失败和审计证据。
-    if (!options.profile.fallbackProfileId) return options.primary;
-    // 只有 primary 失败后才解析并执行 fallback profile。
-    const fallback = await this.runFallback({ role: options.role, invocation: options.invocation, validate: options.validate, profile: options.profile, primary: options.primary });
+    if (!options.profile.fallbackProfileId && (!options.crossBackendFallback || !canCrossBackendFallback(options.primary.error.code))) return options.primary;
+    // 只有 provider/transport failure 才能通过显式配置跨 backend；schema 和业务边界错误不扩大调用范围。
+    const fallback = await this.runFallback({ role: options.role, invocation: options.invocation, validate: options.validate, profile: options.profile, primary: options.primary, crossBackendFallback: options.crossBackendFallback && canCrossBackendFallback(options.primary.error.code), ...(options.crossBackendInput !== undefined ? { crossBackendInput: options.crossBackendInput } : {}) });
+    // 没有可用的同 backend 或跨 backend primary 时保留原始稳定失败。
+    if (!fallback) return options.primary;
     // fallback 成功仍保留 primary attempt，便于审计降级原因。
     if (fallback.ok) return { ...fallback, audit: [...options.primary.audit, ...fallback.audit], events: [...options.primary.events, ...fallback.events] };
     // 两条路径均失败时返回明确 fallback_failed，不伪装 provider 成功。
@@ -171,12 +173,26 @@ export class ModelGateway {
   }
 
   /** 使用 fallback profile 执行第二条 provider 路径。 @param options - fallback 执行参数 @returns fallback 结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
-  private async runFallback<T>(options: { role: ModelRole; invocation: ModelInvocation; validate: (raw: unknown) => ModelOutputValidation<T>; profile: ModelProfile; primary: ModelGatewayFailure }): Promise<ModelGatewayResult<T>> {
-    const { role, invocation, validate, profile, primary } = options;
+  private async runFallback<T>(options: { role: ModelRole; invocation: ModelInvocation; validate: (raw: unknown) => ModelOutputValidation<T>; profile: ModelProfile; primary: ModelGatewayFailure; crossBackendFallback: boolean; crossBackendInput?: JsonValue }): Promise<ModelGatewayResult<T> | undefined> {
+    const { role, invocation, validate, profile, primary, crossBackendFallback, crossBackendInput } = options;
     try {
-      const fallbackProfile = resolveFallbackProfile(this.registry, profile);
-      if (!fallbackProfile) throw new Error('fallback profile unavailable');
-      return await this.runProfile({ role, invocation, profile: fallbackProfile, validate, useFallback: true });
+      const sameBackendFallback = resolveFallbackProfile(this.registry, profile);
+      if (sameBackendFallback) {
+        const sameResult = await this.runProfile({ role, invocation, profile: sameBackendFallback, validate, useFallback: true });
+        // 同 backend fallback 成功后立即结束，不能因为显式策略再额外调用另一 backend。
+        if (sameResult.ok || !crossBackendFallback || !canCrossBackendFallback(sameResult.error.code)) return sameResult;
+        const crossProfile = resolveCrossBackendProfile(this.registry, profile);
+        if (!crossProfile) return sameResult;
+        const crossInvocation = createFallbackInvocation(invocation, crossBackendInput);
+        if (!crossInvocation) return invalidInputResult();
+        const crossResult = await this.runProfile({ role, invocation: crossInvocation, profile: crossProfile, validate, useFallback: true });
+        return mergeFallbackAttempts(sameResult, crossResult);
+      }
+      const crossProfile = crossBackendFallback ? resolveCrossBackendProfile(this.registry, profile) : undefined;
+      if (!crossProfile) return undefined;
+      const crossInvocation = createFallbackInvocation(invocation, crossBackendInput);
+      if (!crossInvocation) return invalidInputResult();
+      return await this.runProfile({ role, invocation: crossInvocation, profile: crossProfile, validate, useFallback: true });
     } catch {
       // registry fallback 配置损坏也要保留 primary code 并稳定失败。
       return { ok: false, error: { code: 'model.fallback_failed', message: '模型 fallback 配置无效', retryable: false, details: { primaryCode: primary.error.code } }, audit: [], events: [] };
@@ -225,6 +241,24 @@ export class ModelGateway {
     options.events.push({ eventName: 'model.failed', audit: entry, ...(options.code ? { errorCode: options.code } : {}) });
     return { ok: false, error: { code: options.code ?? 'model.no_provider', message: '模型 provider 未注册', retryable: false, details: {} }, audit: options.audit, events: options.events };
   }
+}
+
+/** 只有 provider/transport 类失败允许显式跨 backend，避免把 schema 或业务拒绝扩散为第二次模型调用。 @param code - primary 稳定错误码 @returns 是否允许跨 backend @author lvdaxianer@yeah.net @date 2026-10-17 */
+function canCrossBackendFallback(code: ModelGatewayError['code']): boolean {
+  return code === 'model.provider_failed' || code === 'model.timeout' || code === 'model.no_provider';
+}
+
+/** 合并同 backend 与跨 backend 的 fallback attempt，并保持最终错误稳定。 @param first - 同 backend 结果 @param second - 跨 backend 结果 @returns 合并后的 fallback 结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
+function mergeFallbackAttempts<T>(first: ModelGatewayResult<T>, second: ModelGatewayResult<T>): ModelGatewayResult<T> {
+  if (second.ok) return { ...second, audit: [...first.audit, ...second.audit], events: [...first.events, ...second.events] };
+  return { ok: false, error: { code: 'model.fallback_failed', message: '模型主 provider 和 fallback 均失败', retryable: false, details: { primaryCode: first.ok ? 'model.provider_failed' : first.error.code, fallbackCode: second.error.code } }, audit: [...first.audit, ...second.audit], events: [...first.events, ...second.events] };
+}
+
+/** 为跨 backend 输入重新建立冻结快照，防止 provider 修改 Prompt 后污染审计或后续 attempt。 @param invocation - primary 冻结调用 @param input - 目标 backend 输入 @returns 冻结 fallback 调用或 undefined @author lvdaxianer@yeah.net @date 2026-10-17 */
+function createFallbackInvocation(invocation: ModelInvocation, input?: JsonValue): ModelInvocation | undefined {
+  // 没有跨 backend 输入时复用 primary snapshot，同 backend fallback 不重复复制。
+  if (input === undefined) return invocation;
+  return createInvocationSnapshot({ ...invocation, input });
 }
 
 /** 在单个 profile 内执行有界 retry loop。 @param options - retry 状态和 attempt 回调 @returns 当前 profile 的稳定结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
