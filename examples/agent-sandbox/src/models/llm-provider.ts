@@ -22,6 +22,11 @@ import {
   type ModelProvider,
   type ModelProviderRequest
 } from '@iar/decision';
+import { callModel } from './model-transport.js';
+import { runWithModelLogContext } from '../safe-log.js';
+import { callModelStream } from './model-stream-transport.js';
+import { SEMANTIC_SYSTEM_PROMPT, COMPACT_SYSTEM_PROMPT, RESPONSE_SYSTEM_PROMPT, RESPONSE_STREAM_SYSTEM_PROMPT,
+  buildCompactionUserPrompt, buildResponseUserPrompt, readString } from './model-input-transport.js';
 
 /** brain provider 的可注入配置。 */
 export type BrainProviderOptions = {
@@ -55,83 +60,6 @@ export type OpenAICompatibleProviderOptions = {
   /** 未声明 endpoint 环境变量时的兼容默认地址。 */
   defaultBaseUrl?: string;
 };
-
-/** OpenAI 兼容 chat/completions 响应的最小读取形状。 */
-type ChatCompletionResponse = {
-  choices?: Array<{ message?: { content?: unknown } }>;
-};
-
-/** OpenAI 兼容 chat/completions 流式 chunk 的最小读取形状。 */
-type ChatCompletionStreamChunk = {
-  choices?: Array<{ delta?: { content?: unknown } }>;
-};
-
-/** 语义抽取角色的系统提示词。 */
-const SEMANTIC_SYSTEM_PROMPT = `你是 IAR（Intent Action Runtime）的 Semantic Extractor。
-把用户输入抽取为 iar.semantic-frame/v1 结构的 JSON 对象，只允许以下字段：
-{ "schemaVersion": "iar.semantic-frame/v1", "subject": {...}, "intent": string, "action": string, "slots": {...}, "references": [...], "confidence": number }
-
-intent 只允许以下取值之一（企业数据平台的十个子系统，intent 即 functionId）：
-- knowledge.query：平台通用知识问答/FAQ/使用帮助，只收纳跨子系统的通用问题（登录、密码重置、浏览器兼容、使用入口等）；某个子系统领域内的概念、流程、排错问题必须归该子系统。槽位 slots.query = 用户想查的内容。
-- dip.manage：数据集成管理（DIP 任务）。槽位 slots.operation 可选 list/detail/rerun/stop；slots.query 为自由文本；slots.params 可选 taskId 等参数。
-- job.monitor：任务调度监控。槽位 slots.operation 可选 status/logs；slots.params 可选 jobName。
-- api.gateway：API 网关管理。槽位 slots.operation 可选 stats/limit；slots.params 可选 target、rate。
-- dataset.query：数据资产目录检索。槽位 slots.operation 可选 search/lineage；slots.query 为表名或指标；slots.params 可选 table。
-- report.center：报表中心。槽位 slots.operation 可选 list/export；slots.params 可选 reportId、format。
-- system.status：系统状态与告警。槽位 slots.operation 可选 overview/alerts。
-- account.privilege：账户与权限。槽位 slots.operation 可选 mine/grant；slots.params 可选 role、resource。
-- ticket.create：工单支持。槽位 slots.operation 可选 progress/create；slots.params 可选 ticketId、title、priority。
-- human.transfer：转接人工服务。槽位 slots.query 或 slots.summary = 问题摘要。
-- unknown：无法归入以上十类。
-
-规则：
-1. 缺槽位时只抽取已有的槽位，不要编造。
-2. confidence 取 0 到 1。
-3. references 解析输入中的指代，没有则为空数组。
-4. 用户询问助手身份或纯闲聊寒暄（如「你是谁呢」「你好」「今天天气怎么样」）时，intent 取 unknown。
-5. slots.operation 只在用户明确要求执行动作时给出（如「重跑」「停止」「导出」「申请」「转人工」「调整限流」）；咨询类问题（「有哪些」「是什么」「怎么用」「多久」「怎么排查」）不要给 operation，只给 slots.query。
-6. 只输出一个 JSON 对象，不要输出 Markdown、解释文字或代码围栏。`;
-
-/** 上下文压缩角色的系统提示词。 */
-const COMPACT_SYSTEM_PROMPT = `你是 IAR（Intent Action Runtime）的 Context Compactor。
-你的唯一任务是在不改变行为状态的前提下压缩旧对话和旧事件，生成可校验的结构化摘要。
-硬性规则：
-1. 只使用输入中明确出现的事实，不得猜测补充。
-2. 必须原样保留 state.subject、state.intent、state.action、state.route、state.slots、state.workflow、state.pending、state.confirmation。
-3. 不得重新选择 Function 或 Plugin，不得改变 confirmation 或 workflow 状态。
-4. 只输出一个 JSON 对象，不要输出 Markdown、解释文字或代码围栏。
-5. 输出必须符合 iar.compaction-result/v1：{ "schemaVersion": "iar.compaction-result/v1", "summary": string, "state": {...}, "references": [...], "preservedFacts": [...], "warnings": [...] }。
-preservedFacts 必须包含：subject、action、functionId、pluginId、slots、workflow.currentStep、pending、confirmation、intent、idempotencyKey。`;
-
-/** 回复生成角色的系统提示词。 */
-const RESPONSE_SYSTEM_PROMPT = `你是 IAR（Intent Action Runtime）的 Response Generator。
-根据给定的执行结果生成面向用户的自然语言回复。
-只输出一个符合 iar.response/v1 的 JSON 对象：{ "schemaVersion": "iar.response/v1", "text": string }。
-不要输出 Markdown、解释文字或代码围栏。text 使用简洁友好的中文。`;
-
-/** 流式回复生成角色的系统提示词：直接输出正文，避免 JSON 包装逐字流出到界面。 */
-const RESPONSE_STREAM_SYSTEM_PROMPT = `你是 IAR（Intent Action Runtime）的 Response Generator。
-根据给定的执行结果生成面向用户的自然语言回复。
-直接输出回复正文本身：不要输出 JSON、schemaVersion 包装、Markdown 或解释性文字。
-使用简洁友好的中文，可以分点。`;
-
-/** 压缩提示词中的 compression_policy 片段。 */
-const COMPACTION_POLICY = `{
-  "schemaVersion": "iar.compaction-result/v1",
-  "maxSummaryChars": 1200,
-  "requiredPaths": [
-    "state.subject",
-    "state.intent",
-    "state.action",
-    "state.route.functionId",
-    "state.route.pluginId",
-    "state.slots",
-    "state.workflow.currentStep",
-    "state.pending",
-    "state.confirmation"
-  ],
-  "preserveEventReferences": true
-}`;
 
 /**
  * 通过真实 LLM API 执行结构化模型调用的 provider。
@@ -167,8 +95,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     const connection = this.resolveConnection(request.profile);
     if (!connection.apiKey || !connection.baseUrl) throw new ModelProviderError('provider_unavailable');
     const prompt = this.buildPrompt(request);
-    const raw = await this.callChatCompletion(connection, prompt.system, prompt.user, request.signal);
-    return parseJsonContent(raw);
+    return await runWithModelLogContext(request.traceId, () => callModel({ connection, ...prompt, signal: request.signal }));
   }
 
   /**
@@ -190,7 +117,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     if (!connection.apiKey || !connection.baseUrl) throw new ModelProviderError('provider_unavailable');
     // 流式场景直接输出正文（非 JSON 契约），accumulate 全文原样返回，由调用方兜底解析。
     const prompt = this.buildStreamPrompt(request);
-    return await this.streamChatCompletion(connection, prompt.system, prompt.user, request.signal, onDelta, false);
+    return await runWithModelLogContext(request.traceId, () => callModelStream({ connection, ...prompt, signal: request.signal }, onDelta));
   }
 
   /**
@@ -228,14 +155,10 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
   }
 
   /**
-   * 调用 OpenAI 兼容 chat/completions 接口。
+   * 根据模型配置解析连接信息。
    *
-   * @param model - 本次调用使用的模型标识
-   * @param system - 系统提示词
-   * @param user - 用户内容
-   * @param signal - gateway 注入的取消信号
-   * @returns choices[0].message.content 原文
-   * @throws ModelProviderError 当 HTTP 状态非 2xx 或网络失败
+   * @param profile - 模型配置
+   * @returns 当前调用使用的连接信息
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
@@ -250,128 +173,6 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     return { apiKey, baseUrl: baseUrl?.replace(/\/+$/, ''), model };
   }
 
-  /**
-   * 调用 OpenAI 兼容 chat/completions 接口。
-   *
-   * @param connection - 已解析且不写入 profile 的连接信息
-   * @param system - 系统提示词
-   * @param user - 用户内容
-   * @param signal - gateway 注入的取消信号
-   * @returns choices[0].message.content 原文
-   * @throws ModelProviderError 当 HTTP 状态非 2xx 或网络失败
-   * @author lvdaxianer@yeah.net
-   * @date 2026-10-17
-   */
-  private async callChatCompletion(connection: { apiKey: string | undefined; baseUrl: string | undefined; model: string }, system: string, user: string, signal: AbortSignal): Promise<string> {
-    let response: Response;
-    try {
-      response = await fetch(`${connection.baseUrl}/chat/completions`, {
-        method: 'POST',
-        signal,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${connection.apiKey}` },
-        body: JSON.stringify({
-          model: connection.model,
-          temperature: 0.2,
-          response_format: { type: 'json_object' },
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: user }
-          ]
-        })
-      });
-    } catch {
-      // 网络层异常统一归类为 provider 暂不可用，让 gateway 走 retry/fallback。
-      throw new ModelProviderError('provider_unavailable');
-    }
-    if (!response.ok) throw new ModelProviderError('provider_failed');
-    let payload: ChatCompletionResponse;
-    try {
-      payload = await response.json() as ChatCompletionResponse;
-    } catch {
-      throw new ModelProviderError('provider_failed');
-    }
-    const content = payload.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || content.length === 0) throw new ModelProviderError('provider_failed');
-    return content;
-  }
-
-  /**
-   * 调用 OpenAI 兼容 chat/completions 流式接口并逐行解析 SSE。
-   *
-   * 只识别 `data: ` 前缀的有效负载行，`[DONE]` 为结束标记；
-   * 注释行、非法 JSON 行和空 delta 直接跳过，保证对端心跳或
-   * 个别坏帧不会中断整段回复。accumulate 的全文最终交回 completeStreamed 解析。
-   *
-   * @param connection - 已解析且不写入 profile 的连接信息
-   * @param system - 系统提示词
-   * @param user - 用户内容
-   * @param signal - gateway 注入的取消信号
-   * @param onDelta - 每个 content 增量的回调
-   * @returns accumulate 后的全文
-   * @throws ModelProviderError 当 HTTP 状态非 2xx、网络失败、读取中断或全文为空
-   * @author lvdaxianer@yeah.net
-   * @date 2026-10-18
-   */
-  private async streamChatCompletion(connection: { apiKey: string | undefined; baseUrl: string | undefined; model: string }, system: string, user: string, signal: AbortSignal, onDelta: (delta: string) => void, jsonFormat = true): Promise<string> {
-    let response: Response;
-    try {
-      response = await fetch(`${connection.baseUrl}/chat/completions`, {
-        method: 'POST',
-        signal,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${connection.apiKey}` },
-        body: JSON.stringify({
-          model: connection.model,
-          temperature: 0.2,
-          stream: true,
-          ...(jsonFormat ? { response_format: { type: 'json_object' } } : {}),
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: user }
-          ]
-        })
-      });
-    } catch {
-      // 网络层异常（含 abort）统一归类为 provider 暂不可用。
-      throw new ModelProviderError('provider_unavailable');
-    }
-    if (!response.ok || response.body === null) throw new ModelProviderError('provider_failed');
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let pending = '';
-    let accumulated = '';
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        pending += decoder.decode(value, { stream: true });
-        const lines = pending.split(/\r?\n/);
-        pending = lines.pop() ?? '';
-        for (const line of lines) {
-          const text = line.trim();
-          if (!text.startsWith('data:')) continue;
-          const data = text.slice('data:'.length).trim();
-          if (data === '[DONE]') continue;
-          let chunk: ChatCompletionStreamChunk;
-          try {
-            chunk = JSON.parse(data) as ChatCompletionStreamChunk;
-          } catch {
-            // 个别坏帧（如服务端心跳注释被误切）不中断整段回复。
-            continue;
-          }
-          const delta = chunk.choices?.[0]?.delta?.content;
-          if (typeof delta === 'string' && delta.length > 0) {
-            accumulated += delta;
-            onDelta(delta);
-          }
-        }
-      }
-    } catch {
-      // 读取中断或解码失败按 provider 暂不可用归类，保留已收到增量的兜底由调用方决定。
-      throw new ModelProviderError('provider_unavailable');
-    }
-    if (accumulated.length === 0) throw new ModelProviderError('provider_failed');
-    return accumulated;
-  }
 }
 
 /** 普通交互模型 provider，保留既有 brain 角色的提示词协议。 */
@@ -444,103 +245,8 @@ function nonEmpty(value: string | undefined): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 }
 
-/**
- * 按参考模板拼装压缩用户提示词。
- *
- * @param input - 调用方注入的 behaviorContext、eventsToCompact 和 recentMessages
- * @returns 压缩用户内容
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
-function buildCompactionUserPrompt(input: Record<string, unknown>): string {
-  const contextJson = JSON.stringify(input.behaviorContext ?? {}, null, 2);
-  const eventsJson = JSON.stringify(input.eventsToCompact ?? [], null, 2);
-  const messagesJson = JSON.stringify(input.recentMessages ?? [], null, 2);
-  return [
-    '请压缩以下 IAR 上下文。',
-    '',
-    '<behavior_context>',
-    contextJson,
-    '</behavior_context>',
-    '',
-    '<events_to_compact>',
-    eventsJson,
-    '</events_to_compact>',
-    '',
-    '<recent_messages>',
-    messagesJson,
-    '</recent_messages>',
-    '',
-    '<compression_policy>',
-    COMPACTION_POLICY,
-    '</compression_policy>'
-  ].join('\n');
-}
 
-/**
- * 拼装回复生成的用户内容。
- *
- * 输入携带 availableFunctions 时视为路由未命中的兜底回复请求：
- * 基于最近对话自然回答"你是谁/你能做什么/我刚才让你做什么"类问题，
- * 或自然解释可执行能力；否则按执行结果生成常规回复。
- *
- * @param input - 调用方注入的用户消息和执行结果或兜底上下文
- * @returns 回复生成用户内容
- * @author lvdaxianer@yeah.net
- * @date 2026-10-18
- */
-function buildResponseUserPrompt(input: Record<string, unknown>): string {
-  if (Array.isArray(input.availableFunctions)) {
-    return [
-      '本轮路由未命中任何可执行功能，需要生成一条兜底回复。',
-      `用户消息：${readString(input, 'userMessage') ?? ''}`,
-      `最近对话：${JSON.stringify(input.recentMessages ?? [])}`,
-      `可用功能：${input.availableFunctions.map((item) => String(item)).join('、')}`,
-      `未命中原因码：${readString(input, 'reasonCode') ?? 'unknown'}`,
-      '要求：用户问"你是谁/你是做什么的"时，自然自我介绍为 IAR Agent Sandbox（可交互的 IAR 插件沙盒，演示意图识别、两阶段路由和插件执行链路）；用户提到"刚才/之前"让你做的事时，根据最近对话回答；其他情况自然解释你能做什么并各给一个简短示例。语气简洁友好，不要提及路由失败或原因码。',
-      '请生成面向用户的最终回复 JSON。'
-    ].join('\n');
-  }
-  return [
-    `用户消息：${readString(input, 'userMessage') ?? ''}`,
-    `执行功能：${readString(input, 'functionId') ?? 'unknown'} / 插件：${readString(input, 'pluginId') ?? 'unknown'}`,
-    `执行状态：${readString(input, 'actionStatus') ?? 'unknown'}`,
-    `执行输出：${JSON.stringify(input.actionOutput ?? null)}`,
-    '请生成面向用户的最终回复 JSON。'
-  ].join('\n');
-}
 
-/**
- * 解析模型返回的 JSON 文本。
- *
- * @param content - choices[0].message.content 原文
- * @returns 解析后的 JSON 值
- * @throws ModelProviderError 当文本不是合法 JSON
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
-function parseJsonContent(content: string): unknown {
-  try {
-    return JSON.parse(content) as unknown;
-  } catch {
-    // 结构化输出解析失败只能转为稳定 provider 错误，不能传播原始正文。
-    throw new ModelProviderError('provider_failed');
-  }
-}
-
-/**
- * 读取冻结输入中的字符串字段。
- *
- * @param input - provider 请求输入
- * @param key - 字段名
- * @returns 非空字符串或 undefined
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
-function readString(input: Record<string, unknown>, key: string): string | undefined {
-  const value = input[key];
-  return typeof value === 'string' && value.length > 0 ? value : undefined;
-}
 
 /**
  * 把未知输入收窄为普通对象。
