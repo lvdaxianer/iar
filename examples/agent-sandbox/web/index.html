@@ -54,6 +54,17 @@
   .msg.user { align-self: flex-end; background: var(--user-bg); color: #fff; border-bottom-right-radius: 4px; }
   .msg.bot { align-self: flex-start; background: var(--bot-bg); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
   .msg .meta { display: block; margin-top: 6px; font-size: 11px; color: var(--muted); }
+  /* Markdown 渲染 */
+  .md-body { display: block; }
+  .md-body p { margin: 4px 0; }
+  .md-body ul, .md-body ol { margin: 4px 0; padding-left: 18px; }
+  .md-body li { margin: 2px 0; }
+  .md-body code { background: rgba(0,0,0,.06); padding: 1px 4px; border-radius: 4px; font-family: var(--mono); font-size: 12px; }
+  .md-body pre { background: #f6f8fa; border: 1px solid var(--border); border-radius: 6px; padding: 8px; overflow-x: auto; margin: 6px 0; }
+  .md-body pre code { background: none; padding: 0; }
+  .md-body h3, .md-body h4, .md-body h5 { margin: 8px 0 4px; font-size: 13px; }
+  .md-body strong { font-weight: 600; }
+
   .confirm-box {
     align-self: flex-start; background: #fffbeb; border: 1px solid #fde68a;
     border-radius: 12px; padding: 12px 14px; font-size: 13px; max-width: 78%;
@@ -119,7 +130,7 @@
   <section class="chat">
     <div id="messages" class="messages"></div>
     <form id="inputBar" class="input-bar">
-      <input id="messageInput" placeholder="输入消息，例如：帮我查一下退款政策" autocomplete="off" />
+      <input id="messageInput" placeholder="输入消息，例如：搜一下用户表" autocomplete="off" />
       <button id="sendBtn" type="submit">发送</button>
     </form>
   </section>
@@ -133,6 +144,10 @@
         <dt>语义置信度</dt><dd id="routeConfidence">-</dd>
         <dt>决策分数</dt><dd id="routeScore">-</dd>
       </dl>
+    </div>
+    <div>
+      <h2>子系统（10）</h2>
+      <ul id="subsystemList" style="list-style:none;display:flex;flex-direction:column;gap:4px;margin-top:8px;font-size:12px"></ul>
     </div>
     <div>
       <h2>最近事件</h2>
@@ -151,7 +166,7 @@
       <div id="compactResult" style="margin-top:8px"></div>
     </div>
     <p class="hint">
-      试试：「帮我查一下退款政策」（低风险直接执行）、「帮我提个工单，网络很卡」（高风险需确认）、「转人工」（高风险需确认）。
+      试试：「如何申请数据权限」（知识问答）、「重跑订单同步这个 DIP」（需确认）、「订单汇总 Job 跑完了吗」（任务监控）、「搜一下用户表」（资产检索）、「导出销售日报」（需确认）、「你是谁呢」（闲聊兜底）。
     </p>
   </aside>
 </main>
@@ -162,10 +177,77 @@
   var sendBtn = document.getElementById('sendBtn');
   var pendingRunId = null;
 
+  /** HTML 转义：任何模型输出渲染前必须先转义，防注入。 */
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  /** 行内 Markdown：代码、加粗、斜体。输入必须是已转义文本。 */
+  function inlineMd(s) {
+    return s
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>');
+  }
+
+  /** 轻量 Markdown 渲染：代码块、标题、无序/有序列表、段落；先转义再渲染，安全子集。 */
+  function renderMarkdown(src) {
+    var codeBlocks = [];
+    var text = String(src).replace(/```([\s\S]*?)```/g, function (_, code) {
+      codeBlocks.push(code.replace(/^\n+|\n+$/g, ''));
+      return ' ' + (codeBlocks.length - 1) + ' ';
+    });
+    var lines = escapeHtml(text).split('\n');
+    var html = '';
+    var inUl = false;
+    var inOl = false;
+    function closeLists() {
+      if (inUl) { html += '</ul>'; inUl = false; }
+      if (inOl) { html += '</ol>'; inOl = false; }
+    }
+    for (var i = 0; i < lines.length; i++) {
+      var trimmed = lines[i].trim();
+      var ulMatch = /^[-*]\s+(.+)/.exec(trimmed);
+      var olMatch = /^\d+[.、)]\s*(.+)/.exec(trimmed);
+      if (ulMatch) {
+        if (inOl) { html += '</ol>'; inOl = false; }
+        if (!inUl) { html += '<ul>'; inUl = true; }
+        html += '<li>' + inlineMd(ulMatch[1]) + '</li>';
+        continue;
+      }
+      if (olMatch) {
+        if (inUl) { html += '</ul>'; inUl = false; }
+        if (!inOl) { html += '<ol>'; inOl = true; }
+        html += '<li>' + inlineMd(olMatch[1]) + '</li>';
+        continue;
+      }
+      closeLists();
+      if (trimmed === '') continue;
+      var h = /^(#{1,4})\s+(.+)$/.exec(trimmed);
+      if (h) {
+        var level = h[1].length + 2;
+        html += '<h' + level + '>' + inlineMd(h[2]) + '</h' + level + '>';
+        continue;
+      }
+      html += '<p>' + inlineMd(lines[i]) + '</p>';
+    }
+    closeLists();
+    return html.replace(/ (\d+) /g, function (_, idx) {
+      return '<pre><code>' + escapeHtml(codeBlocks[+idx]) + '</code></pre>';
+    });
+  }
+
   function appendMsg(role, text, meta) {
     var div = document.createElement('div');
     div.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
-    div.textContent = text;
+    if (role === 'user') {
+      div.textContent = text;
+    } else {
+      var body = document.createElement('div');
+      body.className = 'md-body';
+      body.innerHTML = renderMarkdown(text);
+      div.appendChild(body);
+    }
     if (meta) {
       var span = document.createElement('span');
       span.className = 'meta';
@@ -224,11 +306,12 @@
     response: '正在生成回复…'
   };
 
-  /** 创建流式助手气泡：text 节点追加增量，stage 行展示阶段进度。 */
+  /** 创建流式助手气泡：流式期间纯文本追加，finalize 时渲染 Markdown；stage 行展示阶段进度。 */
   function createStreamBubble() {
     var div = document.createElement('div');
     div.className = 'msg bot';
-    var textEl = document.createElement('span');
+    var textEl = document.createElement('div');
+    textEl.className = 'md-body';
     var stageEl = document.createElement('span');
     stageEl.className = 'meta';
     stageEl.textContent = STAGE_LABELS.semantic;
@@ -242,7 +325,7 @@
         if (!gotDelta && STAGE_LABELS[stage]) stageEl.textContent = STAGE_LABELS[stage];
       },
       appendDelta: function (text) {
-        // 收到第一个增量即收尾阶段行，开始逐字渲染回复。
+        // 收到第一个增量即收尾阶段行，开始逐字渲染回复（纯文本，结束时统一渲染 Markdown）。
         if (!gotDelta) { gotDelta = true; stageEl.remove(); }
         textEl.textContent += text;
         messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -251,6 +334,8 @@
         stageEl.remove();
         if (!result) return;
         if (textEl.textContent.length === 0 && result.reply) textEl.textContent = result.reply;
+        // 流式结束，把累积正文渲染为 Markdown（内部已做 HTML 转义）。
+        textEl.innerHTML = renderMarkdown(textEl.textContent);
         var metaText = result.status === 'executed'
           ? '已执行 · ' + (result.route && result.route.functionId ? result.route.functionId : '')
           : result.status === 'awaiting_confirmation' ? '等待确认'
@@ -417,7 +502,38 @@
     });
   }
 
-  appendMsg('bot', '你好，我是 IAR Agent Sandbox。输入消息即可体验「意图 → Function → Plugin → 执行」全链路，右侧调试面板可查看路由证据、事件流和 BehaviorContext。');
+  var SUBSYSTEMS = [
+    ['knowledge.query', '平台通用知识'],
+    ['dip.manage', '数据集成管理'],
+    ['job.monitor', '任务调度监控'],
+    ['api.gateway', 'API 网关管理'],
+    ['dataset.query', '数据资产目录'],
+    ['report.center', '报表中心'],
+    ['system.status', '系统状态与告警'],
+    ['account.privilege', '账户与权限'],
+    ['ticket.create', '工单支持'],
+    ['human.transfer', '人工服务']
+  ];
+
+  function renderSubsystems() {
+    var list = document.getElementById('subsystemList');
+    list.innerHTML = '';
+    SUBSYSTEMS.forEach(function (item) {
+      var li = document.createElement('li');
+      li.style.cssText = 'display:flex;justify-content:space-between;gap:8px;padding:4px 8px;background:#f8fafc;border:1px solid var(--border);border-radius:6px';
+      var name = document.createElement('span');
+      name.textContent = item[1];
+      var id = document.createElement('span');
+      id.style.cssText = 'font-family:var(--mono);color:var(--muted);font-size:11px';
+      id.textContent = item[0];
+      li.appendChild(name);
+      li.appendChild(id);
+      list.appendChild(li);
+    });
+  }
+
+  appendMsg('bot', '你好，我是 IAR Agent Sandbox。当前模拟的企业数据平台包含 10 个子系统：平台通用知识、数据集成管理（DIP）、任务调度监控、API 网关管理、数据资产目录、报表中心、系统状态与告警、账户与权限、工单支持与人工服务。输入一句话即可体验「意图 → Function → Plugin → 执行」全链路，右侧调试面板可查看路由证据、事件流和 BehaviorContext。');
+  renderSubsystems();
   refreshState();
   setInterval(refreshState, 3000);
 })();

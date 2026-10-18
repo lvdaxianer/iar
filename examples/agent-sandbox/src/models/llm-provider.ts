@@ -71,17 +71,26 @@ const SEMANTIC_SYSTEM_PROMPT = `你是 IAR（Intent Action Runtime）的 Semanti
 把用户输入抽取为 iar.semantic-frame/v1 结构的 JSON 对象，只允许以下字段：
 { "schemaVersion": "iar.semantic-frame/v1", "subject": {...}, "intent": string, "action": string, "slots": {...}, "references": [...], "confidence": number }
 
-intent 只允许四个取值之一：
-- knowledge.query：用户想查询知识/资料/政策。槽位 slots.query = 用户想查的内容。
-- ticket.create：用户想提交工单/报障/提单。槽位 slots.title（简短标题）、slots.description（详细描述）、slots.priority（low/medium/high）。
-- human.transfer：用户想转人工/找客服/人工协助。槽位 slots.reason（转接原因）、slots.summary（问题摘要）。
-- unknown：无法归入以上三类。
+intent 只允许以下取值之一（企业数据平台的十个子系统，intent 即 functionId）：
+- knowledge.query：平台通用知识问答/FAQ/使用帮助，只收纳跨子系统的通用问题（登录、密码重置、浏览器兼容、使用入口等）；某个子系统领域内的概念、流程、排错问题必须归该子系统。槽位 slots.query = 用户想查的内容。
+- dip.manage：数据集成管理（DIP 任务）。槽位 slots.operation 可选 list/detail/rerun/stop；slots.query 为自由文本；slots.params 可选 taskId 等参数。
+- job.monitor：任务调度监控。槽位 slots.operation 可选 status/logs；slots.params 可选 jobName。
+- api.gateway：API 网关管理。槽位 slots.operation 可选 stats/limit；slots.params 可选 target、rate。
+- dataset.query：数据资产目录检索。槽位 slots.operation 可选 search/lineage；slots.query 为表名或指标；slots.params 可选 table。
+- report.center：报表中心。槽位 slots.operation 可选 list/export；slots.params 可选 reportId、format。
+- system.status：系统状态与告警。槽位 slots.operation 可选 overview/alerts。
+- account.privilege：账户与权限。槽位 slots.operation 可选 mine/grant；slots.params 可选 role、resource。
+- ticket.create：工单支持。槽位 slots.operation 可选 progress/create；slots.params 可选 ticketId、title、priority。
+- human.transfer：转接人工服务。槽位 slots.query 或 slots.summary = 问题摘要。
+- unknown：无法归入以上十类。
 
 规则：
 1. 缺槽位时只抽取已有的槽位，不要编造。
 2. confidence 取 0 到 1。
 3. references 解析输入中的指代，没有则为空数组。
-4. 只输出一个 JSON 对象，不要输出 Markdown、解释文字或代码围栏。`;
+4. 用户询问助手身份或纯闲聊寒暄（如「你是谁呢」「你好」「今天天气怎么样」）时，intent 取 unknown。
+5. slots.operation 只在用户明确要求执行动作时给出（如「重跑」「停止」「导出」「申请」「转人工」「调整限流」）；咨询类问题（「有哪些」「是什么」「怎么用」「多久」「怎么排查」）不要给 operation，只给 slots.query。
+6. 只输出一个 JSON 对象，不要输出 Markdown、解释文字或代码围栏。`;
 
 /** 上下文压缩角色的系统提示词。 */
 const COMPACT_SYSTEM_PROMPT = `你是 IAR（Intent Action Runtime）的 Context Compactor。

@@ -2,16 +2,19 @@
  * 提供离线确定性 ModelProvider 实现（scripted 模式）。
  *
  * 该 provider 不访问任何外部服务，用关键词匹配模拟语义抽取：
- * 查/知识/退款 → knowledge.query，工单 → ticket.create，人工 → human.transfer；
- * response.generate 返回模板化中文回复；context.compact 返回基于输入的确定性摘要。
- * 输出结构与 brain provider 完全一致，保证同一 gateway 校验路径可复用。
+ * 十个企业数据平台子系统（intent 即 functionId），各配 3~6 个中文
+ * 关键词/句式，并抽取 slots.operation / slots.query；response.generate
+ * 按子系统中文名生成模板化中文回复；context.compact 返回基于输入的
+ * 确定性摘要。输出结构与 brain provider 完全一致，保证同一 gateway
+ * 校验路径可复用。
  *
  * @author lvdaxianer@yeah.net
- * @date 2026-10-17
+ * @date 2026-10-18
  */
 import type { JsonValue } from '@iar/contracts';
 import { REQUIRED_PRESERVED_FACTS } from '@iar/contracts';
 import type { ModelProvider, ModelProviderRequest } from '@iar/decision';
+import { sandboxFunctionCatalog } from '../functions/index.js';
 
 /** 会话消息的最小形状。 */
 type SandboxMessage = { role: string; text: string };
@@ -42,25 +45,62 @@ export class ScriptedModelProvider implements ModelProvider {
   }
 
   /**
-   * 关键词匹配抽取 SemanticFrame。
+   * 关键词匹配抽取 SemanticFrame，覆盖十个子系统。
+   *
+   * 匹配顺序从语义最具体的子系统到最泛化的知识问答，避免宽泛词
+   * （如「查」「怎么」）抢先命中；operation 槽位在检测到明确的动作
+   * 或子操作关键词时给出，缺省时由 handler 端推断默认 read 操作。
    *
    * @param text - 用户输入文本
    * @returns iar.semantic-frame/v1 结构
    * @author lvdaxianer@yeah.net
-   * @date 2026-10-17
+   * @date 2026-10-18
    */
   private extract(text: string): unknown {
     const trimmed = text.trim();
     if (trimmed.length === 0) return frame('unknown', {}, 0.1);
-    // 人工优先于工单和查询，避免“转人工查问题”被误判为知识查询。
-    if (/(人工|客服|真人)/.test(trimmed)) {
-      return frame('human.transfer', { reason: '用户主动请求人工协助', summary: trimmed }, 0.96);
+    // howTo 用于区分「如何/怎么/怎样」类咨询与真正的动作请求。
+    const howTo = /(如何|怎么|怎样)/.test(trimmed);
+    // 人工优先于工单和查询，避免“转人工查问题”被误判。
+    if (/(转人工|人工客服|真人客服|人工服务|找人工)/.test(trimmed)) {
+      return frame('human.transfer', { operation: 'transfer', query: trimmed }, 0.97);
     }
-    if (/(工单|报障|提单|故障)/.test(trimmed)) {
-      return frame('ticket.create', { title: trimmed.slice(0, 30), description: trimmed, priority: 'medium' }, 0.94);
+    if (/(工单|报障|故障)/.test(trimmed)) {
+      if (/(进度|进展|状态|查询|查一下|到哪|怎么样)/.test(trimmed)) return frame('ticket.create', { operation: 'progress', query: trimmed }, 0.94);
+      return frame('ticket.create', { operation: 'create', query: trimmed }, 0.95);
     }
-    if (/(查|知识|退款|政策|怎么|如何|是什么|多少)/.test(trimmed)) {
-      return frame('knowledge.query', { query: trimmed }, 0.92);
+    if (/(DIP|数据集成|集成任务|同步任务)/.test(trimmed)) {
+      if (!howTo && /(重跑|重新跑|再跑|rerun)/i.test(trimmed)) return frame('dip.manage', { operation: 'rerun', query: trimmed }, 0.96);
+      if (!howTo && /(停止|停掉|暂停)/.test(trimmed)) return frame('dip.manage', { operation: 'stop', query: trimmed }, 0.96);
+      if (/(详情|明细|配置)/.test(trimmed)) return frame('dip.manage', { operation: 'detail', query: trimmed }, 0.94);
+      return frame('dip.manage', { operation: 'list', query: trimmed }, 0.93);
+    }
+    if (/(调度|跑批|定时任务|任务|job)/i.test(trimmed)) {
+      if (/(日志|log)/i.test(trimmed)) return frame('job.monitor', { operation: 'logs', query: trimmed }, 0.94);
+      return frame('job.monitor', { operation: 'status', query: trimmed }, 0.93);
+    }
+    if (/(网关|限流)/.test(trimmed) || /API/.test(trimmed)) {
+      if (!howTo && /(限流|调整|修改|提额)/.test(trimmed)) return frame('api.gateway', { operation: 'limit', query: trimmed }, 0.94);
+      return frame('api.gateway', { operation: 'stats', query: trimmed }, 0.92);
+    }
+    if (/(报表|报告|看板|日报|周报|月报)/.test(trimmed)) {
+      if (!howTo && /(导出|下载)/.test(trimmed)) return frame('report.center', { operation: 'export', query: trimmed }, 0.95);
+      return frame('report.center', { operation: 'list', query: trimmed }, 0.92);
+    }
+    if (/(系统状态|服务状态|整体状态|状态如何|状态怎么样|运行情况|告警|报警|公告|挂了|宕机|不可用|健康)/.test(trimmed)) {
+      if (/(告警|报警)/.test(trimmed)) return frame('system.status', { operation: 'alerts', query: trimmed }, 0.94);
+      return frame('system.status', { operation: 'overview', query: trimmed }, 0.93);
+    }
+    if (!howTo && /(权限|授权|角色|账号|账户)/.test(trimmed)) {
+      if (/(申请|开通|提权)/.test(trimmed)) return frame('account.privilege', { operation: 'grant', query: trimmed }, 0.95);
+      return frame('account.privilege', { operation: 'mine', query: trimmed }, 0.92);
+    }
+    if (/(搜表|查表|找表|数据表|宽表|用户表|订单表|商品表|指标|血缘)/.test(trimmed)) {
+      if (/(血缘|上下游|来源)/.test(trimmed)) return frame('dataset.query', { operation: 'lineage', query: trimmed }, 0.95);
+      return frame('dataset.query', { operation: 'search', query: trimmed }, 0.94);
+    }
+    if (/(知识|查一下|查下|是什么|什么是|如何|怎么|为什么|政策|规范|资料|帮助|多少)/.test(trimmed)) {
+      return frame('knowledge.query', { query: trimmed }, 0.9);
     }
     return frame('unknown', {}, 0.3);
   }
@@ -95,28 +135,41 @@ export class ScriptedModelProvider implements ModelProvider {
   }
 
   /**
-   * 按执行结果生成模板化中文回复。
+   * 按执行结果生成模板化中文回复，提及对应子系统中文名。
    *
    * @param input - userMessage、functionId、actionStatus 和 actionOutput
    * @returns iar.response/v1 结构
    * @author lvdaxianer@yeah.net
-   * @date 2026-10-17
+   * @date 2026-10-18
    */
   private generate(input: Record<string, unknown>): unknown {
     const functionId = readString(input, 'functionId') ?? 'unknown';
     const status = readString(input, 'actionStatus') ?? 'unknown';
     const output = asRecord(input.actionOutput);
+    const subsystem = sandboxFunctionCatalog[functionId]?.name ?? functionId;
     let text: string;
     if (status !== 'succeeded') {
-      text = `动作执行失败（${typeof output.errorCode === 'string' ? output.errorCode : 'unknown'}），请稍后重试。`;
-    } else if (functionId === 'knowledge.query') {
-      text = `已为你查询到相关知识：${readString(output, 'answer') ?? '（无内容）'}（置信度 ${typeof output.confidence === 'number' ? output.confidence.toFixed(2) : '0.00'}）`;
-    } else if (functionId === 'ticket.create') {
-      text = `工单已创建，编号 ${readString(output, 'ticketId') ?? 'unknown'}。`;
-    } else if (functionId === 'human.transfer') {
-      text = `已为你转接人工客服，受理号 ${readString(output, 'handoffId') ?? 'unknown'}。`;
+      text = `【${subsystem}】动作执行失败（${typeof output.errorCode === 'string' ? output.errorCode : 'unknown'}），请稍后重试。`;
     } else {
-      text = '动作已执行完成。';
+      const operation = readString(output, 'operation') ?? '';
+      const summary = readString(output, 'summary') ?? '';
+      const receipt = readString(output, 'receipt');
+      if (operation === 'search') {
+        const results = Array.isArray(output.results) ? output.results.filter(isRecord) : [];
+        if (results.length === 0) {
+          text = `【${subsystem}】没有检索到匹配的内容，可以换个关键词再试。`;
+        } else {
+          const lines = results.slice(0, 3).map((item, index) => {
+            const score = typeof item.score === 'number' ? item.score.toFixed(2) : '0.00';
+            return `${String(index + 1)}. ${readString(item, 'title') ?? ''}：${readString(item, 'answer') ?? ''}（相关度 ${score}）`;
+          });
+          text = `【${subsystem}】为你找到 ${String(results.length)} 条相关内容：\n${lines.join('\n')}`;
+        }
+      } else if (receipt !== undefined) {
+        text = `【${subsystem}】${summary || '操作已受理'} 受理号 ${receipt}。`;
+      } else {
+        text = `【${subsystem}】${summary || '操作已完成'}`;
+      }
     }
     return { schemaVersion: 'iar.response/v1', text };
   }

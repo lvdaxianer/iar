@@ -4,6 +4,8 @@
  * 每个会话组合 PluginHost、ModelGateway、TwoStageRouter、LocalWorkflow、
  * BehaviorContextProjector 和 InMemoryEventStore，实现单轮对话的完整链路：
  * 语义抽取 → 两阶段路由 → 策略/确认 → 插件执行 → 回复生成 → 事件投影。
+ * 沙盒模拟一个企业数据平台，安装十个子系统插件（每个 Function 一个插件，
+ * 本地确定性 fixture，无真实副作用），构造时预加载十个本地知识库。
  * 由于 LocalWorkflow 的 ActionExecutor 是同步签名，插件 Handler 通过
  * SyncPluginBridge 在 worker 线程中执行。
  * 路由未命中时优先生成兜底回复（brain 走 Response Generator，scripted 走模板），
@@ -62,10 +64,9 @@ import {
   confirmationScopeHash,
   type ActionExecutor
 } from '@iar/workflow';
-import { humanTransferPlugin } from '../../human-transfer/src/index.js';
-import { knowledgeQueryPlugin } from '../../knowledge-query/src/index.js';
-import { ticketCreatePlugin } from '../../ticket-create/src/index.js';
 import { SyncPluginBridge } from './execution/sync-plugin-bridge.js';
+import { allSandboxPlugins, sandboxFunctionCatalog, sandboxFunctionIds } from './functions/index.js';
+import { assertSandboxKnowledgeBases } from './knowledge/retrieval.js';
 import { BrainModelProvider, IntentModelProvider, OpenAICompatibleModelProvider } from './models/llm-provider.js';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
 import { sandboxFunctionRules, sandboxPluginRules } from './rules.js';
@@ -190,7 +191,7 @@ const SESSION_RUN_ID = 'sandbox-session';
 const SESSION_CORRELATION_ID = 'sandbox-session';
 
 /** 路由未命中且兜底回复生成失败时的固定话术。 */
-const FALLBACK_REPLY_TEXT = '我没有完全理解你的意图。可以试试：查询知识（如“查一下退款政策”）、创建工单（如“帮我提个工单，网络很卡”）或转接人工。';
+const FALLBACK_REPLY_TEXT = '我没有完全理解你的意图。可以试试：平台知识问答（「如何申请数据权限」）、数据集成（「列出今天的集成任务」）、任务监控（「订单汇总 Job 跑完了吗」）、资产检索（「搜一下用户表」）、系统告警（「现在有哪些告警」）、创建工单（「帮我提个工单，网络很卡」）或转人工。';
 
 /** sandbox 单轮执行状态机定义。 */
 const TURN_DEFINITION: WorkflowDefinition = {
@@ -236,17 +237,19 @@ export class IarSandboxSession {
   private consumedWorkflowEvents = 0;
 
   /**
-   * 安装并启用三个示例插件，构建 gateway 和首个 Workflow 实例。
+   * 安装并启用十个子系统插件，预加载全部本地知识库，构建 gateway 和首个 Workflow 实例。
    *
    * @param options - sandbox 模式（brain/scripted）
-   * @throws Error 当插件安装失败或模型配置非法
+   * @throws Error 当插件安装失败、模型配置非法或任一知识库加载失败
    * @author lvdaxianer@yeah.net
-   * @date 2026-10-17
+   * @date 2026-10-18
    */
   public constructor(options: { mode: SandboxMode; decisionBackend?: SandboxDecisionBackend }) {
     this.mode = options.mode;
-    this.pluginHost = new PluginHost({ functionIds: ['knowledge.query', 'ticket.create', 'human.transfer'] });
-    for (const registration of [knowledgeQueryPlugin, ticketCreatePlugin, humanTransferPlugin]) {
+    // 知识库在构造期全量预加载，缺失或非法时抛出带 functionId 的清晰错误。
+    assertSandboxKnowledgeBases(sandboxFunctionIds);
+    this.pluginHost = new PluginHost({ functionIds: sandboxFunctionIds });
+    for (const registration of allSandboxPlugins) {
       if (!this.pluginHost.install(registration).ok) throw new Error(`插件安装失败: ${registration.manifest.pluginId}`);
       if (!this.pluginHost.enable(registration.manifest.pluginId).ok) throw new Error(`插件启用失败: ${registration.manifest.pluginId}`);
     }
@@ -665,7 +668,10 @@ export class IarSandboxSession {
     if (!resolved.ok) return { status: 'failed', reply: `路由选中的插件不可用（${resolved.error.code}）。`, reasonCode: resolved.error.code };
     const built = buildActionInput(route.functionId, frame.slots, userText);
     if ('missing' in built) return { status: 'clarification', reply: `还缺少必要信息（${built.missing.join('、')}），请补充完整后再试。`, reasonCode: 'slots_missing' };
-    const policy = resolved.value.manifest.policy;
+    // manifest policy 是安全上限，不可被放宽：action 操作沿用 manifest 声明
+    // （high + 需确认），read 操作降到 low + 免确认直接执行。
+    const manifestPolicy = resolved.value.manifest.policy;
+    const operationKind = sandboxOperationKind(route.functionId, built.input);
     const action: ActionDefinition = {
       schemaVersion: SCHEMA_VERSIONS.action,
       actionId: `action-sandbox-${String(this.turnCount)}`,
@@ -674,14 +680,14 @@ export class IarSandboxSession {
       pluginId: route.pluginId,
       idempotencyKey: `${route.functionId}:${SESSION_RUN_ID}:${String(this.turnCount)}`,
       input: built.input,
-      riskLevel: policy.riskLevel,
-      confirmationRequired: policy.requiresConfirmation
+      riskLevel: operationKind === 'action' ? manifestPolicy.riskLevel : 'low',
+      confirmationRequired: operationKind === 'action' ? manifestPolicy.requiresConfirmation : false
     };
     await this.appendDecisionEvent(runId, frame, route, built.input);
     // 每个回合使用独立 Workflow 实例，事件写入共享 EventLog 以保证全局唯一 ID。
     this.workflow = this.createWorkflow();
     this.workflow.start({ runId, definition: TURN_DEFINITION });
-    if (policy.requiresConfirmation) this.workflow.transition({ runId, event: 'request_confirmation' });
+    if (action.confirmationRequired) this.workflow.transition({ runId, event: 'request_confirmation' });
     const executed = await this.workflow.execute({
       runId,
       action,
@@ -694,7 +700,7 @@ export class IarSandboxSession {
     if (!executed.ok) {
       if (executed.reasonCode === 'confirmation_required') {
         this.pending = { action };
-        return { status: 'awaiting_confirmation', action, reply: `即将执行高风险操作「${action.functionId}」（插件 ${action.pluginId}），需要你的确认。` };
+        return { status: 'awaiting_confirmation', action, reply: `即将执行高风险操作「${describeAction(action)}」（插件 ${action.pluginId}），需要你的确认。` };
       }
       return { status: 'failed', reply: `动作被拒绝：${executed.reasonCode}`, reasonCode: executed.reasonCode };
     }
@@ -722,7 +728,7 @@ export class IarSandboxSession {
         input: {
           userMessage: userText,
           recentMessages: this.recentMessages.slice(-6),
-          availableFunctions: ['knowledge.query', 'ticket.create', 'human.transfer'],
+          availableFunctions: [...sandboxFunctionIds],
           reasonCode
         }
       });
@@ -755,7 +761,7 @@ export class IarSandboxSession {
     const input: JsonValue = {
       userMessage: userText,
       recentMessages: this.recentMessages.slice(-6),
-      availableFunctions: ['knowledge.query', 'ticket.create', 'human.transfer'],
+      availableFunctions: [...sandboxFunctionIds],
       reasonCode
     };
     const controller = new AbortController();
@@ -779,7 +785,7 @@ export class IarSandboxSession {
   }
 
   /**
-   * scripted 模式的轻量模板兜底：身份介绍、能力说明和基于最近对话的指令回忆。
+   * scripted 模式的轻量模板兜底：身份介绍、十项能力说明和基于最近对话的指令回忆。
    *
    * @param userText - 用户输入文本
    * @returns 模板回复文本，模板覆盖不了时返回 undefined
@@ -794,10 +800,10 @@ export class IarSandboxSession {
       return '这是我们对话的开始，你还没有让我做过任何事。';
     }
     if (/(你是谁|你叫什么|自我介绍|你是什么)/.test(text)) {
-      return '我是 IAR Agent Sandbox，一个可交互的 IAR 插件沙盒：你输入一句话，我会走完语义抽取、两阶段路由（Function → Plugin）、策略确认和插件执行，并在右侧展示完整的路由证据和事件流。';
+      return '我是 IAR Agent Sandbox，一个可交互的 IAR 插件沙盒。当前模拟的企业数据平台包含 10 个子系统：平台通用知识、数据集成管理（DIP）、任务调度监控、API 网关管理、数据资产目录、报表中心、系统状态与告警、账户与权限、工单支持和人工服务。你输入一句话，我会走完语义抽取、两阶段路由（Function → Plugin）、策略确认和插件执行，并在右侧展示完整的路由证据和事件流。';
     }
     if (/(能做什么|会什么|有什么功能|可以做什么|能干嘛|能干什么)/.test(text)) {
-      return '我目前支持三件事：1）查询知识，比如「查一下退款政策」；2）创建工单，比如「帮我提个工单，网络很卡」；3）转接人工客服，比如「转人工」。其中工单和转人工属于高风险操作，执行前需要你确认。';
+      return '我目前支持十项能力：1）平台知识问答，如「如何申请数据权限」；2）数据集成管理，如「列出今天的集成任务」，重跑/停止需确认；3）任务调度监控，如「订单汇总 Job 跑完了吗」；4）API 网关管理，如「查看网关调用统计」，调整限流需确认；5）数据资产检索，如「搜一下用户表」；6）报表中心，如「列出销售报表」，导出需确认；7）系统状态与告警，如「现在有哪些告警」；8）账户与权限，如「我有哪些权限」，申请授权需确认；9）工单支持，如「帮我提个工单，网络很卡」；10）人工服务，如「转人工」，转接需确认。';
     }
     return undefined;
   }
@@ -1090,36 +1096,94 @@ function buildEvidence(route: RouteResult, frame: SemanticFrame): RouteEvidence 
 }
 
 /**
- * 按 Function 把语义槽位和默认值组装成插件输入。
+ * 从语义槽位组装统一 Handler 输入 { operation, query, params }。
+ *
+ * operation 缺省时不在此处推断，交由 handler 端按 query 关键词确定默认
+ * read 操作；槽位给出的 operation 若不在目标 Function 的操作目录中会被
+ * 丢弃，避免确认策略与实际执行不一致。search 类操作必须有 query。
  *
  * @param functionId - 目标 Function
  * @param slots - 抽取到的槽位
  * @param userText - 用户原始输入
  * @returns 插件输入或缺失槽位列表
  * @author lvdaxianer@yeah.net
- * @date 2026-10-17
+ * @date 2026-10-18
  */
 function buildActionInput(functionId: string, slots: Record<string, JsonValue>, userText: string): { input: JsonValue } | { missing: string[] } {
-  if (functionId === 'knowledge.query') {
-    const query = stringSlot(slots, 'query') ?? (userText.length > 0 ? userText : undefined);
-    if (!query) return { missing: ['query'] };
-    return { input: { query: query.slice(0, 500), topK: 3 } };
+  const descriptor = sandboxFunctionCatalog[functionId];
+  if (!descriptor) return { missing: [`未知 Function: ${functionId}`] };
+  const rawOperation = stringSlot(slots, 'operation');
+  const query = stringSlot(slots, 'query') ?? (userText.length > 0 ? userText : undefined);
+  // 未知 operation 直接丢弃，让 handler 按默认 read 操作执行。
+  let operation = rawOperation && descriptor.operations.some((item) => item.name === rawOperation) ? rawOperation : undefined;
+  // 知识型问法纠偏：显式动作 operation 但问句是咨询语气且无动作动词时，改写为本系统知识检索，
+  // 避免"限流策略有哪些"被模型标成 action 而误入确认流。
+  if (operation && isActionOperation(descriptor, operation) && query && !hasActionVerb(query) && isKnowledgeQuestion(query) && descriptor.operations.some((item) => item.name === 'search')) {
+    operation = 'search';
   }
-  if (functionId === 'ticket.create') {
-    const title = stringSlot(slots, 'title') ?? '用户反馈问题';
-    const description = stringSlot(slots, 'description') ?? userText;
-    const priorityRaw = stringSlot(slots, 'priority');
-    const priority = priorityRaw === 'low' || priorityRaw === 'medium' || priorityRaw === 'high' ? priorityRaw : 'medium';
-    if (description.length === 0) return { missing: ['description'] };
-    return { input: { title: title.slice(0, 120), description: description.slice(0, 2000), priority } };
+  const params = paramsSlot(slots);
+  const effectiveOperation = operation ?? descriptor.defaultOperation;
+  if (effectiveOperation === 'search' && !query) return { missing: ['query'] };
+  const input: Record<string, JsonValue> = {};
+  if (operation) input.operation = operation.slice(0, 60);
+  if (query) input.query = query.slice(0, 500);
+  if (params) input.params = params;
+  return { input };
+}
+
+/**
+ * 按操作 kind 判定确认策略：action 沿用 manifest 上限，read 免确认。
+ *
+ * @param functionId - 目标 Function
+ * @param input - 已构建的 Handler 输入
+ * @returns 操作类型，未知 Function 按 action 保守处理
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-18
+ */
+function sandboxOperationKind(functionId: string, input: JsonValue): 'read' | 'action' {
+  const descriptor = sandboxFunctionCatalog[functionId];
+  if (!descriptor) return 'action';
+  const record = typeof input === 'object' && input !== null && !Array.isArray(input) ? input as Record<string, JsonValue> : {};
+  const raw = record.operation;
+  if (typeof raw === 'string' && raw.length > 0) {
+    return descriptor.operations.find((item) => item.name === raw)?.kind ?? 'read';
   }
-  if (functionId === 'human.transfer') {
-    const reason = stringSlot(slots, 'reason') ?? '用户请求人工协助';
-    const summary = stringSlot(slots, 'summary') ?? userText;
-    if (summary.length === 0) return { missing: ['summary'] };
-    return { input: { reason: reason.slice(0, 240), summary: summary.slice(0, 2000) } };
-  }
-  return { missing: [`未知 Function: ${functionId}`] };
+  // 未显式指定操作时，知识型问法按检索（read）处理，避免"工单多久有回复"误入动作确认流。
+  const query = typeof record.query === 'string' ? record.query : '';
+  if (descriptor.operations.some((item) => item.name === 'search') && isKnowledgeQuestion(query)) return 'read';
+  const name = descriptor.defaultOperation;
+  return descriptor.operations.find((item) => item.name === name)?.kind ?? 'read';
+}
+
+/** 知识型问法启发式：强咨询信号（"有哪些/是什么/怎么/为什么/多久"类），用于动作纠偏与默认检索。 */
+function isKnowledgeQuestion(query: string): boolean {
+  return /有哪些|是什么|什么是|如何|怎么|为什么|多久|多长时间|区别|介绍|说明/.test(query);
+}
+
+/** 动作动词集合：命中时视为动作请求，不被咨询语气纠偏。 */
+function hasActionVerb(query: string): boolean {
+  return /重跑|重启|停止|导出|下载|转人工|调整|调到|设为|改成|修改|提高|降低|提额|开通|提权|创建|提交|提个|发起|帮我申请|我要申请|我想申请|申请一下|帮我开通|帮我提权/.test(query);
+}
+
+/** 判断指定 operation 是否为动作类型。 */
+function isActionOperation(descriptor: { operations: ReadonlyArray<{ name: string; kind: string }> }, operation: string): boolean {
+  return descriptor.operations.find((item) => item.name === operation)?.kind === 'action';
+}
+
+/**
+ * 用中文子系统名与操作名描述待确认动作，供确认提示展示。
+ *
+ * @param action - 待确认动作
+ * @returns 人类可读的动作描述
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-18
+ */
+function describeAction(action: ActionDefinition): string {
+  const descriptor = sandboxFunctionCatalog[action.functionId];
+  const record = typeof action.input === 'object' && action.input !== null && !Array.isArray(action.input) ? action.input as Record<string, JsonValue> : {};
+  const operation = typeof record.operation === 'string' && record.operation.length > 0 ? record.operation : descriptor?.defaultOperation;
+  const name = descriptor?.name ?? action.functionId;
+  return operation ? `${name} · ${operation}` : name;
 }
 
 /**
@@ -1134,6 +1198,25 @@ function buildActionInput(functionId: string, slots: Record<string, JsonValue>, 
 function stringSlot(slots: Record<string, JsonValue>, key: string): string | undefined {
   const value = slots[key];
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+/**
+ * 读取字符串键值 params 槽位，非法结构返回 undefined。
+ *
+ * @param slots - 槽位集合
+ * @returns 键值均为非空字符串的映射，或 undefined
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-18
+ */
+function paramsSlot(slots: Record<string, JsonValue>): Record<string, string> | undefined {
+  const value = slots.params;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const params: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value as Record<string, JsonValue>)) {
+    if (typeof item !== 'string' || item.trim().length === 0) return undefined;
+    params[key] = item.trim().slice(0, 200);
+  }
+  return Object.keys(params).length > 0 ? params : undefined;
 }
 
 /**
