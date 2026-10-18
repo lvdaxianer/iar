@@ -213,7 +213,8 @@ export class ModelGateway {
     const controller = new AbortController();
     const providerRequest = { ...request, signal: controller.signal };
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => { controller.abort(); reject(new GatewayTimeoutError()); }, timeoutMs); });
+    // 取消原因使用固定安全值，供传输层识别超时；对外错误仍由 gateway 统一映射。
+    const timeout = new Promise<never>((_resolve, reject) => { timer = setTimeout(() => { controller.abort(new DOMException('Model call timed out', 'TimeoutError')); reject(new GatewayTimeoutError()); }, timeoutMs); });
     try {
       // 异步 provider 才能被 timeout race 可靠监管，禁止同步返回绕过门禁。
       const result = provider.complete(providerRequest);

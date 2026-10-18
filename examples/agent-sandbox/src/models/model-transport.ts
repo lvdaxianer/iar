@@ -1,0 +1,150 @@
+/**
+ * 发送 OpenAI 兼容请求并记录受控的传输摘要。
+ *
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-18
+ */
+import { ModelProviderError } from '@iar/decision';
+import { logModelHttpFailure, logModelInvalidResponse, logModelNetworkFailure, logModelSuccess } from '../safe-log.js';
+
+/** 请求所需连接配置与提示词。 */
+export type ModelTransportRequest = {
+  connection: { apiKey: string | undefined; baseUrl: string | undefined; model: string };
+  system: string;
+  user: string;
+  signal: AbortSignal;
+};
+/** 响应内容的最小形状。 */
+type CompletionResponse = { choices?: Array<{ message?: { content?: unknown } }> };
+/** 温度与已有模型配置保持一致。 */
+const TEMPERATURE = 0.2;
+
+/**
+ * 发起请求并将网络和 HTTP 错误转换为稳定错误。
+ *
+ * @param request - 模型请求配置
+ * @param isStream - 是否使用流式协议
+ * @param startTime - 调用开始时间
+ * @returns 成功的 HTTP 响应
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-18
+ */
+export async function fetchModelResponse(request: ModelTransportRequest, isStream: boolean, startTime: number): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(`${request.connection.baseUrl}/chat/completions`, createFetchOptions(request, isStream));
+  } catch {
+    // 网络或取消错误不输出异常原文。
+    logModelNetworkFailure(startTime, request.signal);
+    throw new ModelProviderError('provider_unavailable');
+  }
+  // 上游返回非成功状态时不读取或记录正文。
+  if (!response.ok) {
+    logModelHttpFailure(startTime, response.status);
+    // 不读取错误正文，也不等待可能永不结束的底层取消。
+    const body = response.body;
+    // 无正文时没有需要取消的资源。
+    if (body) cancelModelBody(() => body.cancel());
+    throw new ModelProviderError('provider_failed');
+  }
+  return response;
+}
+
+/**
+ * 发起尽力取消，不让清理失败或挂起覆盖业务错误。
+ *
+ * @param cancel - 流或 reader 的取消操作
+ * @returns 无返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-18
+ */
+export function cancelModelBody(cancel: () => Promise<void>): void {
+  try {
+    void cancel().catch(() => { /* 取消失败不改变原始结果。 */ });
+  } catch {
+    // 同步清理失败也不改变原始结果。
+  }
+}
+
+/**
+ * 构造与既有协议一致的 HTTP 请求。
+ *
+ * @param request - 模型请求配置
+ * @param isStream - 是否使用流式协议
+ * @returns fetch 选项
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-18
+ */
+function createFetchOptions(request: ModelTransportRequest, isStream: boolean): RequestInit {
+  return { method: 'POST', signal: request.signal,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${request.connection.apiKey}` },
+    body: JSON.stringify({ model: request.connection.model, temperature: TEMPERATURE,
+      ...(isStream ? { stream: true } : { response_format: { type: 'json_object' } }),
+      messages: [{ role: 'system', content: request.system }, { role: 'user', content: request.user }] }) };
+}
+
+/**
+ * 执行普通模型请求并解析结构化输出。
+ *
+ * @param request - 模型请求配置
+ * @returns 模型返回的 JSON 值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-18
+ */
+export async function callModel(request: ModelTransportRequest): Promise<unknown> {
+  const startTime = Date.now();
+  const response = await fetchModelResponse(request, false, startTime);
+  const content = await readModelContent(response, { startTime, signal: request.signal });
+  try {
+    const result = JSON.parse(content) as unknown;
+    logModelSuccess(startTime, response.status);
+    return result;
+  } catch {
+    // 响应正文格式无效时不记录其内容。
+    logModelInvalidResponse(startTime, response.status);
+    throw new ModelProviderError('provider_failed');
+  }
+}
+
+/**
+ * 从普通 HTTP 响应中读取模型正文。
+ *
+ * @param response - 模型 HTTP 响应
+ * @param timing - 调用开始时间和取消信号
+ * @returns 非空模型正文
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-18
+ */
+async function readModelContent(response: Response, timing: { startTime: number; signal: AbortSignal }): Promise<string> {
+  const body = await readModelBody(response, timing);
+  try {
+    const payload = JSON.parse(body) as CompletionResponse;
+    const content = payload.choices?.[0]?.message?.content;
+    // 缺少正文按无效响应处理。
+    if (typeof content !== 'string' || content.length === 0) throw new ModelProviderError('provider_failed');
+    return content;
+  } catch {
+    // 读取成功后，仅正文解析或结构错误属于无效响应。
+    logModelInvalidResponse(timing.startTime, response.status);
+    throw new ModelProviderError('provider_failed');
+  }
+}
+
+/**
+ * 读取响应正文并独立分类传输错误。
+ *
+ * @param response - 模型 HTTP 响应
+ * @param timing - 调用开始时间和取消信号
+ * @returns 未解析的正文
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-18
+ */
+async function readModelBody(response: Response, timing: { startTime: number; signal: AbortSignal }): Promise<string> {
+  try {
+    return await response.text();
+  } catch {
+    // 正文读取失败是网络或取消问题，不混同格式错误。
+    logModelNetworkFailure(timing.startTime, timing.signal);
+    throw new ModelProviderError('provider_failed');
+  }
+}

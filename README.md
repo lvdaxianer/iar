@@ -109,6 +109,14 @@ Function 和 Plugin 决策都经过 `ModelGateway` 与 `UnifiedDecisionAdapter`�
 
 agent-sandbox 默认同时加载 JEV 和 Intent Model，并固定 JEV 优先。设置 `IAR_SANDBOX_DECISION_BACKEND=intent-model` 可运行 Intent-only 路径；两条路径都通过同一个 `iar.decision/v1` 返回契约。
 
+### 沙箱安全日志
+
+沙箱记录 HTTP 请求审计和模型调用的安全元数据，默认不输出正常模型调用的 DEBUG 日志。拥有进程信号权限的本机运维人员可以向沙箱进程发送 `SIGHUP` 切换模型 DEBUG，重复发送恢复关闭；部署环境须限制进程信号权限并确认没有其他 SIGHUP 处理约定。日志不记录模型输入、输出、请求头、凭据、URL 查询或原始异常。详见[安全与观测方案](docs/README.md#123-观测字段)。
+
+安全日志默认异步写入标准错误，宿主可注入专用输出；须独占输出或统一串行写入，共享输出无法保证跨写入者行原子性。队列有界且满时丢弃，可通过进程内只读状态查询丢弃和卡住情况；输出故障及进程退出可能造成日志丢失，轮转和持久化由宿主负责。
+
+启动成功会输出受控 `sandbox.start` 记录，包含本地监听地址的主机和端口、实际模式以及是否自动回退；不向标准输出写启动消息。
+
 ## 文档与验证
 
 - [完整架构与能力边界](docs/README.md)

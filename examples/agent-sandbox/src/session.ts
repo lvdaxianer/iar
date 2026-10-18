@@ -70,6 +70,7 @@ import { assertSandboxKnowledgeBases } from './knowledge/retrieval.js';
 import { BrainModelProvider, IntentModelProvider, OpenAICompatibleModelProvider } from './models/llm-provider.js';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
 import { sandboxFunctionRules, sandboxPluginRules } from './rules.js';
+import { resolveSandboxTraceId } from './safe-log.js';
 
 /** sandbox 模式：brain 使用真实 LLM，scripted 使用离线假大脑。 */
 export type SandboxMode = 'brain' | 'scripted';
@@ -283,7 +284,7 @@ export class IarSandboxSession {
     await this.cancelStalePending();
     this.turnCount += 1;
     const runId = SESSION_RUN_ID;
-    const traceId = `trace-sandbox-${String(this.turnCount)}`;
+    const traceId = resolveSandboxTraceId(`trace-sandbox-${String(this.turnCount)}`);
     const extracted = await this.extractFrame(traceId, runId, userText);
     if (!extracted.ok) {
       this.pushMessages(userText, extracted.reply);
@@ -334,7 +335,7 @@ export class IarSandboxSession {
     await this.cancelStalePending();
     this.turnCount += 1;
     const runId = SESSION_RUN_ID;
-    const traceId = `trace-sandbox-${String(this.turnCount)}`;
+    const traceId = resolveSandboxTraceId(`trace-sandbox-${String(this.turnCount)}`);
     const finish = (result: TurnResult): TurnResult => {
       emit({ type: 'done', result });
       return result;
@@ -417,7 +418,7 @@ export class IarSandboxSession {
     this.workflow.transition({ runId, event: 'complete' });
     await this.drainWorkflowEvents();
     const actionResult = executed.value;
-    const reply = await this.generateReply(`trace-sandbox-confirm-${String(this.turnCount)}`, runId, '（确认执行）', action, actionResult);
+    const reply = await this.generateReply(resolveSandboxTraceId(`trace-sandbox-confirm-${String(this.turnCount)}`), runId, '（确认执行）', action, actionResult);
     this.pushAssistantMessage(reply);
     return { status: 'executed', reply, actionResult };
   }
@@ -440,7 +441,7 @@ export class IarSandboxSession {
     const compactSeq = this.compactCount;
     const occurredAt = new Date().toISOString();
     const compacted = await new ContextCompactorAdapter(this.gateway).compact({
-      traceId: `trace-compact-${String(compactSeq)}`,
+      traceId: resolveSandboxTraceId(`trace-compact-${String(compactSeq)}`),
       runId: SESSION_RUN_ID,
       input: { behaviorContext: current, eventsToCompact: events.slice(0, -1), recentMessages: this.recentMessages }
     });
@@ -765,7 +766,7 @@ export class IarSandboxSession {
       reasonCode
     };
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), profile.timeoutMs);
+    const timer = setTimeout(() => controller.abort(new DOMException('Model call timed out', 'TimeoutError')), profile.timeoutMs);
     let streamed = '';
     try {
       const parsed = await this.brainProvider.completeStreamed({ traceId, runId, profile, input, attempt: 1, signal: controller.signal }, (delta) => {
@@ -839,7 +840,7 @@ export class IarSandboxSession {
       actionOutput: actionResult.output ?? null
     };
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), profile.timeoutMs);
+    const timer = setTimeout(() => controller.abort(new DOMException('Model call timed out', 'TimeoutError')), profile.timeoutMs);
     let streamed = '';
     try {
       const parsed = await this.brainProvider.completeStreamed({ traceId, runId, profile, input, attempt: 1, signal: controller.signal }, (delta) => {
