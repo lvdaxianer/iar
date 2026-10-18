@@ -56,6 +56,28 @@ npm run demo:sandbox
 - 左侧：对话区，用户/助手气泡；高风险动作会弹出「确认执行 / 取消」按钮。
 - 右侧调试面板：当前 Function/Plugin 与路由状态、最近事件列表、BehaviorContext JSON 视图、上下文压缩按钮（显示哈希变化与摘要）、重置按钮。
 
+## 流式输出
+
+`POST /api/chat` 支持 SSE 流式响应：请求体带 `"stream": true` 或查询参数 `?stream=1` 时，响应为 `text/event-stream`，事件按序下发，结束前固定发送 `{"type":"end"}`：
+
+| 事件 | 说明 |
+| --- | --- |
+| `{ "type": "stage", "stage": "semantic" \| "route" \| "action" \| "response" }` | 阶段进度（正在理解意图/路由/执行插件/生成回复） |
+| `{ "type": "delta", "text": "..." }` | 回复增量，仅 response 阶段产生 |
+| `{ "type": "done", "result": { ... } }` | 最终 TurnResult，与非流式 `turn()` 返回同构 |
+| `{ "type": "error", "reasonCode": "...", "message": "..." }` | 流式处理异常 |
+
+scripted 模式没有真实流，回复阶段会一次性下发 delta 与 done。前端默认优先走流式（fetch + `response.body.getReader()` 逐段解析、逐字渲染），流式不可用（如 5xx）时自动回退原有 JSON 响应。确认按钮（awaiting_confirmation）流程仍走 `/api/confirm`。
+
+## 兜底回复
+
+路由未命中（unknown 意图或需澄清）时不再只回固定话术，而是分层兜底：
+
+- **brain 模式**：先用 Response Generator 生成兜底回复，输入包含用户消息、最近对话、可用功能（`knowledge.query` / `ticket.create` / `human.transfer`）和未命中原因码；提示词要求基于对话历史自然回答（如「你是谁呢」→ 自我介绍为 IAR Agent Sandbox；「我刚才让你干啥来着」→ 根据历史回答），或自然解释能做什么。只有生成失败才回退固定话术。
+- **scripted 模式**：轻量模板兜底，覆盖「你是谁 / 你能做什么 / 我刚才让你做什么（基于最近对话的关键词回忆）」，模板覆盖不了再回退固定话术。
+
+另外，brain 模式下语义抽取失败时会自动用离线 `ScriptedModelProvider` 重试一次，成功则继续走正常链路，并在路由证据里标注 `semanticFallback: true`；重试仍失败才返回错误回复。
+
 ## 试试这些输入
 
 - `帮我查一下退款政策` → 路由到 `knowledge.query`，低风险直接执行。

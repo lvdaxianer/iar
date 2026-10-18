@@ -6,9 +6,12 @@
  * 语义抽取 → 两阶段路由 → 策略/确认 → 插件执行 → 回复生成 → 事件投影。
  * 由于 LocalWorkflow 的 ActionExecutor 是同步签名，插件 Handler 通过
  * SyncPluginBridge 在 worker 线程中执行。
+ * 路由未命中时优先生成兜底回复（brain 走 Response Generator，scripted 走模板），
+ * brain 模式语义抽取失败时用离线 ScriptedModelProvider 重试一次；
+ * turnStreamed 提供 SSE 流式输出，response.generate 阶段逐段透传 delta。
  *
  * @author lvdaxianer@yeah.net
- * @date 2026-10-17
+ * @date 2026-10-18
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -36,6 +39,7 @@ import {
   loadModelProfiles,
   type DecisionBackend,
   type DecisionRequest,
+  type ModelGatewayResult,
   type ModelProvider,
   type SemanticFrame
 } from '@iar/decision';
@@ -62,7 +66,7 @@ import { humanTransferPlugin } from '../../human-transfer/src/index.js';
 import { knowledgeQueryPlugin } from '../../knowledge-query/src/index.js';
 import { ticketCreatePlugin } from '../../ticket-create/src/index.js';
 import { SyncPluginBridge } from './execution/sync-plugin-bridge.js';
-import { BrainModelProvider, IntentModelProvider } from './models/llm-provider.js';
+import { BrainModelProvider, IntentModelProvider, OpenAICompatibleModelProvider } from './models/llm-provider.js';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
 import { sandboxFunctionRules, sandboxPluginRules } from './rules.js';
 
@@ -90,6 +94,8 @@ export type RouteEvidence = {
   functionScore?: number;
   /** Plugin 决策分数。 */
   pluginScore?: number;
+  /** 语义抽取是否走了离线 ScriptedModelProvider 兜底重试。 */
+  semanticFallback?: boolean;
 };
 
 /** 待确认动作摘要，供前端渲染确认按钮。 */
@@ -116,6 +122,28 @@ export type TurnResult =
   | { status: 'awaiting_confirmation'; reply: string; route: RouteEvidence; pending: PendingActionSummary }
   | { status: 'clarification'; reply: string; route: RouteEvidence; reasonCode: string }
   | { status: 'failed'; reply: string; route: RouteEvidence; reasonCode: string };
+
+/** 流式输出的阶段标识。 */
+export type TurnStage = 'semantic' | 'route' | 'action' | 'response';
+
+/** turnStreamed 下发的事件联合。 */
+export type StreamEvent =
+  | { type: 'stage'; stage: TurnStage }
+  | { type: 'delta'; text: string }
+  | { type: 'done'; result: TurnResult }
+  | { type: 'error'; reasonCode: string; message: string };
+
+/** 语义抽取阶段的内部结果联合。 */
+type ExtractFrameOutcome =
+  | { ok: true; frame: SemanticFrame; semanticFallback: boolean }
+  | { ok: false; route: RouteEvidence; reasonCode: string; reply: string };
+
+/** 单轮执行阶段的内部结果联合。 */
+type ExecuteTurnOutcome =
+  | { status: 'executed'; action: ActionDefinition; actionResult: ActionResult }
+  | { status: 'awaiting_confirmation'; action: ActionDefinition; reply: string }
+  | { status: 'clarification'; reply: string; reasonCode: string }
+  | { status: 'failed'; reply: string; reasonCode: string };
 
 /** 确认操作结果联合。 */
 export type ConfirmResult =
@@ -161,6 +189,9 @@ const SESSION_RUN_ID = 'sandbox-session';
 /** 会话内所有事件共享的 correlationId。 */
 const SESSION_CORRELATION_ID = 'sandbox-session';
 
+/** 路由未命中且兜底回复生成失败时的固定话术。 */
+const FALLBACK_REPLY_TEXT = '我没有完全理解你的意图。可以试试：查询知识（如“查一下退款政策”）、创建工单（如“帮我提个工单，网络很卡”）或转接人工。';
+
 /** sandbox 单轮执行状态机定义。 */
 const TURN_DEFINITION: WorkflowDefinition = {
   schemaVersion: SCHEMA_VERSIONS.workflow,
@@ -187,6 +218,8 @@ const TURN_DEFINITION: WorkflowDefinition = {
 export class IarSandboxSession {
   private readonly mode: SandboxMode;
   private readonly pluginHost: PluginHost;
+  private readonly brainProvider: BrainModelProvider | ScriptedModelProvider;
+  private readonly registry: ModelProfileRegistry;
   private readonly gateway: ModelGateway;
   private readonly functionDecisionAdapter: AsyncDecisionAdapter;
   private readonly pluginDecisionAdapter: AsyncDecisionAdapter;
@@ -225,9 +258,10 @@ export class IarSandboxSession {
     const configText = readFileSync(join(process.cwd(), 'examples', 'agent-sandbox', 'config', 'models.brain.json'), 'utf8');
     const configuredBackend = options.decisionBackend ?? readSandboxDecisionBackend();
     const profiles = loadModelProfiles(configText).filter((profile) => profile.role !== 'function.select' && profile.role !== 'plugin.select' || configuredBackend === undefined || (profile.decisionBackend ?? 'jev') === configuredBackend);
-    const registry = new ModelProfileRegistry(profiles);
-    this.gateway = new ModelGateway({ registry, providers: { brain, mock: scriptedDecision, 'intent-model': intent } });
-    const resolver = new DecisionBackendResolver(registry);
+    this.brainProvider = brain;
+    this.registry = new ModelProfileRegistry(profiles);
+    this.gateway = new ModelGateway({ registry: this.registry, providers: { brain, mock: scriptedDecision, 'intent-model': intent } });
+    const resolver = new DecisionBackendResolver(this.registry);
     this.functionDecisionAdapter = new UnifiedDecisionAdapter(resolver, new JevDecisionAdapter(this.gateway, 'function.select'), new IntentModelDecisionAdapter(this.gateway, 'function.select'));
     this.pluginDecisionAdapter = new UnifiedDecisionAdapter(resolver, new JevDecisionAdapter(this.gateway, 'plugin.select'), new IntentModelDecisionAdapter(this.gateway, 'plugin.select'));
     this.workflow = this.createWorkflow();
@@ -239,7 +273,7 @@ export class IarSandboxSession {
    * @param text - 用户输入文本
    * @returns 本轮对话结果
    * @author lvdaxianer@yeah.net
-   * @date 2026-10-17
+   * @date 2026-10-18
    */
   public async turn(text: string): Promise<TurnResult> {
     const userText = text.trim();
@@ -247,90 +281,94 @@ export class IarSandboxSession {
     this.turnCount += 1;
     const runId = SESSION_RUN_ID;
     const traceId = `trace-sandbox-${String(this.turnCount)}`;
-    const extracted = await new SemanticExtractorAdapter(this.gateway).extract({ traceId, runId, input: { text: userText } });
+    const extracted = await this.extractFrame(traceId, runId, userText);
     if (!extracted.ok) {
-      const route: RouteEvidence = { status: 'semantic_failed', reasonCode: extracted.error.code, semanticIntent: 'unknown', semanticConfidence: 0 };
-      const reply = `语义抽取失败（${extracted.error.code}），请换个说法重试。`;
-      this.pushMessages(userText, reply);
-      return { status: 'failed', reply, route, reasonCode: extracted.error.code };
+      this.pushMessages(userText, extracted.reply);
+      return { status: 'failed', reply: extracted.reply, route: extracted.route, reasonCode: extracted.reasonCode };
     }
-    const frame = extracted.value;
-    const route = await new TwoStageRouter().routeAsync({
-      traceId,
-      runId,
-      facts: buildFacts(frame),
-      tenantId: 'tenant-sandbox',
-      actorId: 'actor-sandbox',
-      environment: 'sandbox',
-      functionRules: sandboxFunctionRules,
-      pluginRules: sandboxPluginRules,
-      pluginHost: this.pluginHost,
-      functionDecisionAdapter: this.functionDecisionAdapter,
-      pluginDecisionAdapter: this.pluginDecisionAdapter,
-      authorizePlugin: () => true
-    });
+    const frame = extracted.frame;
+    const route = await this.routeFrame(traceId, runId, frame);
     const evidence = buildEvidence(route, frame);
+    if (extracted.semanticFallback) evidence.semanticFallback = true;
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
-      const reply = '我没有完全理解你的意图。可以试试：查询知识（如“查一下退款政策”）、创建工单（如“帮我提个工单，网络很卡”）或转接人工。';
+      const reply = await this.fallbackReply(traceId, runId, userText, route.reasonCode);
       this.pushMessages(userText, reply);
       return { status: 'clarification', reply, route: evidence, reasonCode: route.reasonCode };
     }
-    const resolved = this.pluginHost.resolveCandidate(route.functionId, route.pluginId);
-    if (!resolved.ok) {
-      const reply = `路由选中的插件不可用（${resolved.error.code}）。`;
-      this.pushMessages(userText, reply);
-      return { status: 'failed', reply, route: evidence, reasonCode: resolved.error.code };
+    const outcome = await this.prepareAndExecute(runId, userText, frame, route);
+    if (outcome.status === 'awaiting_confirmation') {
+      this.pushMessages(userText, outcome.reply);
+      return { status: 'awaiting_confirmation', reply: outcome.reply, route: evidence, pending: summarizeAction(outcome.action) };
     }
-    const built = buildActionInput(route.functionId, frame.slots, userText);
-    if ('missing' in built) {
-      const reply = `还缺少必要信息（${built.missing.join('、')}），请补充完整后再试。`;
-      this.pushMessages(userText, reply);
-      return { status: 'clarification', reply, route: evidence, reasonCode: 'slots_missing' };
+    if (outcome.status === 'failed') {
+      this.pushMessages(userText, outcome.reply);
+      return { status: 'failed', reply: outcome.reply, route: evidence, reasonCode: outcome.reasonCode };
     }
-    const policy = resolved.value.manifest.policy;
-    const action: ActionDefinition = {
-      schemaVersion: SCHEMA_VERSIONS.action,
-      actionId: `action-sandbox-${String(this.turnCount)}`,
-      runId,
-      functionId: route.functionId,
-      pluginId: route.pluginId,
-      idempotencyKey: `${route.functionId}:${SESSION_RUN_ID}:${String(this.turnCount)}`,
-      input: built.input,
-      riskLevel: policy.riskLevel,
-      confirmationRequired: policy.requiresConfirmation
-    };
-    await this.appendDecisionEvent(runId, frame, route, built.input);
-    // 每个回合使用独立 Workflow 实例，事件写入共享 EventLog 以保证全局唯一 ID。
-    this.workflow = this.createWorkflow();
-    this.workflow.start({ runId, definition: TURN_DEFINITION });
-    if (policy.requiresConfirmation) this.workflow.transition({ runId, event: 'request_confirmation' });
-    const executeInput = {
-      runId,
-      action,
-      requiredCapabilities: [...resolved.value.manifest.capabilities],
-      grantedCapabilities: [...resolved.value.manifest.capabilities],
-      authorized: true,
-      executor: this.createExecutor()
-    };
-    const executed = await this.workflow.execute(executeInput);
-    await this.drainWorkflowEvents();
-    if (!executed.ok) {
-      if (executed.reasonCode === 'confirmation_required') {
-        this.pending = { action };
-        const reply = `即将执行高风险操作「${action.functionId}」（插件 ${action.pluginId}），需要你的确认。`;
-        this.pushMessages(userText, reply);
-        return { status: 'awaiting_confirmation', reply, route: evidence, pending: summarizeAction(action) };
-      }
-      const reply = `动作被拒绝：${executed.reasonCode}`;
-      this.pushMessages(userText, reply);
-      return { status: 'failed', reply, route: evidence, reasonCode: executed.reasonCode };
+    if (outcome.status === 'clarification') {
+      this.pushMessages(userText, outcome.reply);
+      return { status: 'clarification', reply: outcome.reply, route: evidence, reasonCode: outcome.reasonCode };
     }
-    this.workflow.transition({ runId, event: 'complete' });
-    await this.drainWorkflowEvents();
-    const actionResult = executed.value;
-    const reply = await this.generateReply(traceId, runId, userText, action, actionResult);
+    const reply = await this.generateReply(traceId, runId, userText, outcome.action, outcome.actionResult);
     this.pushMessages(userText, reply);
-    return { status: 'executed', reply, route: evidence, actionResult };
+    return { status: 'executed', reply, route: evidence, actionResult: outcome.actionResult };
+  }
+
+  /**
+   * 执行一轮流式对话，逐阶段下发事件，response.generate 阶段透传 delta。
+   *
+   * 语义抽取、路由和执行复用 turn() 的私有步骤；scripted 模式没有真实流，
+   * 回复阶段一次性下发 delta 与 done。done 事件的 result 与 turn() 返回同构。
+   *
+   * @param text - 用户输入文本
+   * @param emit - 流式事件回调
+   * @returns 本轮对话结果（与 done 事件内容一致）
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-18
+   */
+  public async turnStreamed(text: string, emit: (event: StreamEvent) => void): Promise<TurnResult> {
+    const userText = text.trim();
+    emit({ type: 'stage', stage: 'semantic' });
+    await this.cancelStalePending();
+    this.turnCount += 1;
+    const runId = SESSION_RUN_ID;
+    const traceId = `trace-sandbox-${String(this.turnCount)}`;
+    const finish = (result: TurnResult): TurnResult => {
+      emit({ type: 'done', result });
+      return result;
+    };
+    const extracted = await this.extractFrame(traceId, runId, userText);
+    if (!extracted.ok) {
+      this.pushMessages(userText, extracted.reply);
+      return finish({ status: 'failed', reply: extracted.reply, route: extracted.route, reasonCode: extracted.reasonCode });
+    }
+    emit({ type: 'stage', stage: 'route' });
+    const frame = extracted.frame;
+    const route = await this.routeFrame(traceId, runId, frame);
+    const evidence = buildEvidence(route, frame);
+    if (extracted.semanticFallback) evidence.semanticFallback = true;
+    if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
+      const reply = await this.fallbackReplyStreamed(traceId, runId, userText, route.reasonCode, (delta) => emit({ type: 'delta', text: delta }));
+      this.pushMessages(userText, reply);
+      return finish({ status: 'clarification', reply, route: evidence, reasonCode: route.reasonCode });
+    }
+    emit({ type: 'stage', stage: 'action' });
+    const outcome = await this.prepareAndExecute(runId, userText, frame, route);
+    if (outcome.status === 'awaiting_confirmation') {
+      this.pushMessages(userText, outcome.reply);
+      return finish({ status: 'awaiting_confirmation', reply: outcome.reply, route: evidence, pending: summarizeAction(outcome.action) });
+    }
+    if (outcome.status === 'failed') {
+      this.pushMessages(userText, outcome.reply);
+      return finish({ status: 'failed', reply: outcome.reply, route: evidence, reasonCode: outcome.reasonCode });
+    }
+    if (outcome.status === 'clarification') {
+      this.pushMessages(userText, outcome.reply);
+      return finish({ status: 'clarification', reply: outcome.reply, route: evidence, reasonCode: outcome.reasonCode });
+    }
+    emit({ type: 'stage', stage: 'response' });
+    const reply = await this.generateReplyStreamed(traceId, runId, userText, outcome.action, outcome.actionResult, (delta) => emit({ type: 'delta', text: delta }));
+    this.pushMessages(userText, reply);
+    return finish({ status: 'executed', reply, route: evidence, actionResult: outcome.actionResult });
   }
 
   /**
@@ -544,6 +582,277 @@ export class IarSandboxSession {
   }
 
   /**
+   * 执行语义抽取，brain 模式失败时用离线 ScriptedModelProvider 重试一次。
+   *
+   * @param traceId - 链路标识
+   * @param runId - 运行标识
+   * @param userText - 用户输入文本
+   * @returns 语义帧（含是否走了离线兜底）或稳定失败摘要
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-18
+   */
+  private async extractFrame(traceId: string, runId: string, userText: string): Promise<ExtractFrameOutcome> {
+    const extracted = await new SemanticExtractorAdapter(this.gateway).extract({ traceId, runId, input: { text: userText } });
+    if (extracted.ok) return { ok: true, frame: extracted.value, semanticFallback: false };
+    if (this.mode === 'brain') {
+      // 真实 LLM 抽取失败时降级到离线关键词抽取，保证链路可以继续。
+      const retried = await this.retrySemanticWithScripted(traceId, runId, userText);
+      if (retried.ok) return { ok: true, frame: retried.value, semanticFallback: true };
+    }
+    const route: RouteEvidence = { status: 'semantic_failed', reasonCode: extracted.error.code, semanticIntent: 'unknown', semanticConfidence: 0 };
+    return { ok: false, route, reasonCode: extracted.error.code, reply: `语义抽取失败（${extracted.error.code}），请换个说法重试。` };
+  }
+
+  /**
+   * 用离线 ScriptedModelProvider 作为 brain provider 重试语义抽取。
+   *
+   * 复用同一 profile registry 和 gateway 校验/超时/重试边界，
+   * 只把 provider 换成离线实现，不放宽输出 Schema。
+   *
+   * @param traceId - 链路标识
+   * @param runId - 运行标识
+   * @param userText - 用户输入文本
+   * @returns 离线抽取的结构化结果
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-18
+   */
+  private async retrySemanticWithScripted(traceId: string, runId: string, userText: string): Promise<ModelGatewayResult<SemanticFrame>> {
+    const fallbackGateway = new ModelGateway({ registry: this.registry, providers: { brain: new ScriptedModelProvider() } });
+    return new SemanticExtractorAdapter(fallbackGateway).extract({ traceId, runId, input: { text: userText } });
+  }
+
+  /**
+   * 用语义帧执行两阶段路由。
+   *
+   * @param traceId - 链路标识
+   * @param runId - 运行标识
+   * @param frame - 结构化语义帧
+   * @returns 两阶段路由结果
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-18
+   */
+  private routeFrame(traceId: string, runId: string, frame: SemanticFrame): Promise<RouteResult> {
+    return new TwoStageRouter().routeAsync({
+      traceId,
+      runId,
+      facts: buildFacts(frame),
+      tenantId: 'tenant-sandbox',
+      actorId: 'actor-sandbox',
+      environment: 'sandbox',
+      functionRules: sandboxFunctionRules,
+      pluginRules: sandboxPluginRules,
+      pluginHost: this.pluginHost,
+      functionDecisionAdapter: this.functionDecisionAdapter,
+      pluginDecisionAdapter: this.pluginDecisionAdapter,
+      authorizePlugin: () => true
+    });
+  }
+
+  /**
+   * 把路由结果落成 Action 并交给 Workflow 执行。
+   *
+   * @param runId - 运行标识
+   * @param userText - 用户输入文本
+   * @param frame - 结构化语义帧
+   * @param route - 两阶段路由结果
+   * @returns 执行/待确认/澄清/失败的内部结果联合
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-18
+   */
+  private async prepareAndExecute(runId: string, userText: string, frame: SemanticFrame, route: RouteResult): Promise<ExecuteTurnOutcome> {
+    if (!route.functionId || !route.pluginId) return { status: 'failed', reply: '路由结果缺少 Function 或 Plugin。', reasonCode: 'route_incomplete' };
+    const resolved = this.pluginHost.resolveCandidate(route.functionId, route.pluginId);
+    if (!resolved.ok) return { status: 'failed', reply: `路由选中的插件不可用（${resolved.error.code}）。`, reasonCode: resolved.error.code };
+    const built = buildActionInput(route.functionId, frame.slots, userText);
+    if ('missing' in built) return { status: 'clarification', reply: `还缺少必要信息（${built.missing.join('、')}），请补充完整后再试。`, reasonCode: 'slots_missing' };
+    const policy = resolved.value.manifest.policy;
+    const action: ActionDefinition = {
+      schemaVersion: SCHEMA_VERSIONS.action,
+      actionId: `action-sandbox-${String(this.turnCount)}`,
+      runId,
+      functionId: route.functionId,
+      pluginId: route.pluginId,
+      idempotencyKey: `${route.functionId}:${SESSION_RUN_ID}:${String(this.turnCount)}`,
+      input: built.input,
+      riskLevel: policy.riskLevel,
+      confirmationRequired: policy.requiresConfirmation
+    };
+    await this.appendDecisionEvent(runId, frame, route, built.input);
+    // 每个回合使用独立 Workflow 实例，事件写入共享 EventLog 以保证全局唯一 ID。
+    this.workflow = this.createWorkflow();
+    this.workflow.start({ runId, definition: TURN_DEFINITION });
+    if (policy.requiresConfirmation) this.workflow.transition({ runId, event: 'request_confirmation' });
+    const executed = await this.workflow.execute({
+      runId,
+      action,
+      requiredCapabilities: [...resolved.value.manifest.capabilities],
+      grantedCapabilities: [...resolved.value.manifest.capabilities],
+      authorized: true,
+      executor: this.createExecutor()
+    });
+    await this.drainWorkflowEvents();
+    if (!executed.ok) {
+      if (executed.reasonCode === 'confirmation_required') {
+        this.pending = { action };
+        return { status: 'awaiting_confirmation', action, reply: `即将执行高风险操作「${action.functionId}」（插件 ${action.pluginId}），需要你的确认。` };
+      }
+      return { status: 'failed', reply: `动作被拒绝：${executed.reasonCode}`, reasonCode: executed.reasonCode };
+    }
+    this.workflow.transition({ runId, event: 'complete' });
+    await this.drainWorkflowEvents();
+    return { status: 'executed', action, actionResult: executed.value };
+  }
+
+  /**
+   * 路由未命中时的兜底回复：brain 走 Response Generator，scripted 走模板。
+   *
+   * @param traceId - 链路标识
+   * @param runId - 运行标识
+   * @param userText - 用户输入文本
+   * @param reasonCode - 路由未命中的稳定原因码
+   * @returns 兜底回复文本，生成失败时回退固定话术
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-18
+   */
+  private async fallbackReply(traceId: string, runId: string, userText: string, reasonCode: string): Promise<string> {
+    if (this.mode === 'brain') {
+      const generated = await new ResponseGeneratorAdapter(this.gateway).generate({
+        traceId,
+        runId,
+        input: {
+          userMessage: userText,
+          recentMessages: this.recentMessages.slice(-6),
+          availableFunctions: ['knowledge.query', 'ticket.create', 'human.transfer'],
+          reasonCode
+        }
+      });
+      // 只有生成失败才回退固定话术。
+      if (generated.ok) return generated.value.text;
+      return FALLBACK_REPLY_TEXT;
+    }
+    return this.scriptedFallbackReply(userText) ?? FALLBACK_REPLY_TEXT;
+  }
+
+  /**
+   * 流式兜底回复：brain 模式逐段透传 delta，失败回退非流式兜底；scripted 模式一次性下发模板回复。
+   *
+   * @param traceId - 链路追踪标识
+   * @param runId - 会话运行标识
+   * @param userText - 用户输入文本
+   * @param reasonCode - 路由失败原因码
+   * @param onDelta - 回复增量回调
+   * @returns 兜底回复全文
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-18
+   */
+  private async fallbackReplyStreamed(traceId: string, runId: string, userText: string, reasonCode: string, onDelta: (delta: string) => void): Promise<string> {
+    if (this.mode !== 'brain' || !(this.brainProvider instanceof OpenAICompatibleModelProvider)) {
+      const reply = await this.fallbackReply(traceId, runId, userText, reasonCode);
+      onDelta(reply);
+      return reply;
+    }
+    const profile = this.registry.forRole('response.generate');
+    const input: JsonValue = {
+      userMessage: userText,
+      recentMessages: this.recentMessages.slice(-6),
+      availableFunctions: ['knowledge.query', 'ticket.create', 'human.transfer'],
+      reasonCode
+    };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), profile.timeoutMs);
+    let streamed = '';
+    try {
+      const parsed = await this.brainProvider.completeStreamed({ traceId, runId, profile, input, attempt: 1, signal: controller.signal }, (delta) => {
+        streamed += delta;
+        onDelta(delta);
+      });
+      const text = readResponseText(parsed);
+      if (text !== undefined) return text;
+      if (streamed.trim().length > 0) return streamed;
+      return this.fallbackReply(traceId, runId, userText, reasonCode);
+    } catch {
+      if (streamed.trim().length > 0) return streamed;
+      return this.fallbackReply(traceId, runId, userText, reasonCode);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * scripted 模式的轻量模板兜底：身份介绍、能力说明和基于最近对话的指令回忆。
+   *
+   * @param userText - 用户输入文本
+   * @returns 模板回复文本，模板覆盖不了时返回 undefined
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-18
+   */
+  private scriptedFallbackReply(userText: string): string | undefined {
+    const text = userText.trim();
+    if (/(刚才|之前|上次|前面)/.test(text)) {
+      const lastUser = [...this.recentMessages].reverse().find((message) => message.role === 'user');
+      if (lastUser) return `你刚才让我「${lastUser.text.slice(0, 60)}」，这就是你之前交代的事。`;
+      return '这是我们对话的开始，你还没有让我做过任何事。';
+    }
+    if (/(你是谁|你叫什么|自我介绍|你是什么)/.test(text)) {
+      return '我是 IAR Agent Sandbox，一个可交互的 IAR 插件沙盒：你输入一句话，我会走完语义抽取、两阶段路由（Function → Plugin）、策略确认和插件执行，并在右侧展示完整的路由证据和事件流。';
+    }
+    if (/(能做什么|会什么|有什么功能|可以做什么|能干嘛|能干什么)/.test(text)) {
+      return '我目前支持三件事：1）查询知识，比如「查一下退款政策」；2）创建工单，比如「帮我提个工单，网络很卡」；3）转接人工客服，比如「转人工」。其中工单和转人工属于高风险操作，执行前需要你确认。';
+    }
+    return undefined;
+  }
+
+  /**
+   * 流式回复生成：brain 模式逐段透传 delta，scripted 模式一次性下发模板回复。
+   *
+   * 流式调用或 iar.response/v1 解析失败时，已 stream 出的原文直接兜底；
+   * 一个增量都没收到时退回非流式生成，保持与 turn() 相同的失败话术。
+   *
+   * @param traceId - 链路标识
+   * @param runId - 运行标识
+   * @param userText - 用户消息
+   * @param action - 已执行动作
+   * @param actionResult - 动作执行结果
+   * @param onDelta - 回复增量回调
+   * @returns 回复文本
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-18
+   */
+  private async generateReplyStreamed(traceId: string, runId: string, userText: string, action: ActionDefinition, actionResult: ActionResult, onDelta: (delta: string) => void): Promise<string> {
+    if (this.mode !== 'brain' || !(this.brainProvider instanceof OpenAICompatibleModelProvider)) {
+      const reply = await this.generateReply(traceId, runId, userText, action, actionResult);
+      onDelta(reply);
+      return reply;
+    }
+    const profile = this.registry.forRole('response.generate');
+    const input: JsonValue = {
+      userMessage: userText,
+      functionId: action.functionId,
+      pluginId: action.pluginId,
+      actionStatus: actionResult.status,
+      actionOutput: actionResult.output ?? null
+    };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), profile.timeoutMs);
+    let streamed = '';
+    try {
+      const parsed = await this.brainProvider.completeStreamed({ traceId, runId, profile, input, attempt: 1, signal: controller.signal }, (delta) => {
+        streamed += delta;
+        onDelta(delta);
+      });
+      const text = readResponseText(parsed);
+      if (text !== undefined) return text;
+      if (streamed.trim().length > 0) return streamed;
+      return `动作已执行（${action.functionId}），但回复生成失败（model.schema_invalid）。`;
+    } catch {
+      if (streamed.trim().length > 0) return streamed;
+      return this.generateReply(traceId, runId, userText, action, actionResult);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
    * 追加记录路由证据的 decision.created 事件。
    *
    * @param runId - 会话运行标识
@@ -721,6 +1030,21 @@ function createDecisionModelProvider(): ModelProvider {
       };
     }
   };
+}
+
+/**
+ * 从 provider 输出中读取 iar.response/v1 的 text 字段。
+ *
+ * @param raw - provider 原始输出
+ * @returns 非空 text 或 undefined
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-18
+ */
+function readResponseText(raw: unknown): string | undefined {
+  if (typeof raw === 'string') return raw.trim().length > 0 ? raw : undefined;
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const text = (raw as { text?: unknown }).text;
+  return typeof text === 'string' && text.trim().length > 0 ? text : undefined;
 }
 
 /**

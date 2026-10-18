@@ -2,16 +2,16 @@
  * 提供 IAR agent sandbox 的 Fastify 宿主服务。
  *
  * 该服务把 IarSandboxSession 暴露为简单的 HTTP API：
- * 聊天、确认、压缩、状态和重置，并在 GET / 返回单文件聊天页面。
+ * 聊天（支持 SSE 流式）、确认、压缩、状态和重置，并在 GET / 返回单文件聊天页面。
  *
  * @author lvdaxianer@yeah.net
- * @date 2026-10-17
+ * @date 2026-10-18
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { loadDotEnv } from './env.js';
-import { IarSandboxSession, type SandboxMode } from './session.js';
+import { IarSandboxSession, type SandboxMode, type StreamEvent } from './session.js';
 
 /** sandbox 服务的启动配置。 */
 export type SandboxServerOptions = {
@@ -57,13 +57,14 @@ export async function startSandboxServer(options: SandboxServerOptions): Promise
     return indexHtml;
   });
 
-  app.post('/api/chat', async (request) => {
+  app.post('/api/chat', async (request, reply) => {
     const body = asRecord(request.body);
     const message = typeof body.message === 'string' ? body.message.trim() : '';
     if (message.length === 0) {
       return { status: 'failed', reply: '消息不能为空。', reasonCode: 'empty_message' };
     }
-    return session.turn(message);
+    if (!wantsStream(request, body)) return session.turn(message);
+    return streamTurn(session, message, reply);
   });
 
   app.post('/api/confirm', async (request) => {
@@ -107,4 +108,61 @@ export async function startSandboxServer(options: SandboxServerOptions): Promise
  */
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+/**
+ * 判断本次聊天请求是否要求流式响应。
+ *
+ * @param request - Fastify 请求（读取查询参数）
+ * @param body - 已收窄的请求体
+ * @returns 是否走 SSE 流式
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-18
+ */
+function wantsStream(request: FastifyRequest, body: Record<string, unknown>): boolean {
+  if (body.stream === true) return true;
+  const query = asRecord(request.query);
+  return query.stream === '1' || query.stream === 'true';
+}
+
+/**
+ * 执行一轮流式对话并通过 reply.raw 下发 SSE 事件。
+ *
+ * 事件序列为若干 stage/delta/done，结束时固定发送 `{"type":"end"}` 并关闭连接；
+ * 处理异常时发送 error 事件而不是让连接裸断。hijack 之后由本函数全权负责响应写入。
+ *
+ * @param session - 会话组合根
+ * @param message - 用户消息
+ * @param reply - Fastify 回复对象（接管底层响应）
+ * @returns 无返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-18
+ */
+async function streamTurn(session: IarSandboxSession, message: string, reply: FastifyReply): Promise<void> {
+  reply.hijack();
+  reply.raw.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive'
+  });
+  const emit = (event: StreamEvent): void => {
+    try {
+      if (!reply.raw.writableEnded) reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+    } catch {
+      // 客户端提前断开时静默丢弃，避免写入异常冒泡。
+    }
+  };
+  try {
+    await session.turnStreamed(message, emit);
+  } catch {
+    emit({ type: 'error', reasonCode: 'stream_failed', message: '流式处理失败，请重试。' });
+  }
+  try {
+    if (!reply.raw.writableEnded) {
+      reply.raw.write('data: {"type":"end"}\n\n');
+      reply.raw.end();
+    }
+  } catch {
+    // 客户端提前断开时结束流程。
+  }
 }

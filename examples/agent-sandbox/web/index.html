@@ -217,23 +217,121 @@
     }).then(function (res) { return res.json(); });
   }
 
+  var STAGE_LABELS = {
+    semantic: '正在理解意图…',
+    route: '正在路由…',
+    action: '正在执行插件…',
+    response: '正在生成回复…'
+  };
+
+  /** 创建流式助手气泡：text 节点追加增量，stage 行展示阶段进度。 */
+  function createStreamBubble() {
+    var div = document.createElement('div');
+    div.className = 'msg bot';
+    var textEl = document.createElement('span');
+    var stageEl = document.createElement('span');
+    stageEl.className = 'meta';
+    stageEl.textContent = STAGE_LABELS.semantic;
+    div.appendChild(textEl);
+    div.appendChild(stageEl);
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    var gotDelta = false;
+    return {
+      setStage: function (stage) {
+        if (!gotDelta && STAGE_LABELS[stage]) stageEl.textContent = STAGE_LABELS[stage];
+      },
+      appendDelta: function (text) {
+        // 收到第一个增量即收尾阶段行，开始逐字渲染回复。
+        if (!gotDelta) { gotDelta = true; stageEl.remove(); }
+        textEl.textContent += text;
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      },
+      finalize: function (result) {
+        stageEl.remove();
+        if (!result) return;
+        if (textEl.textContent.length === 0 && result.reply) textEl.textContent = result.reply;
+        var metaText = result.status === 'executed'
+          ? '已执行 · ' + (result.route && result.route.functionId ? result.route.functionId : '')
+          : result.status === 'awaiting_confirmation' ? '等待确认'
+          : result.status === 'clarification' ? '需要澄清' : '失败';
+        var meta = document.createElement('span');
+        meta.className = 'meta';
+        meta.textContent = metaText;
+        div.appendChild(meta);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+        if (result.status === 'awaiting_confirmation' && result.pending) runConfirm(result.pending);
+      },
+      remove: function () { div.remove(); }
+    };
+  }
+
+  /** 优先走 SSE 流式；res 非 2xx 或流读取失败时抛错，由调用方回退 JSON 路径。 */
+  function streamChat(text) {
+    return fetch('/api/chat?stream=1', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text })
+    }).then(function (res) {
+      if (!res.ok || !res.body) throw new Error('stream unavailable');
+      var bubble = createStreamBubble();
+      var reader = res.body.getReader();
+      var decoder = new TextDecoder();
+      var buffer = '';
+      var doneResult = null;
+      var handleLine = function (line) {
+        if (line.indexOf('data: ') !== 0) return;
+        var event;
+        try { event = JSON.parse(line.slice('data: '.length)); } catch (err) { return; }
+        if (event.type === 'stage') bubble.setStage(event.stage);
+        else if (event.type === 'delta') bubble.appendDelta(event.text);
+        else if (event.type === 'done') doneResult = event.result;
+        else if (event.type === 'error') bubble.appendDelta(event.message || '处理出错');
+      };
+      var pump = function () {
+        return reader.read().then(function (chunk) {
+          if (chunk.done) {
+            bubble.finalize(doneResult);
+            return;
+          }
+          buffer += decoder.decode(chunk.value, { stream: true });
+          var blocks = buffer.split('\n\n');
+          buffer = blocks.pop() || '';
+          blocks.forEach(function (block) {
+            block.split('\n').forEach(handleLine);
+          });
+          return pump();
+        });
+      };
+      return pump().catch(function (err) {
+        bubble.remove();
+        throw err;
+      });
+    });
+  }
+
+  /** 确认/取消待确认动作，流程保持走 /api/confirm。 */
+  function runConfirm(pending) {
+    showConfirmBox(pending, function (accepted) {
+      setBusy(true);
+      api('/api/confirm', { accepted: accepted }).then(function (confirmResult) {
+        setBusy(false);
+        if (confirmResult.status === 'executed') {
+          appendMsg('bot', confirmResult.reply, '已执行');
+        } else if (confirmResult.status === 'cancelled') {
+          appendMsg('bot', confirmResult.reply, '已取消');
+        } else {
+          appendMsg('bot', confirmResult.reply || '操作失败', '失败');
+        }
+        refreshState();
+      });
+    });
+  }
+
   function handleTurnResult(result) {
     if (result.status === 'awaiting_confirmation' && result.pending) {
       appendMsg('bot', result.reply, '等待确认');
-      showConfirmBox(result.pending, function (accepted) {
-        setBusy(true);
-        api('/api/confirm', { accepted: accepted }).then(function (confirmResult) {
-          setBusy(false);
-          if (confirmResult.status === 'executed') {
-            appendMsg('bot', confirmResult.reply, '已执行');
-          } else if (confirmResult.status === 'cancelled') {
-            appendMsg('bot', confirmResult.reply, '已取消');
-          } else {
-            appendMsg('bot', confirmResult.reply || '操作失败', '失败');
-          }
-          refreshState();
-        });
-      });
+      runConfirm(result.pending);
     } else if (result.status === 'executed') {
       var meta = '已执行 · ' + (result.route && result.route.functionId ? result.route.functionId : '');
       appendMsg('bot', result.reply, meta);
@@ -249,11 +347,18 @@
     inputEl.value = '';
     appendMsg('user', text);
     setBusy(true);
-    api('/api/chat', { message: text }).then(function (result) {
-      setBusy(false);
-      handleTurnResult(result);
-      refreshState();
-    });
+    streamChat(text)
+      .catch(function () {
+        // 流式不可用（如 5xx）时回退原有 JSON 路径。
+        return api('/api/chat', { message: text }).then(handleTurnResult);
+      })
+      .catch(function () {
+        appendMsg('bot', '请求失败，请稍后重试。', '失败');
+      })
+      .then(function () {
+        setBusy(false);
+        refreshState();
+      });
   };
 
   document.getElementById('compactBtn').onclick = function () {

@@ -7,9 +7,12 @@
  * context.compact 生成 iar.compaction-result/v1，
  * response.generate 生成 iar.response/v1。
  * 解析失败或缺 key 时抛出 ModelProviderError，交由 ModelGateway 走 fallback。
+ * response.generate 额外支持 SSE 流式输出（completeStreamed），
+ * 内部逐行解析 data: 增量并 accumulate 全文；流式回复直接输出正文（非 JSON 契约），
+ * 避免 JSON 包装逐字流出到界面。
  *
  * @author lvdaxianer@yeah.net
- * @date 2026-10-17
+ * @date 2026-10-18
  */
 import {
   INTENT_DECISION_PROMPT_VERSION,
@@ -58,6 +61,11 @@ type ChatCompletionResponse = {
   choices?: Array<{ message?: { content?: unknown } }>;
 };
 
+/** OpenAI 兼容 chat/completions 流式 chunk 的最小读取形状。 */
+type ChatCompletionStreamChunk = {
+  choices?: Array<{ delta?: { content?: unknown } }>;
+};
+
 /** 语义抽取角色的系统提示词。 */
 const SEMANTIC_SYSTEM_PROMPT = `你是 IAR（Intent Action Runtime）的 Semantic Extractor。
 把用户输入抽取为 iar.semantic-frame/v1 结构的 JSON 对象，只允许以下字段：
@@ -91,6 +99,12 @@ const RESPONSE_SYSTEM_PROMPT = `你是 IAR（Intent Action Runtime）的 Respons
 根据给定的执行结果生成面向用户的自然语言回复。
 只输出一个符合 iar.response/v1 的 JSON 对象：{ "schemaVersion": "iar.response/v1", "text": string }。
 不要输出 Markdown、解释文字或代码围栏。text 使用简洁友好的中文。`;
+
+/** 流式回复生成角色的系统提示词：直接输出正文，避免 JSON 包装逐字流出到界面。 */
+const RESPONSE_STREAM_SYSTEM_PROMPT = `你是 IAR（Intent Action Runtime）的 Response Generator。
+根据给定的执行结果生成面向用户的自然语言回复。
+直接输出回复正文本身：不要输出 JSON、schemaVersion 包装、Markdown 或解释性文字。
+使用简洁友好的中文，可以分点。`;
 
 /** 压缩提示词中的 compression_policy 片段。 */
 const COMPACTION_POLICY = `{
@@ -146,6 +160,43 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     const prompt = this.buildPrompt(request);
     const raw = await this.callChatCompletion(connection, prompt.system, prompt.user, request.signal);
     return parseJsonContent(raw);
+  }
+
+  /**
+   * 执行流式模型调用，逐段回调 delta content 并返回解析后的 JSON 输出。
+   *
+   * 只允许 response.generate 角色流式：semantic.extract/context.compact 的
+   * 结构化 JSON 契约不能拆成半截增量，避免破坏 Schema 校验边界。
+   *
+   * @param request - gateway 冻结的 provider 请求
+   * @param onDelta - 每个 content 增量的回调
+   * @returns 与 complete() 相同的解析后模型输出对象
+   * @throws ModelProviderError 当角色不允许流式、未配置 key、HTTP 失败或 JSON 解析失败
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-18
+   */
+  public async completeStreamed(request: ModelProviderRequest, onDelta: (delta: string) => void): Promise<unknown> {
+    if (request.profile.role !== 'response.generate') throw new ModelProviderError('provider_failed');
+    const connection = this.resolveConnection(request.profile);
+    if (!connection.apiKey || !connection.baseUrl) throw new ModelProviderError('provider_unavailable');
+    // 流式场景直接输出正文（非 JSON 契约），accumulate 全文原样返回，由调用方兜底解析。
+    const prompt = this.buildStreamPrompt(request);
+    return await this.streamChatCompletion(connection, prompt.system, prompt.user, request.signal, onDelta, false);
+  }
+
+  /**
+   * 流式回复生成的提示词：response.generate 直接输出正文，其余角色与非流式一致。
+   *
+   * @param request - gateway 冻结的 provider 请求
+   * @returns 系统提示词和用户内容
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-18
+   */
+  protected buildStreamPrompt(request: ModelProviderRequest): { system: string; user: string } {
+    if (request.profile.role === 'response.generate') {
+      return { system: RESPONSE_STREAM_SYSTEM_PROMPT, user: buildResponseUserPrompt(asRecord(request.input)) };
+    }
+    return this.buildPrompt(request);
   }
 
   /**
@@ -233,6 +284,84 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     const content = payload.choices?.[0]?.message?.content;
     if (typeof content !== 'string' || content.length === 0) throw new ModelProviderError('provider_failed');
     return content;
+  }
+
+  /**
+   * 调用 OpenAI 兼容 chat/completions 流式接口并逐行解析 SSE。
+   *
+   * 只识别 `data: ` 前缀的有效负载行，`[DONE]` 为结束标记；
+   * 注释行、非法 JSON 行和空 delta 直接跳过，保证对端心跳或
+   * 个别坏帧不会中断整段回复。accumulate 的全文最终交回 completeStreamed 解析。
+   *
+   * @param connection - 已解析且不写入 profile 的连接信息
+   * @param system - 系统提示词
+   * @param user - 用户内容
+   * @param signal - gateway 注入的取消信号
+   * @param onDelta - 每个 content 增量的回调
+   * @returns accumulate 后的全文
+   * @throws ModelProviderError 当 HTTP 状态非 2xx、网络失败、读取中断或全文为空
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-18
+   */
+  private async streamChatCompletion(connection: { apiKey: string | undefined; baseUrl: string | undefined; model: string }, system: string, user: string, signal: AbortSignal, onDelta: (delta: string) => void, jsonFormat = true): Promise<string> {
+    let response: Response;
+    try {
+      response = await fetch(`${connection.baseUrl}/chat/completions`, {
+        method: 'POST',
+        signal,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${connection.apiKey}` },
+        body: JSON.stringify({
+          model: connection.model,
+          temperature: 0.2,
+          stream: true,
+          ...(jsonFormat ? { response_format: { type: 'json_object' } } : {}),
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user }
+          ]
+        })
+      });
+    } catch {
+      // 网络层异常（含 abort）统一归类为 provider 暂不可用。
+      throw new ModelProviderError('provider_unavailable');
+    }
+    if (!response.ok || response.body === null) throw new ModelProviderError('provider_failed');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = '';
+    let accumulated = '';
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        pending += decoder.decode(value, { stream: true });
+        const lines = pending.split(/\r?\n/);
+        pending = lines.pop() ?? '';
+        for (const line of lines) {
+          const text = line.trim();
+          if (!text.startsWith('data:')) continue;
+          const data = text.slice('data:'.length).trim();
+          if (data === '[DONE]') continue;
+          let chunk: ChatCompletionStreamChunk;
+          try {
+            chunk = JSON.parse(data) as ChatCompletionStreamChunk;
+          } catch {
+            // 个别坏帧（如服务端心跳注释被误切）不中断整段回复。
+            continue;
+          }
+          const delta = chunk.choices?.[0]?.delta?.content;
+          if (typeof delta === 'string' && delta.length > 0) {
+            accumulated += delta;
+            onDelta(delta);
+          }
+        }
+      }
+    } catch {
+      // 读取中断或解码失败按 provider 暂不可用归类，保留已收到增量的兜底由调用方决定。
+      throw new ModelProviderError('provider_unavailable');
+    }
+    if (accumulated.length === 0) throw new ModelProviderError('provider_failed');
+    return accumulated;
   }
 }
 
@@ -342,12 +471,27 @@ function buildCompactionUserPrompt(input: Record<string, unknown>): string {
 /**
  * 拼装回复生成的用户内容。
  *
- * @param input - 调用方注入的用户消息和执行结果
+ * 输入携带 availableFunctions 时视为路由未命中的兜底回复请求：
+ * 基于最近对话自然回答"你是谁/你能做什么/我刚才让你做什么"类问题，
+ * 或自然解释可执行能力；否则按执行结果生成常规回复。
+ *
+ * @param input - 调用方注入的用户消息和执行结果或兜底上下文
  * @returns 回复生成用户内容
  * @author lvdaxianer@yeah.net
- * @date 2026-10-17
+ * @date 2026-10-18
  */
 function buildResponseUserPrompt(input: Record<string, unknown>): string {
+  if (Array.isArray(input.availableFunctions)) {
+    return [
+      '本轮路由未命中任何可执行功能，需要生成一条兜底回复。',
+      `用户消息：${readString(input, 'userMessage') ?? ''}`,
+      `最近对话：${JSON.stringify(input.recentMessages ?? [])}`,
+      `可用功能：${input.availableFunctions.map((item) => String(item)).join('、')}`,
+      `未命中原因码：${readString(input, 'reasonCode') ?? 'unknown'}`,
+      '要求：用户问"你是谁/你是做什么的"时，自然自我介绍为 IAR Agent Sandbox（可交互的 IAR 插件沙盒，演示意图识别、两阶段路由和插件执行链路）；用户提到"刚才/之前"让你做的事时，根据最近对话回答；其他情况自然解释你能做什么并各给一个简短示例。语气简洁友好，不要提及路由失败或原因码。',
+      '请生成面向用户的最终回复 JSON。'
+    ].join('\n');
+  }
   return [
     `用户消息：${readString(input, 'userMessage') ?? ''}`,
     `执行功能：${readString(input, 'functionId') ?? 'unknown'} / 插件：${readString(input, 'pluginId') ?? 'unknown'}`,

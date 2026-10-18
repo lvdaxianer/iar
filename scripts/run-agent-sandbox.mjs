@@ -22,14 +22,22 @@ if (forcedMode !== undefined && forcedMode !== 'real' && forcedMode !== 'scripte
   console.error(`未知的大脑模式: ${forcedMode}，只允许 real 或 scripted。`);
   process.exit(1);
 }
-const hasApiKey = Boolean(process.env.IAR_LLM_API_KEY ?? process.env.IAR_MODEL_API_KEY);
+// 占位符 CHANGE_ME 与空白视为未配置，避免误判成 real 模式后调用必然失败。
+function configured(value) {
+  const trimmed = value?.trim();
+  return trimmed && trimmed !== 'CHANGE_ME' ? trimmed : undefined;
+}
+const hasApiKey = Boolean(configured(process.env.IAR_LLM_API_KEY) ?? configured(process.env.IAR_MODEL_API_KEY));
 const mode = forcedMode ?? (hasApiKey ? 'real' : 'scripted');
 if (mode === 'real' && !hasApiKey) {
   console.error('brain real 模式需要环境变量 IAR_LLM_API_KEY（或 IAR_MODEL_API_KEY），可写入仓库根目录 .env，或未配置时改用 --brain scripted。');
   process.exit(1);
 }
+if (mode === 'scripted' && forcedMode !== 'scripted') {
+  console.log('未检测到有效的 IAR_LLM_API_KEY/IAR_MODEL_API_KEY（空白或 CHANGE_ME 均视为未配置），已回退离线假大脑。');
+}
 
-const server = await startSandboxServer({ mode });
+const server = await startSandboxServer({ mode: mode === 'real' ? 'brain' : 'scripted' });
 console.log('按 Ctrl+C 停止服务。');
 
 const shutdown = async () => {
