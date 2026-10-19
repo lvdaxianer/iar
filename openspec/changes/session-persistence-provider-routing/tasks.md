@@ -7,9 +7,9 @@
 
 ## 2. Provider Registry and built-in SQLite
 
-- [ ] 2.1 实现显式 Provider Registry 和动态加载器，验证 Provider 包、导出函数、SPI 版本和能力；用缺失包/错误版本测试验证稳定失败。
-- [ ] 2.2 将现有 SQLite Event/Snapshot 能力封装为内置 Provider，增加消息持久化、幂等和快照 revision 校验；通过 SQLite Provider 集成测试。
-- [ ] 2.3 实现 `flush`、`close`、有界异步写入和恢复读取，验证旧快照不能覆盖新快照且正常关闭排空已接受写入。
+- [x] 2.1 实现显式 Provider Registry 和动态加载器，验证 Provider 包、导出函数、SPI 版本和能力；用缺失包/错误版本测试验证稳定失败。
+- [x] 2.2 将现有 SQLite Event/Snapshot 能力封装为内置 Provider，增加消息持久化、幂等和快照 revision 校验；通过 SQLite Provider 集成测试。
+- [x] 2.3 实现 `flush`、`close`、有界异步写入和恢复读取，验证旧快照不能覆盖新快照且正常关闭排空已接受写入。
 
 ## 3. Hook event persistence
 
