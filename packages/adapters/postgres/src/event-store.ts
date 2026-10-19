@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import type { EventEnvelope } from '@iar/contracts';
-import { StorageConflictError, type EventStore } from '../../../storage/src/index.js';
+import { StorageConflictError, type EventStore } from '@iar/storage';
 import { assertIdentifier, cloneEvent } from './serialization.js';
 import { mapPostgresConflict, querySafely, withTransaction } from './transaction.js';
 import type { PostgresQueryClient } from './types.js';

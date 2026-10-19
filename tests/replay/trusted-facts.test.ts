@@ -6,8 +6,8 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { SCHEMA_VERSIONS, validateContract, type EventEnvelope } from '../../packages/contracts/src/index.js';
-import { BehaviorContextProjector, createInitialContext, criticalFieldHash } from '../../packages/runtime/src/index.js';
+import { SCHEMA_VERSIONS, validateContract, type EventEnvelope } from '@iar/contracts';
+import { BehaviorContextProjector, createInitialContext, criticalFieldHash } from '@iar/runtime';
 import { jobMonitorHandler } from '../../examples/agent-sandbox/src/functions/job-monitor.js';
 import { ticketCreateHandler } from '../../examples/agent-sandbox/src/functions/ticket-create.js';
 import { humanTransferHandler } from '../../examples/agent-sandbox/src/functions/human-transfer.js';

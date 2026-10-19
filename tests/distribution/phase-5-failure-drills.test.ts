@@ -7,10 +7,10 @@
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import test from 'node:test';
-import { ERROR_CODES, SCHEMA_VERSIONS, type PluginManifest } from '../../packages/contracts/src/index.js';
-import { PluginHost, type PluginHostResult, type PluginRecord } from '../../packages/plugin-host/src/index.js';
-import { createTenantControlPlane, type ControlPlanePolicyDecision } from '../../packages/control-plane/src/index.js';
-import { RemotePluginDistributor, signArtifact, type CapabilityChangeApproval, type DistributionCompatibility, type DistributionResult, type SignedPluginArtifact } from '../../packages/plugin-distribution/src/index.js';
+import { ERROR_CODES, SCHEMA_VERSIONS, type PluginManifest } from '@iar/contracts';
+import { PluginHost, type PluginHostResult, type PluginRecord } from '@iar/plugin-host';
+import { createTenantControlPlane, type ControlPlanePolicyDecision } from '@iar/control-plane';
+import { RemotePluginDistributor, signArtifact, type CapabilityChangeApproval, type DistributionCompatibility, type DistributionResult, type SignedPluginArtifact } from '@iar/plugin-distribution';
 
 const signer = generateKeyPairSync('ed25519');
 const trustedSigners = new Map([['drill-signer', signer.publicKey]]);

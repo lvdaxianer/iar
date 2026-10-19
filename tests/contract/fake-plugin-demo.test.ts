@@ -7,8 +7,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Ajv2020 } from 'ajv/dist/2020.js';
-import { replayEvents } from '../../packages/runtime/src/index.js';
-import { PluginHost, type PluginRecord } from '../../packages/plugin-host/src/index.js';
+import { replayEvents } from '@iar/runtime';
+import { PluginHost, type PluginRecord } from '@iar/plugin-host';
 import { fakeStopPlugin, onDisable, onEnable, onLoad, onUnload } from '../../examples/fake-plugin/src/index.js';
 
 /*

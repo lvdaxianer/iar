@@ -11,10 +11,10 @@ import {
   validateContract,
   type EventEnvelope,
   type FunctionPluginManifest
-} from '../../packages/contracts/src/index.js';
-import { buildIntentDecisionInput, type DecisionRequest } from '../../packages/decision/src/index.js';
-import { PluginHost } from '../../packages/plugin-host/src/index.js';
-import { BehaviorContextProjector, createInitialContext, PluginFirstRouter, type AsyncDecisionAdapter } from '../../packages/runtime/src/index.js';
+} from '@iar/contracts';
+import { buildIntentDecisionInput, type DecisionRequest } from '@iar/decision';
+import { PluginHost } from '@iar/plugin-host';
+import { BehaviorContextProjector, createInitialContext, PluginFirstRouter, type AsyncDecisionAdapter } from '@iar/runtime';
 import { facts } from './rule-engine-fixtures.js';
 
 const expression = { condition: { field: 'semantic.intent', operator: 'equals', value: 'knowledge.query' } } as const;

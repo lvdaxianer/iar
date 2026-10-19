@@ -14,8 +14,8 @@ import {
   ModelProfileRegistry,
   UnifiedDecisionAdapter,
   type ModelProvider
-} from '../../../packages/decision/src/model-gateway/index.js';
-import type { DecisionRequest } from '../../../packages/decision/src/types.js';
+} from '@iar/decision';
+import type { DecisionRequest } from '@iar/decision';
 
 type Backend = 'jev' | 'intent-model';
 type AuditMetadata = Record<string, JsonValue>;

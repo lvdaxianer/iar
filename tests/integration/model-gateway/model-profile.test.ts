@@ -47,7 +47,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { ModelAuditRecorder, ModelProfileRegistry, loadModelProfiles, redactModelRequest } from '../../../packages/decision/src/index.js';
+import { ModelAuditRecorder, ModelProfileRegistry, loadModelProfiles, redactModelRequest } from '@iar/decision';
 
 /**
  * 读取版本化模型配置文本。

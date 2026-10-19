@@ -6,11 +6,11 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createServiceApi, type ServiceApiRequest } from '../../../packages/adapters/service/src/index.js';
-import { createSidecarServer, createSidecarTransport } from '../../../packages/adapters/sidecar/src/index.js';
-import { LocalWorkflow } from '../../../packages/workflow/src/index.js';
-import { PluginHost } from '../../../packages/plugin-host/src/index.js';
-import { SCHEMA_VERSIONS, type WorkflowDefinition } from '../../../packages/contracts/src/index.js';
+import { createServiceApi, type ServiceApiRequest } from '@iar/adapters-service';
+import { createSidecarServer, createSidecarTransport } from '@iar/adapters-sidecar';
+import { LocalWorkflow } from '@iar/workflow';
+import { PluginHost } from '@iar/plugin-host';
+import { SCHEMA_VERSIONS, type WorkflowDefinition } from '@iar/contracts';
 
 /*
  * Sidecar test 同时走 JSON handler 和真实 Node HTTP server。

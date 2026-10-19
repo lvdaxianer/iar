@@ -9,9 +9,10 @@
     "packages/adapters/*"
   ],
   "scripts": {
-    "build": "tsc -b tsconfig.build.json",
-    "clean": "tsc -b tsconfig.build.json --clean",
+    "build": "tsc -b tsconfig.build.json && tsc -p tsconfig.tests.build.json",
+    "clean": "tsc -b tsconfig.build.json --clean && tsc -b tsconfig.tests.build.json --clean",
     "lint": "tsc -p tsconfig.json --noEmit",
+    "verify:packages": "node scripts/verify-package-distribution.mjs",
     "test": "npm run build && node scripts/run-tests.mjs",
     "demo:fake-plugin": "npm run build && node scripts/run-fake-plugin-demo.mjs",
     "demo:sandbox": "npm run build && node scripts/run-agent-sandbox.mjs"

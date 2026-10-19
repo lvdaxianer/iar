@@ -6,11 +6,11 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { SCHEMA_VERSIONS, type WorkflowDefinition } from '../../../packages/contracts/src/index.js';
-import { PluginHost } from '../../../packages/plugin-host/src/index.js';
-import { createFastifyApp } from '../../../packages/adapters/fastify/src/index.js';
-import { createServiceApi, type ServiceApiRequest } from '../../../packages/adapters/service/src/index.js';
-import { LocalWorkflow } from '../../../packages/workflow/src/index.js';
+import { SCHEMA_VERSIONS, type WorkflowDefinition } from '@iar/contracts';
+import { PluginHost } from '@iar/plugin-host';
+import { createFastifyApp } from '@iar/adapters-fastify';
+import { createServiceApi, type ServiceApiRequest } from '@iar/adapters-service';
+import { LocalWorkflow } from '@iar/workflow';
 
 /*
  * 本文件比较 Embedded Fastify 和 ServiceApi 的同一 run fixture。

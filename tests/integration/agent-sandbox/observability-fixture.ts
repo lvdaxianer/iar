@@ -9,8 +9,8 @@
  */
 import { startSandboxServer, type SandboxServerHandle } from '../../../examples/agent-sandbox/src/server.js';
 import { BrainModelProvider } from '../../../examples/agent-sandbox/src/models/llm-provider.js';
-import type { ModelProviderRequest } from '../../../packages/decision/src/index.js';
-import type { ModelGateway } from '../../../packages/decision/src/model-gateway/index.js';
+import type { ModelProviderRequest } from '@iar/decision';
+import type { ModelGateway } from '@iar/decision';
 import { safeLogIsIdleForTesting, setSafeLogWriterForTesting } from '../../../examples/agent-sandbox/src/safe-log.js';
 
 /** 测试使用的固定本地连接，不包含真实凭据。 */

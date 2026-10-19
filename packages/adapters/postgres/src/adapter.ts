@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { StorageValidationError, type EventStore, type RegistryStore, type SnapshotStore } from '../../../storage/src/index.js';
+import { StorageValidationError, type EventStore, type RegistryStore, type SnapshotStore } from '@iar/storage';
 import { PostgresEventStore } from './event-store.js';
 import { initializePostgresSchema } from './schema.js';
 import { PostgresRegistryStore } from './registry-store.js';

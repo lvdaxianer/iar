@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   ModelProviderError,
   type ModelProviderRequest
-} from '../../../packages/decision/src/index.js';
+} from '@iar/decision';
 import {
   BrainModelProvider,
   IntentModelProvider

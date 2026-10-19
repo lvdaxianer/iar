@@ -20,8 +20,8 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { SCHEMA_VERSIONS, type ActionDefinition, type WorkflowDefinition } from '../../packages/contracts/src/index.js';
-import { LocalWorkflow, confirmationScopeHash, type WorkflowRequest } from '../../packages/workflow/src/index.js';
+import { SCHEMA_VERSIONS, type ActionDefinition, type WorkflowDefinition } from '@iar/contracts';
+import { LocalWorkflow, confirmationScopeHash, type WorkflowRequest } from '@iar/workflow';
 
 /**
  * 创建最小可恢复状态机，覆盖运行、等待和终态边界。

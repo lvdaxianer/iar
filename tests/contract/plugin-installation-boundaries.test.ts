@@ -8,8 +8,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { ERROR_CODES, type FunctionPluginManifest } from '../../packages/contracts/src/index.js';
-import { MAX_INSTALL_BATCH_SIZE, PluginHost } from '../../packages/plugin-host/src/index.js';
+import { ERROR_CODES, type FunctionPluginManifest } from '@iar/contracts';
+import { MAX_INSTALL_BATCH_SIZE, PluginHost } from '@iar/plugin-host';
 
 /*
  * 本文件覆盖安装输入的资源和审计边界。

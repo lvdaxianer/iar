@@ -16,10 +16,10 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { SCHEMA_VERSIONS, type ActionDefinition, type WorkflowDefinition } from '../../packages/contracts/src/index.js';
-import { LocalWorkflow } from '../../packages/workflow/src/index.js';
-import type { ActionIdempotencyLedger } from '../../packages/runtime/src/index.js';
-import type { WorkflowRequest } from '../../packages/workflow/src/index.js';
+import { SCHEMA_VERSIONS, type ActionDefinition, type WorkflowDefinition } from '@iar/contracts';
+import { LocalWorkflow } from '@iar/workflow';
+import type { ActionIdempotencyLedger } from '@iar/runtime';
+import type { WorkflowRequest } from '@iar/workflow';
 
 /**
  * 创建 edge case 使用的确定性 WorkflowDefinition。

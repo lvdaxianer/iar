@@ -11,9 +11,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import type { BehaviorContext } from '../../../packages/contracts/src/index.js';
-import { criticalFieldHash } from '../../../packages/runtime/src/index.js';
-import { AsyncSqliteSnapshotStore, StorageConflictError, StoragePersistenceError, type SnapshotRecord } from '../../../packages/storage/src/index.js';
+import type { BehaviorContext } from '@iar/contracts';
+import { criticalFieldHash } from '@iar/runtime';
+import { AsyncSqliteSnapshotStore, StorageConflictError, StoragePersistenceError, type SnapshotRecord } from '@iar/storage';
 
 /** 创建最小合法结构化上下文，业务事实只放在契约允许的 slots 中。 */
 function snapshot(runId: string, revision: number, eventId = `event-${revision}`): SnapshotRecord {

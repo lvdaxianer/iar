@@ -8,12 +8,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { SCHEMA_VERSIONS, type FunctionPluginManifest, type WorkflowDefinition } from '../../packages/contracts/src/index.js';
-import { MockDecisionProvider } from '../../packages/decision/src/index.js';
-import { PluginHost } from '../../packages/plugin-host/src/index.js';
-import { createServiceApi, type ServiceApiRequest } from '../../packages/adapters/service/src/index.js';
-import { TwoStageRouter } from '../../packages/runtime/src/index.js';
-import { LocalWorkflow } from '../../packages/workflow/src/index.js';
+import { SCHEMA_VERSIONS, type FunctionPluginManifest, type WorkflowDefinition } from '@iar/contracts';
+import { MockDecisionProvider } from '@iar/decision';
+import { PluginHost } from '@iar/plugin-host';
+import { createServiceApi, type ServiceApiRequest } from '@iar/adapters-service';
+import { TwoStageRouter } from '@iar/runtime';
+import { LocalWorkflow } from '@iar/workflow';
 import { facts, functionRule, pluginRule } from '../routing/rule-engine-fixtures.js';
 
 /** @returns 可安装的固定业务 Manifest @author lvdaxianer@yeah.net @date 2026-10-17 */

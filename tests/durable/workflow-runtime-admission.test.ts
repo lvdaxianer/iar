@@ -6,9 +6,9 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { SCHEMA_VERSIONS, type WorkflowDefinition } from '../../packages/contracts/src/index.js';
-import { ContractWorkflowRuntime, evaluateDurableAdmission, type DurableWorkflowRequirement } from '../../packages/adapters/temporal/src/index.js';
-import type { WorkflowRequest } from '../../packages/workflow/src/index.js';
+import { SCHEMA_VERSIONS, type WorkflowDefinition } from '@iar/contracts';
+import { ContractWorkflowRuntime, evaluateDurableAdmission, type DurableWorkflowRequirement } from '@iar/adapters-temporal';
+import type { WorkflowRequest } from '@iar/workflow';
 
 /**
  * 创建用于准入测试的最小合法 WorkflowDefinition。

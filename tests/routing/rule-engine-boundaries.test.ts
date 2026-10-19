@@ -114,8 +114,8 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { JsonValue, RuleExpression } from '../../packages/contracts/src/index.js';
-import { RuleEngine, type FunctionRule } from '../../packages/rule-engine/src/index.js';
+import type { JsonValue, RuleExpression } from '@iar/contracts';
+import { RuleEngine, type FunctionRule } from '@iar/rule-engine';
 import { facts, functionRule, pluginCandidate, pluginRule } from './rule-engine-fixtures.js';
 
 test('同一候选的风险等级按最高值聚合且证据数组与输入隔离', () => {

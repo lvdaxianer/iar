@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import { validateContract, type EventEnvelope, type JsonValue, type BehaviorContext } from '@iar/contracts';
-import { StorageValidationError, type RegistryEntry, type SnapshotRecord } from '../../../storage/src/index.js';
+import { StorageValidationError, type RegistryEntry, type SnapshotRecord } from '@iar/storage';
 
 /**
  * 判断值是否为可无损保存的 JSON 值，并拒绝循环引用和恶意 getter。

@@ -12,7 +12,7 @@ import {
   type DispatchEvent,
   type HookHandler,
   type HookSubscription
-} from '../../packages/subscriptions/src/index.js';
+} from '@iar/subscriptions';
 
 const event: DispatchEvent = {
   eventId: 'evt-action-1',

@@ -7,8 +7,8 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { SCHEMA_VERSIONS, type RuleExpression } from '../../packages/contracts/src/index.js';
-import type { FunctionRule, PluginCandidate, PluginRule, RuleEvaluationFacts } from '../../packages/rule-engine/src/index.js';
+import { SCHEMA_VERSIONS, type RuleExpression } from '@iar/contracts';
+import type { FunctionRule, PluginCandidate, PluginRule, RuleEvaluationFacts } from '@iar/rule-engine';
 
 const BASE_RULE = {
   // 基础版本固定，确保所有测试结果可回放。

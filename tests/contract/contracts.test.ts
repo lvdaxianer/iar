@@ -16,7 +16,7 @@ import {
   SCHEMA_VERSIONS,
   validateContract,
   validatePluginManifest
-} from '../../packages/contracts/src/index.js';
+} from '@iar/contracts';
 
 /*
  * 合约测试覆盖版本、字段、嵌入 Schema 和跨字段策略关系。

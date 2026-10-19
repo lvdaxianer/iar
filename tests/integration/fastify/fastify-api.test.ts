@@ -8,10 +8,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { SCHEMA_VERSIONS, type FunctionPluginManifest, type WorkflowDefinition } from '../../../packages/contracts/src/index.js';
-import { PluginHost } from '../../../packages/plugin-host/src/index.js';
-import { LocalWorkflow, confirmationScopeHash } from '../../../packages/workflow/src/index.js';
-import { createFastifyApp, type FastifyHostOptions } from '../../../packages/adapters/fastify/src/index.js';
+import { SCHEMA_VERSIONS, type FunctionPluginManifest, type WorkflowDefinition } from '@iar/contracts';
+import { PluginHost } from '@iar/plugin-host';
+import { LocalWorkflow, confirmationScopeHash } from '@iar/workflow';
+import { createFastifyApp, type FastifyHostOptions } from '@iar/adapters-fastify';
 
 /**
  * 创建可供 API contract test 使用的最小状态机。

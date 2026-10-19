@@ -15,7 +15,7 @@ import type { SessionMessage, SessionPersistenceProvider } from '@iar/persistenc
 import { PluginHost } from '@iar/plugin-host';
 import { BehaviorContextProjector, type AsyncDecisionAdapter } from '@iar/runtime';
 import { SubscriptionDispatcher, SubscriptionRegistry, type DispatchEvent } from '@iar/subscriptions';
-import { InMemoryEventStore, type SnapshotStore } from '../../../packages/storage/src/index.js';
+import { InMemoryEventStore, type SnapshotStore } from '@iar/storage';
 import { LocalWorkflow, WorkflowEventLog, type ActionExecutor } from '@iar/workflow';
 import { SyncPluginBridge } from './execution/sync-plugin-bridge.js';
 import { BrainModelProvider } from './models/llm-provider.js';

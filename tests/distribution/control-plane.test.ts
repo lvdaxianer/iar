@@ -7,10 +7,10 @@
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import test from 'node:test';
-import { SCHEMA_VERSIONS, type PluginManifest } from '../../packages/contracts/src/index.js';
-import { signArtifact, type SignedPluginArtifact } from '../../packages/plugin-distribution/src/index.js';
-import { PluginHost } from '../../packages/plugin-host/src/index.js';
-import { createTenantControlPlane, type ControlPlanePolicyDecision, type TenantControlPlaneRequest } from '../../packages/control-plane/src/index.js';
+import { SCHEMA_VERSIONS, type PluginManifest } from '@iar/contracts';
+import { signArtifact, type SignedPluginArtifact } from '@iar/plugin-distribution';
+import { PluginHost } from '@iar/plugin-host';
+import { createTenantControlPlane, type ControlPlanePolicyDecision, type TenantControlPlaneRequest } from '@iar/control-plane';
 
 const signer = generateKeyPairSync('ed25519');
 const trustedSigners = new Map([['test-signer', signer.publicKey]]);

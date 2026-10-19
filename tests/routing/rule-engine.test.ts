@@ -1,8 +1,8 @@
 /** 验证 FunctionRule 与 PluginRule 的有限候选和可解释证据。 */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { RuleExpression } from '../../packages/contracts/src/index.js';
-import { RuleEngine } from '../../packages/rule-engine/src/index.js';
+import type { RuleExpression } from '@iar/contracts';
+import { RuleEngine } from '@iar/rule-engine';
 import { facts, functionRule } from './rule-engine-fixtures.js';
 
 /*

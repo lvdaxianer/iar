@@ -90,9 +90,9 @@ import {
   UnifiedDecisionAdapter,
   loadModelProfiles,
   type ModelProvider
-} from '../../../packages/decision/src/model-gateway/index.js';
+} from '@iar/decision';
 import type { DecisionResult, JsonValue } from '@iar/contracts';
-import type { DecisionRequest } from '../../../packages/decision/src/types.js';
+import type { DecisionRequest } from '@iar/decision';
 /**
  * 创建测试使用的最小决策 profile 集合。
  * @param backends - 要启用的后端列表

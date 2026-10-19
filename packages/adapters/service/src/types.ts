@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import type { EventStore, RegistryStore, SnapshotStore } from '../../../storage/src/index.js';
+import type { EventStore, RegistryStore, SnapshotStore } from '@iar/storage';
 
 /** Service adapter 对外提供的最小租户存储组合。 */
 export type TenantStorage = {

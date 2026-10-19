@@ -4,8 +4,8 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import type { BehaviorContext, EventEnvelope } from '../../../packages/contracts/src/index.js';
-import type { PostgresQueryClient } from '../../../packages/adapters/postgres/src/index.js';
+import type { BehaviorContext, EventEnvelope } from '@iar/contracts';
+import type { PostgresQueryClient } from '@iar/adapters-postgres';
 
 /*
  * Fake 只模拟参数化 SQL、租户过滤、事务回滚和连接释放；pg-mem 负责方言执行。

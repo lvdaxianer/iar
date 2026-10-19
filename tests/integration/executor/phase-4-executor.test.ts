@@ -6,8 +6,8 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createContainerExecutor, createSidecarExecutor, createWorkerExecutor, type ExecutorRequest } from '../../../packages/adapters/executors/src/index.js';
-import { SubscriptionRegistry, type HookSubscription } from '../../../packages/subscriptions/src/index.js';
+import { createContainerExecutor, createSidecarExecutor, createWorkerExecutor, type ExecutorRequest } from '@iar/adapters-executors';
+import { SubscriptionRegistry, type HookSubscription } from '@iar/subscriptions';
 
 /*
  * fixture 只使用 JSON-safe 输入和固定版本，避免测试绕过 transport 边界。

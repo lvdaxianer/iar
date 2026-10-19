@@ -7,11 +7,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Ajv2020 } from 'ajv/dist/2020.js';
-import type { FunctionPluginManifest, JsonValue } from '../../../packages/contracts/src/index.js';
-import type { PluginRegistration } from '../../../packages/plugin-sdk/src/index.js';
-import { createFastifyApp } from '../../../packages/adapters/fastify/src/index.js';
-import { PluginHost } from '../../../packages/plugin-host/src/index.js';
-import { LocalWorkflow } from '../../../packages/workflow/src/index.js';
+import type { FunctionPluginManifest, JsonValue } from '@iar/contracts';
+import type { PluginRegistration } from '@iar/plugin-sdk';
+import { createFastifyApp } from '@iar/adapters-fastify';
+import { PluginHost } from '@iar/plugin-host';
+import { LocalWorkflow } from '@iar/workflow';
 import { knowledgeQueryPlugin } from '../../../examples/knowledge-query/src/index.js';
 import { ticketCreatePlugin } from '../../../examples/ticket-create/src/index.js';
 import { humanTransferPlugin } from '../../../examples/human-transfer/src/index.js';

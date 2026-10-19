@@ -57,11 +57,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import type { FunctionPluginManifest } from '../../packages/contracts/src/index.js';
-import { SCHEMA_VERSIONS } from '../../packages/contracts/src/index.js';
-import { DecisionBackendResolver, IntentModelDecisionAdapter, JevDecisionAdapter, loadModelProfiles, MockDecisionProvider, ModelGateway, ModelProfileRegistry, UnifiedDecisionAdapter, type DecisionRequest, type ModelProvider } from '../../packages/decision/src/index.js';
-import { PluginHost } from '../../packages/plugin-host/src/index.js';
-import { TwoStageRouter, type AsyncDecisionAdapter, type RouteRequest } from '../../packages/runtime/src/index.js';
+import type { FunctionPluginManifest } from '@iar/contracts';
+import { SCHEMA_VERSIONS } from '@iar/contracts';
+import { DecisionBackendResolver, IntentModelDecisionAdapter, JevDecisionAdapter, loadModelProfiles, MockDecisionProvider, ModelGateway, ModelProfileRegistry, UnifiedDecisionAdapter, type DecisionRequest, type ModelProvider } from '@iar/decision';
+import { PluginHost } from '@iar/plugin-host';
+import { TwoStageRouter, type AsyncDecisionAdapter, type RouteRequest } from '@iar/runtime';
 import { facts, functionRule, pluginRule } from './rule-engine-fixtures.js';
 
 /*

@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { StorageConflictError, type RegistryEntry, type RegistryStore } from '../../../storage/src/index.js';
+import { StorageConflictError, type RegistryEntry, type RegistryStore } from '@iar/storage';
 import { assertIdentifier, cloneJsonValue } from './serialization.js';
 import { querySafely } from './transaction.js';
 import type { PostgresQueryClient } from './types.js';

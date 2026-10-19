@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import type { BehaviorContext } from '@iar/contracts';
-import { StorageConflictError, type SnapshotRecord, type SnapshotStore } from '../../../storage/src/index.js';
+import { StorageConflictError, type SnapshotRecord, type SnapshotStore } from '@iar/storage';
 import { assertIdentifier, cloneSnapshot, parseContext } from './serialization.js';
 import { mapPostgresConflict, querySafely, withTransaction } from './transaction.js';
 import type { PostgresQueryClient, PostgresQueryConnection } from './types.js';

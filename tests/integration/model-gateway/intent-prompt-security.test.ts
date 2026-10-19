@@ -4,8 +4,8 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildIntentDecisionInput } from '../../../packages/decision/src/index.js';
-import type { DecisionRequest } from '../../../packages/decision/src/types.js';
+import { buildIntentDecisionInput } from '@iar/decision';
+import type { DecisionRequest } from '@iar/decision';
 
 /**
  * 创建安全的基础请求，供恶意输入测试按场景替换单个结构。

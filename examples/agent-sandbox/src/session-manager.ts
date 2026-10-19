@@ -6,7 +6,7 @@
 import { randomBytes } from 'node:crypto';
 import { AsyncResource } from 'node:async_hooks';
 import { IarSandboxSession, type SandboxMode } from './session.js';
-import type { SnapshotStore } from '../../../packages/storage/src/index.js';
+import type { SnapshotStore } from '@iar/storage';
 import type { SessionPersistenceProvider } from '@iar/persistence-spi';
 
 /** 会话管理可配置上限；包含正在执行的请求。 */

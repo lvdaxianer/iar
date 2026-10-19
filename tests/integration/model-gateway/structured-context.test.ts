@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { IarSandboxSession } from '../../../examples/agent-sandbox/src/session.js';
-import { InMemorySnapshotStore } from '../../../packages/storage/src/index.js';
-import { createInitialContext } from '../../../packages/runtime/src/index.js';
+import { InMemorySnapshotStore } from '@iar/storage';
+import { createInitialContext } from '@iar/runtime';
 import {
   IntentModelDecisionAdapter,
   JevDecisionAdapter,
@@ -10,9 +10,9 @@ import {
   ModelProfileRegistry,
   type DecisionRequest,
   type ModelProvider
-} from '../../../packages/decision/src/index.js';
+} from '@iar/decision';
 import { buildFallbackUserPrompt, buildResponseUserPrompt, buildSemanticUserPrompt } from '../../../examples/agent-sandbox/src/models/model-input-transport.js';
-import { ResponseGeneratorAdapter } from '../../../packages/decision/src/index.js';
+import { ResponseGeneratorAdapter } from '@iar/decision';
 
 function request(): DecisionRequest {
   return {

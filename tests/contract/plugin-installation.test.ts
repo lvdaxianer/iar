@@ -8,8 +8,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { ERROR_CODES, type FunctionPluginManifest, type PluginManifest } from '../../packages/contracts/src/index.js';
-import { PluginHost } from '../../packages/plugin-host/src/index.js';
+import { ERROR_CODES, type FunctionPluginManifest, type PluginManifest } from '@iar/contracts';
+import { PluginHost } from '@iar/plugin-host';
 
 /*
  * 本文件聚焦安装事务，不重复覆盖生命周期事件细节。

@@ -3,14 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "./index.js",
-  "types": "../../dist/packages/built-in-plugins/src/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "import": "./index.js"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     }
   },
+  "files": ["dist"],
   "dependencies": {
     "@iar/contracts": "0.1.0",
     "@iar/observability": "0.1.0",

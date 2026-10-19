@@ -10,7 +10,7 @@ import test from 'node:test';
 import { newDb } from 'pg-mem';
 import * as PostgresPackage from '@iar/adapters-postgres';
 import * as ServicePackage from '@iar/adapters-service';
-import type { BehaviorContext, EventEnvelope } from '../../../packages/contracts/src/index.js';
+import type { BehaviorContext, EventEnvelope } from '@iar/contracts';
 import {
   SqliteEventStore,
   SqliteRegistryStore,
@@ -21,9 +21,9 @@ import {
   type EventStore,
   type RegistryStore,
   type SnapshotStore
-} from '../../../packages/storage/src/index.js';
-import { PostgresStorageAdapter, type PostgresQueryClient } from '../../../packages/adapters/postgres/src/index.js';
-import { TenantStorageService, type TenantStorage } from '../../../packages/adapters/service/src/index.js';
+} from '@iar/storage';
+import { PostgresStorageAdapter, type PostgresQueryClient } from '@iar/adapters-postgres';
+import { TenantStorageService, type TenantStorage } from '@iar/adapters-service';
 import { FailingPostgresClient, FakePostgresClient } from './fake-postgres-client.js';
 
 /*

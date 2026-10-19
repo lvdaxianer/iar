@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { connect } from 'node:net';
-import { ModelGateway, ModelProfileRegistry } from '../../../packages/decision/src/model-gateway/index.js';
+import { ModelGateway, ModelProfileRegistry } from '@iar/decision';
 import { createStreamRequest, createTestProvider, flushObservabilityLogs, withObservabilityFixture,
   type ObservabilityFixture } from './observability-fixture.js';
 

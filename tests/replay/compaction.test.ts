@@ -13,7 +13,7 @@ import {
   createInitialContext,
   type CompactionRequest,
   type CompactionResult
-} from '../../packages/runtime/src/index.js';
+} from '@iar/runtime';
 
 const sourceEvent = {
   schemaVersion: 'iar.event/v1' as const,

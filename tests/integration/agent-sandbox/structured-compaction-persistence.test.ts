@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { InMemorySnapshotStore } from '../../../packages/storage/src/index.js';
+import { InMemorySnapshotStore } from '@iar/storage';
 import { IarSandboxSession } from '../../../examples/agent-sandbox/src/session.js';
 
 test('会话压缩成功后异步快照包含已校验摘要', async () => {

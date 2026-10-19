@@ -10,9 +10,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { type ActionDefinition } from '../../packages/contracts/src/index.js';
-import { ActionIdempotencyLedger, RegistryActionIdempotencyStore } from '../../packages/runtime/src/index.js';
-import { SqliteRegistryStore } from '../../packages/storage/src/index.js';
+import { type ActionDefinition } from '@iar/contracts';
+import { ActionIdempotencyLedger, RegistryActionIdempotencyStore } from '@iar/runtime';
+import { SqliteRegistryStore } from '@iar/storage';
 
 /**
  * 创建跨数据库重启测试所需的 Action。

@@ -16,7 +16,7 @@ import {
   SqliteSnapshotStore,
   StorageValidationError,
   type RegistryEntry
-} from '../../packages/storage/src/index.js';
+} from '@iar/storage';
 import {
   BehaviorContextProjector,
   ActionIdempotencyLedger,
@@ -24,8 +24,8 @@ import {
   criticalFieldHash,
   replayEvents,
   ReplayValidationError
-} from '../../packages/runtime/src/index.js';
-import type { ActionDefinition, BehaviorContext, EventEnvelope } from '../../packages/contracts/src/index.js';
+} from '@iar/runtime';
+import type { ActionDefinition, BehaviorContext, EventEnvelope } from '@iar/contracts';
 
 /*
  * 事件事实源只允许追加，不允许用快照回写历史事件。

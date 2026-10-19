@@ -5,6 +5,17 @@
     "moduleResolution": "NodeNext",
     "rootDir": ".",
     "outDir": "dist",
+    "paths": {
+      "@iar/adapters-*/http-boundary": [
+        "./packages/adapters/*/src/http-boundary.ts"
+      ],
+      "@iar/adapters-*": [
+        "./packages/adapters/*/src/index.ts"
+      ],
+      "@iar/*": [
+        "./packages/*/src/index.ts"
+      ]
+    },
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,

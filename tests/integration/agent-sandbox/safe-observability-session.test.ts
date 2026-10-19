@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
 import test from 'node:test';
-import type { ModelProfileRegistry } from '../../../packages/decision/src/model-gateway/index.js';
+import type { ModelProfileRegistry } from '@iar/decision';
 import { MAX_MODEL_RESPONSE_BYTES } from '../../../examples/agent-sandbox/src/models/model-transport.js';
 import { safeModelTraceId } from '../../../examples/agent-sandbox/src/safe-log.js';
 import { createStreamRequest, createTestProvider, flushObservabilityLogs, observeAuditTraces, withObservabilityFixture,

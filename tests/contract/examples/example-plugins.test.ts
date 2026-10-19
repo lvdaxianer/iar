@@ -7,9 +7,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Ajv2020 } from 'ajv/dist/2020.js';
-import type { FunctionPluginManifest, JsonValue, PluginManifest } from '../../../packages/contracts/src/index.js';
-import { PluginHost, type PluginRecord } from '../../../packages/plugin-host/src/index.js';
-import type { PluginHandlerResult, PluginRegistration } from '../../../packages/plugin-sdk/src/index.js';
+import type { FunctionPluginManifest, JsonValue, PluginManifest } from '@iar/contracts';
+import { PluginHost, type PluginRecord } from '@iar/plugin-host';
+import type { PluginHandlerResult, PluginRegistration } from '@iar/plugin-sdk';
 import { knowledgeQueryPlugin } from '../../../examples/knowledge-query/src/index.js';
 import { ticketCreatePlugin } from '../../../examples/ticket-create/src/index.js';
 import { humanTransferPlugin } from '../../../examples/human-transfer/src/index.js';

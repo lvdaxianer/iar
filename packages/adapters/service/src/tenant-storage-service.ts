@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { StorageValidationError } from '../../../storage/src/index.js';
+import { StorageValidationError } from '@iar/storage';
 import type { TenantAuthorizer, TenantRequestContext, TenantStorage, TenantStorageFactory } from './types.js';
 
 /** 只允许通过租户 ID 创建隔离存储门面的 Service adapter。 */

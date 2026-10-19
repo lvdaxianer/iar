@@ -6,10 +6,10 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validatePluginManifest } from '../../packages/contracts/src/index.js';
-import { createSystemLoggingPlugin, installSystemLoggingPlugin, SYSTEM_LOGGING_PLUGIN_MANIFEST, SYSTEM_LOGGING_SUBSCRIPTIONS } from '../../packages/built-in-plugins/src/index.js';
-import { ObservabilityRecorder, type ObservabilityRecord } from '../../packages/observability/src/index.js';
-import { SubscriptionDispatcher, SubscriptionRegistry, type DispatchEvent } from '../../packages/subscriptions/src/index.js';
+import { validatePluginManifest } from '@iar/contracts';
+import { createSystemLoggingPlugin, installSystemLoggingPlugin, SYSTEM_LOGGING_PLUGIN_MANIFEST, SYSTEM_LOGGING_SUBSCRIPTIONS } from '@iar/built-in-plugins';
+import { ObservabilityRecorder, type ObservabilityRecord } from '@iar/observability';
+import { SubscriptionDispatcher, SubscriptionRegistry, type DispatchEvent } from '@iar/subscriptions';
 
 const event = (payload: Record<string, unknown>): DispatchEvent => ({ eventId: 'event-1', eventName: 'input.received', runId: 'run-1', correlationId: 'trace-1', payload: payload as never });
 

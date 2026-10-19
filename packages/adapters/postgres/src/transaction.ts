@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { StorageConflictError, StoragePersistenceError, StorageValidationError } from '../../../storage/src/index.js';
+import { StorageConflictError, StoragePersistenceError, StorageValidationError } from '@iar/storage';
 import type { PostgresQueryClient, PostgresQueryConnection, PostgresQueryResult } from './types.js';
 
 /**

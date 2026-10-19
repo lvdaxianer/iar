@@ -6,9 +6,9 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type WorkflowDefinition } from '../../packages/contracts/src/index.js';
-import { InMemoryDurableWorkflowStore, DurableWorkflowRuntime, type DurableExecuteRequest, type DurableWorkflowSnapshot } from '../../packages/adapters/temporal/src/index.js';
-import { confirmationScopeHash, type WorkflowRequest } from '../../packages/workflow/src/index.js';
+import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type WorkflowDefinition } from '@iar/contracts';
+import { InMemoryDurableWorkflowStore, DurableWorkflowRuntime, type DurableExecuteRequest, type DurableWorkflowSnapshot } from '@iar/adapters-temporal';
+import { confirmationScopeHash, type WorkflowRequest } from '@iar/workflow';
 
 /**
  * 创建 durable fixture 使用的 WorkflowDefinition。

@@ -17,8 +17,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { replayEvents, criticalFieldHash } from '../../packages/runtime/src/index.js';
-import type { EventEnvelope } from '../../packages/contracts/src/index.js';
+import { replayEvents, criticalFieldHash } from '@iar/runtime';
+import type { EventEnvelope } from '@iar/contracts';
 
 /**
  * 读取 Phase 2 stop-service 的 JSON EventLog fixture。

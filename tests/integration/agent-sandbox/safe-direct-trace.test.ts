@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createSemanticRequest, createTestProvider, flushObservabilityLogs, withObservabilityFixture } from './observability-fixture.js';
 import { registerDebugSignal, safeModelTraceId } from '../../../examples/agent-sandbox/src/safe-log.js';
-import { ModelGateway, ModelProfileRegistry } from '../../../packages/decision/src/model-gateway/index.js';
+import { ModelGateway, ModelProfileRegistry } from '@iar/decision';
 
 /**
  * 创建流式角色请求，保留既有固定测试连接。

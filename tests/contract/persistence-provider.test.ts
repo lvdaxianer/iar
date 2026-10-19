@@ -7,7 +7,7 @@ import {
   validateSessionIdentity,
   type PersistenceProviderManifest,
   type SessionIdentity
-} from '../../packages/persistence-spi/src/index.js';
+} from '@iar/persistence-spi';
 
 const identity: SessionIdentity = {
   sessionId: 'session-001',

@@ -1,0 +1,112 @@
+/**
+ * 验证 IAR 包的发布边界、入口文件和 npm tarball 内容。
+ *
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-20
+ */
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+
+const root = process.cwd();
+const packageDirectories = [
+  ...readdirSync(join(root, 'packages'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join(root, 'packages', entry.name)),
+  ...readdirSync(join(root, 'packages', 'adapters'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => join(root, 'packages', 'adapters', entry.name)),
+];
+
+const manifests = packageDirectories
+  .map((directory) => join(directory, 'package.json'))
+  .filter(existsSync)
+  .map((file) => ({ file, directory: join(file, '..'), manifest: JSON.parse(readFileSync(file, 'utf8')) }));
+
+assert.equal(manifests.length, 24, 'expected all workspace packages to have manifests');
+
+function assertTarget(packageDirectory, packageName, field, target) {
+  assert.equal(typeof target, 'string', `${packageName} ${field} must be a string`);
+  assert.ok(target.startsWith('./'), `${packageName} ${field} must stay inside the package`);
+  assert.ok(existsSync(join(packageDirectory, target)), `${packageName} ${field} target is missing: ${target}`);
+}
+
+function collectExportTargets(value, field = 'exports') {
+  if (typeof value === 'string') return [[field, value]];
+  if (!value || typeof value !== 'object') return [];
+  return Object.entries(value).flatMap(([key, child]) => collectExportTargets(child, `${field}.${key}`));
+}
+
+for (const { directory, manifest } of manifests) {
+  const name = manifest.name;
+  assert.equal(manifest.type, 'module', `${name} must use native ESM`);
+  assert.equal(manifest.main, './dist/index.js', `${name} main must point to local dist`);
+  assert.equal(manifest.types, './dist/index.d.ts', `${name} types must point to local dist`);
+  assert.deepEqual(manifest.exports?.['.'], {
+    types: './dist/index.d.ts',
+    import: './dist/index.js',
+  }, `${name} root exports must expose only its compiled public entrypoint`);
+  assert.deepEqual(manifest.files, ['dist'], `${name} files must publish only dist`);
+  assertTarget(directory, name, 'main', manifest.main);
+  assertTarget(directory, name, 'types', manifest.types);
+
+  for (const [field, target] of collectExportTargets(manifest.exports)) {
+    assertTarget(directory, name, field, target);
+    assert.ok(!target.includes('/src/'), `${name} ${field} must not expose src`);
+  }
+
+  const packJson = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
+    cwd: directory,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const packResult = JSON.parse(packJson)[0];
+  const paths = packResult.files.map(({ path }) => path);
+  assert.ok(paths.includes('dist/index.js'), `${name} tarball must contain JavaScript`);
+  assert.ok(paths.includes('dist/index.d.ts'), `${name} tarball must contain declarations`);
+  assert.ok(!paths.some((file) => file.startsWith('src/')), `${name} tarball must not contain src`);
+  assert.ok(paths.every((file) => file === 'package.json' || file.startsWith('dist/')), `${name} tarball contains an unexpected file`);
+
+  await import(name);
+  try {
+    await import(`${name}/src/index.js`);
+    assert.fail(`${name}/src/index.js unexpectedly crossed the package boundary`);
+  } catch (error) {
+    assert.equal(error?.code, 'ERR_PACKAGE_PATH_NOT_EXPORTED', `${name} must reject undeclared source imports`);
+  }
+
+  const worker = join(directory, 'dist', 'worker.js');
+  if (existsSync(worker)) assert.ok(paths.includes('dist/worker.js'), `${name} tarball must contain its worker`);
+  console.log(`verified ${name} (${paths.length} packed files)`);
+}
+
+const representative = manifests.find(({ manifest }) => manifest.name === '@iar/contracts');
+assert.ok(representative, 'representative package @iar/contracts must exist');
+const consumerDirectory = mkdtempSync(join(tmpdir(), 'iar-package-consumer-'));
+try {
+  const packJson = execFileSync('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', consumerDirectory], {
+    cwd: representative.directory,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const tarball = join(consumerDirectory, JSON.parse(packJson)[0].filename);
+  // 仅将已经安装的第三方依赖预置到临时消费者，保证这个本地 tarball 冒烟不依赖网络。
+  mkdirSync(join(consumerDirectory, 'node_modules', '@sinclair'), { recursive: true });
+  symlinkSync(join(root, 'node_modules', '@sinclair', 'typebox'), join(consumerDirectory, 'node_modules', '@sinclair', 'typebox'), 'junction');
+  symlinkSync(join(root, 'node_modules', 'ajv'), join(consumerDirectory, 'node_modules', 'ajv'), 'junction');
+  execFileSync('npm', ['install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock', '--no-save', tarball], {
+    cwd: consumerDirectory,
+    stdio: 'ignore',
+  });
+  execFileSync(process.execPath, ['--input-type=module', '-e', "await import('@iar/contracts')"], {
+    cwd: consumerDirectory,
+    stdio: 'ignore',
+  });
+  console.log('verified @iar/contracts from a temporary npm tarball consumer');
+} finally {
+  rmSync(consumerDirectory, { recursive: true, force: true });
+}
+
+console.log(`verified ${manifests.length} package distributions`);

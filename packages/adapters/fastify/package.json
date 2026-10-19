@@ -3,18 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "main": "./index.js",
-  "types": "../../../dist/packages/adapters/fastify/src/index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "import": "./index.js"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
     },
     "./http-boundary": {
-      "types": "./src/http-boundary.ts",
-      "import": "./http-boundary.js"
+      "types": "./dist/http-boundary.d.ts",
+      "import": "./dist/http-boundary.js"
     }
   },
+  "files": ["dist"],
   "dependencies": {
     "@iar/contracts": "0.1.0",
     "@iar/plugin-host": "0.1.0",

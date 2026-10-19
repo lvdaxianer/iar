@@ -5,7 +5,7 @@
 import { SCHEMA_VERSIONS, type BehaviorContext, type CompactionResult, type EventEnvelope } from '@iar/contracts';
 import { ContextCompactorAdapter, type ModelGateway } from '@iar/decision';
 import { BehaviorContextProjector, ContextCompactionService, type CompactionRequest } from '@iar/runtime';
-import { InMemoryEventStore } from '../../../packages/storage/src/index.js';
+import { InMemoryEventStore } from '@iar/storage';
 import { resolveSandboxTraceId } from './safe-log.js';
 import { SESSION_RUN_ID, SESSION_CORRELATION_ID } from './session-core.js';
 import type { CompactResult } from './session-types.js';

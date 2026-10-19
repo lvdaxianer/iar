@@ -6,10 +6,10 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { SCHEMA_VERSIONS, type WorkflowDefinition } from '../../../packages/contracts/src/index.js';
-import { PluginHost } from '../../../packages/plugin-host/src/index.js';
-import { createFastifyApp } from '../../../packages/adapters/fastify/src/index.js';
-import { LocalWorkflow } from '../../../packages/workflow/src/index.js';
+import { SCHEMA_VERSIONS, type WorkflowDefinition } from '@iar/contracts';
+import { PluginHost } from '@iar/plugin-host';
+import { createFastifyApp } from '@iar/adapters-fastify';
+import { LocalWorkflow } from '@iar/workflow';
 
 /**
  * 创建 API contract 使用的最小 WorkflowDefinition。

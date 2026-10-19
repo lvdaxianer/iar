@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { runCli, type CliServiceClient } from '../../../packages/cli/src/index.js';
+import { runCli, type CliServiceClient } from '@iar/cli';
 
 /*
  * CLI test 使用 typed fake client，验证命令没有绕过 ServiceApi。

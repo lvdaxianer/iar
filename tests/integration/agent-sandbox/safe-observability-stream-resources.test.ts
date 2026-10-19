@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ModelProviderError } from '../../../packages/decision/src/model-gateway/index.js';
+import { ModelProviderError } from '@iar/decision';
 import { createStreamRequest, createTestProvider, flushObservabilityLogs, withObservabilityFixture,
   type ObservabilityFixture } from './observability-fixture.js';
 

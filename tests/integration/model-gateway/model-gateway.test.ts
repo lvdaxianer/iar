@@ -127,7 +127,7 @@ import {
   loadModelProfiles,
   ModelProfileRegistry,
   type ModelProvider
-} from '../../../packages/decision/src/model-gateway/index.js';
+} from '@iar/decision';
 import type { CompactionResult, DecisionResult, JsonValue } from '@iar/contracts';
 import { createInitialContext } from '@iar/runtime';
 

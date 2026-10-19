@@ -5,8 +5,8 @@
  * @date 2026-10-17
  */
 import assert from 'node:assert/strict';
-import { replayEvents } from '../dist/packages/runtime/src/index.js';
-import { PluginHost } from '../dist/packages/plugin-host/src/index.js';
+import { replayEvents } from '@iar/runtime';
+import { PluginHost } from '@iar/plugin-host';
 import { fakeStopPlugin } from '../dist/examples/fake-plugin/src/index.js';
 
 // 演示入口只使用构建产物，避免文档示例依赖不存在的源码 .js 文件。

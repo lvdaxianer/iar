@@ -6,9 +6,9 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type WorkflowDefinition } from '../../packages/contracts/src/index.js';
-import { InMemoryDurableWorkflowStore, DurableWorkflowRuntime, evaluateDurableAdmission, type DurableExecuteRequest, type DurableWorkflowStore } from '../../packages/adapters/temporal/src/index.js';
-import { LocalWorkflow, type WorkflowRequest } from '../../packages/workflow/src/index.js';
+import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type WorkflowDefinition } from '@iar/contracts';
+import { InMemoryDurableWorkflowStore, DurableWorkflowRuntime, evaluateDurableAdmission, type DurableExecuteRequest, type DurableWorkflowStore } from '@iar/adapters-temporal';
+import { LocalWorkflow, type WorkflowRequest } from '@iar/workflow';
 
 /**
  * 创建带有可恢复状态转移的 Workflow 定义。

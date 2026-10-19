@@ -15,7 +15,7 @@ import { IarSandboxSession, type SandboxMode } from './session.js';
 import { registerSandboxRoutes } from './http-transport.js';
 import { SandboxSessionManager, type SandboxSessionLimits } from './session-manager.js';
 import { loadSandboxPage } from './page-template.js';
-import type { SnapshotStore } from '../../../packages/storage/src/index.js';
+import type { SnapshotStore } from '@iar/storage';
 import type { SessionPersistenceProvider } from '@iar/persistence-spi';
 import { loadSandboxPersistenceProvider } from './persistence-provider.js';
 

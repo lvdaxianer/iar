@@ -8,12 +8,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import type { FunctionPluginManifest } from '../../../packages/contracts/src/index.js';
-import { PluginHost } from '../../../packages/plugin-host/src/index.js';
-import { createWorkerExecutor, type ExecutorRequest } from '../../../packages/adapters/executors/src/index.js';
-import { createServiceApi, type ServiceApiRequest } from '../../../packages/adapters/service/src/index.js';
-import { createSidecarTransport } from '../../../packages/adapters/sidecar/src/index.js';
-import { LocalWorkflow } from '../../../packages/workflow/src/index.js';
+import type { FunctionPluginManifest } from '@iar/contracts';
+import { PluginHost } from '@iar/plugin-host';
+import { createWorkerExecutor, type ExecutorRequest } from '@iar/adapters-executors';
+import { createServiceApi, type ServiceApiRequest } from '@iar/adapters-service';
+import { createSidecarTransport } from '@iar/adapters-sidecar';
+import { LocalWorkflow } from '@iar/workflow';
 
 /** @returns 固定业务插件 Manifest @author lvdaxianer@yeah.net @date 2026-10-17 */
 function manifest(): FunctionPluginManifest {
