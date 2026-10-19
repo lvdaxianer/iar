@@ -1,7 +1,7 @@
 import { ModelResponseLimitError, trackModelResponseLimit } from './models/model-transport.js';
 import { SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
-import type { ActionDefinition, ActionResult } from '@iar/contracts';
+import type { ActionDefinition, ActionResult, BehaviorContext } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/decision';
 import type { RouteResult } from '@iar/runtime';
 import type { ExecuteTurnOutcome, ExtractFrameOutcome, RouteEvidence, StreamEvent, TurnResult } from './session-types.js';
@@ -13,12 +13,13 @@ export type StreamTurnContext = {
   /** 与普通入口共用轮次计数和追踪标识生成。 */
   nextTraceId: () => string;
   /** 与普通入口共用语义抽取及路由，确保相同的策略边界。 */
-  extractFrame: (traceId: string, runId: string, text: string) => Promise<ExtractFrameOutcome>;
-  routeFrame: (traceId: string, runId: string, frame: SemanticFrame) => Promise<RouteResult>;
+  extractFrame: (traceId: string, runId: string, text: string, behaviorContext: BehaviorContext) => Promise<ExtractFrameOutcome>;
+  routeFrame: (traceId: string, runId: string, frame: SemanticFrame, behaviorContext: BehaviorContext, currentMessage: string) => Promise<RouteResult>;
   prepareAndExecute: (context: { runId: string; userText: string; frame: SemanticFrame; route: RouteResult }) => Promise<ExecuteTurnOutcome>;
   /** 兜底与执行后回复分别保留增量回调和超限错误。 */
-  fallbackReplyStreamed: (context: { traceId: string; runId: string; userText: string; reasonCode: string }, onDelta: (delta: string) => void) => Promise<string>;
-  generateReplyStreamed: (context: { traceId: string; runId: string; userText: string; action: ActionDefinition; actionResult: ActionResult }, onDelta: (delta: string) => void) => Promise<string>;
+  fallbackReplyStreamed: (context: { traceId: string; runId: string; userText: string; reasonCode: string; behaviorContext: BehaviorContext }, onDelta: (delta: string) => void) => Promise<string>;
+  generateReplyStreamed: (context: { traceId: string; runId: string; userText: string; action: ActionDefinition; actionResult: ActionResult; behaviorContext: BehaviorContext }, onDelta: (delta: string) => void) => Promise<string>;
+  currentBehaviorContext: () => BehaviorContext;
   /** 仅完整回复可写入宿主持有的历史。 */
   pushMessages: (userText: string, reply: string) => void;
 };
@@ -57,8 +58,9 @@ export class SandboxSessionStreamTurn {
     emit({ type: 'stage', stage: 'semantic' });
     await this.context.cancelStalePending();
     const traceId = this.context.nextTraceId();
-    const extracted = await this.context.extractFrame(traceId, SESSION_RUN_ID, userText);
-    const result = await this.finishStreamExtraction({ userText, traceId, emit, extracted });
+    const behaviorContext = this.context.currentBehaviorContext();
+    const extracted = await this.context.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext);
+    const result = await this.finishStreamExtraction({ userText, traceId, emit, behaviorContext, extracted });
     emit({ type: 'done', result });
     return result;
   }
@@ -69,7 +71,7 @@ export class SandboxSessionStreamTurn {
    * @returns 本轮结果，不发送终态事件
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  protected async finishStreamExtraction(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; extracted: ExtractFrameOutcome }): Promise<TurnResult> {
+  protected async finishStreamExtraction(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; extracted: ExtractFrameOutcome }): Promise<TurnResult> {
     const { userText, extracted } = context;
     // 抽取失败仍与普通入口一样保存失败说明。
     if (!extracted.ok) {
@@ -86,15 +88,15 @@ export class SandboxSessionStreamTurn {
    * @returns 本轮结果
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  protected async routeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; extracted: Extract<ExtractFrameOutcome, { ok: true }> }): Promise<TurnResult> {
-    const { userText, traceId, emit, extracted } = context;
+  protected async routeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }> }): Promise<TurnResult> {
+    const { userText, traceId, emit, behaviorContext, extracted } = context;
     emit({ type: 'stage', stage: 'route' });
     const frame = extracted.frame;
-    const route = await this.context.routeFrame(traceId, SESSION_RUN_ID, frame);
+    const route = await this.context.routeFrame(traceId, SESSION_RUN_ID, frame, behaviorContext, userText);
     const evidence = buildEvidence(route, frame);
     if (extracted.semanticFallback) evidence.semanticFallback = true;
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
-      return this.finishStreamFallback({ userText, traceId, emit, evidence });
+      return this.finishStreamFallback({ userText, traceId, emit, behaviorContext, evidence });
     }
     emit({ type: 'stage', stage: 'action' });
     const outcome = await this.context.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame, route });
@@ -107,9 +109,9 @@ export class SandboxSessionStreamTurn {
    * @returns 澄清或超限失败结果
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  protected async finishStreamFallback(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; evidence: RouteEvidence }): Promise<TurnResult> {
-    const { userText, traceId, emit, evidence } = context;
-    const reply = await trackModelResponseLimit(() => this.context.fallbackReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, reasonCode: evidence.reasonCode }, (delta) => emit({ type: 'delta', text: delta }))).catch((error: unknown) => {
+  protected async finishStreamFallback(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; evidence: RouteEvidence }): Promise<TurnResult> {
+    const { userText, traceId, emit, behaviorContext, evidence } = context;
+    const reply = await trackModelResponseLimit(() => this.context.fallbackReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext, reasonCode: evidence.reasonCode }, (delta) => emit({ type: 'delta', text: delta }))).catch((error: unknown) => {
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
     });
@@ -147,7 +149,7 @@ export class SandboxSessionStreamTurn {
   protected async finishStreamExecution(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; evidence: RouteEvidence; outcome: Extract<ExecuteTurnOutcome, { status: 'executed' }> }): Promise<TurnResult> {
     const { userText, traceId, emit, evidence, outcome } = context;
     emit({ type: 'stage', stage: 'response' });
-    const reply = await trackModelResponseLimit(() => this.context.generateReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, action: outcome.action, actionResult: outcome.actionResult }, (delta) => emit({ type: 'delta', text: delta }))).catch((error: unknown) => {
+    const reply = await trackModelResponseLimit(() => this.context.generateReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, action: outcome.action, actionResult: outcome.actionResult, behaviorContext: this.context.currentBehaviorContext() }, (delta) => emit({ type: 'delta', text: delta }))).catch((error: unknown) => {
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
     });

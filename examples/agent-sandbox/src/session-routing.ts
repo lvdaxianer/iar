@@ -6,7 +6,7 @@
  * @date 2026-10-18
  */
 import { randomUUID } from 'node:crypto';
-import { SCHEMA_VERSIONS, type ActionDefinition, type EventEnvelope, type JsonValue, type PluginPolicyMetadata } from '@iar/contracts';
+import { SCHEMA_VERSIONS, type ActionDefinition, type BehaviorContext, type EventEnvelope, type JsonValue, type PluginPolicyMetadata } from '@iar/contracts';
 import { ModelGateway, SemanticExtractorAdapter, type ModelGatewayResult, type ModelProfileRegistry, type SemanticFrame } from '@iar/decision';
 import { TwoStageRouter, type AsyncDecisionAdapter, type RouteResult } from '@iar/runtime';
 import type { PluginHost } from '@iar/plugin-host';
@@ -64,12 +64,12 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public async extractFrame(traceId: string, runId: string, userText: string): Promise<ExtractFrameOutcome> {
-    const extracted = await new SemanticExtractorAdapter(this.context.gateway).extract({ traceId, runId, input: { text: userText } });
+  public async extractFrame(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext): Promise<ExtractFrameOutcome> {
+    const extracted = await new SemanticExtractorAdapter(this.context.gateway).extract({ traceId, runId, input: { text: userText, behaviorContext } });
     if (extracted.ok) return { ok: true, frame: extracted.value, semanticFallback: false };
     if (this.context.mode === 'brain') {
       // 真实 LLM 抽取失败时降级到离线关键词抽取，保证链路可以继续。
-      const retried = await this.retrySemanticWithScripted(traceId, runId, userText);
+      const retried = await this.retrySemanticWithScripted(traceId, runId, userText, behaviorContext);
       if (retried.ok) return { ok: true, frame: retried.value, semanticFallback: true };
     }
     const route: RouteEvidence = { status: 'semantic_failed', reasonCode: extracted.error.code, semanticIntent: 'unknown', semanticConfidence: 0 };
@@ -90,9 +90,9 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected async retrySemanticWithScripted(traceId: string, runId: string, userText: string): Promise<ModelGatewayResult<SemanticFrame>> {
+  protected async retrySemanticWithScripted(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext): Promise<ModelGatewayResult<SemanticFrame>> {
     const fallbackGateway = new ModelGateway({ registry: this.context.registry, providers: { brain: new ScriptedModelProvider() } });
-    return new SemanticExtractorAdapter(fallbackGateway).extract({ traceId, runId, input: { text: userText } });
+    return new SemanticExtractorAdapter(fallbackGateway).extract({ traceId, runId, input: { text: userText, behaviorContext } });
   }
 
 
@@ -106,11 +106,13 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public routeFrame(traceId: string, runId: string, frame: SemanticFrame): Promise<RouteResult> {
+  public routeFrame(traceId: string, runId: string, frame: SemanticFrame, behaviorContext: BehaviorContext, currentMessage: string): Promise<RouteResult> {
     return new TwoStageRouter().routeAsync({
       traceId,
       runId,
       facts: buildFacts(frame),
+      behaviorContext,
+      currentMessage,
       tenantId: 'tenant-sandbox',
       actorId: 'actor-sandbox',
       environment: 'sandbox',

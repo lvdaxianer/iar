@@ -29,7 +29,7 @@ export const SESSION_RUN_ID = 'sandbox-session';
 export const SESSION_CORRELATION_ID = 'sandbox-session';
 
 /** 路由未命中且兜底回复生成失败时的固定话术。 */
-export const FALLBACK_REPLY_TEXT = '我没有完全理解你的意图。可以试试：平台知识问答（「如何申请数据权限」）、数据集成（「列出今天的集成任务」）、任务监控（「订单汇总 Job 跑完了吗」）、资产检索（「搜一下用户表」）、系统告警（「现在有哪些告警」）、创建工单（「帮我提个工单，网络很卡」）或转人工。';
+export const FALLBACK_REPLY_TEXT = '我暂时无法确定你的需求。请补充想查询的对象、希望了解的结果，或明确说明是否要执行某个新操作；如果是在追问当前会话的结果，也可以说明想查看哪项信息。';
 
 /** sandbox 单轮执行状态机定义。 */
 export const TURN_DEFINITION: WorkflowDefinition = {

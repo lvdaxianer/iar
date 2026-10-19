@@ -9,7 +9,7 @@ import { resolveSandboxTraceId } from './safe-log.js';
 import { SandboxSessionStreamTurn } from './session-stream-turn.js';
 import { SandboxSessionReplies } from './session-replies.js';
 import { SandboxSessionRouting } from './session-routing.js';
-import type { ActionDefinition, ActionResult } from '@iar/contracts';
+import type { ActionDefinition, ActionResult, BehaviorContext } from '@iar/contracts';
 import { confirmationScopeHash } from '@iar/workflow';
 import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
@@ -86,11 +86,12 @@ export class IarSandboxSession extends SandboxSessionCore {
     return new SandboxSessionStreamTurn({
       cancelStalePending: () => this.cancelStalePending(),
       nextTraceId: () => { this.turnCount += 1; return resolveSandboxTraceId(`trace-sandbox-${String(this.turnCount)}`); },
-      extractFrame: (traceId, runId, text) => this.routing.extractFrame(traceId, runId, text),
-      routeFrame: (traceId, runId, frame) => this.routing.routeFrame(traceId, runId, frame),
+      extractFrame: (traceId, runId, text, behaviorContext) => this.routing.extractFrame(traceId, runId, text, behaviorContext),
+      routeFrame: (traceId, runId, frame, behaviorContext, currentMessage) => this.routing.routeFrame(traceId, runId, frame, behaviorContext, currentMessage),
       prepareAndExecute: (context) => this.routing.prepareAndExecute(context),
       fallbackReplyStreamed: (context, onDelta) => this.replies.fallbackReplyStreamed(context, onDelta),
       generateReplyStreamed: (context, onDelta) => this.replies.generateReplyStreamed(context, onDelta),
+      currentBehaviorContext: () => this.projector.current(),
       pushMessages: (text, reply) => this.replies.pushMessages(text, reply)
     });
   }
@@ -120,13 +121,14 @@ export class IarSandboxSession extends SandboxSessionCore {
     await this.cancelStalePending();
     this.turnCount += 1;
     const traceId = resolveSandboxTraceId(`trace-sandbox-${String(this.turnCount)}`);
-    const extracted = await this.routing.extractFrame(traceId, SESSION_RUN_ID, userText);
+    const behaviorContext = this.projector.current();
+    const extracted = await this.routing.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext);
     // 语义失败仍写入历史，保持原有对话恢复行为。
     if (!extracted.ok) {
       this.replies.pushMessages(userText, extracted.reply);
       return { status: 'failed', reply: extracted.reply, route: extracted.route, reasonCode: extracted.reasonCode };
     }
-    return this.routeNormalTurn({ userText, traceId, extracted });
+    return this.routeNormalTurn({ userText, traceId, behaviorContext, extracted });
   }
 
 
@@ -137,14 +139,14 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected async routeNormalTurn(context: { userText: string; traceId: string; extracted: Extract<ExtractFrameOutcome, { ok: true }> }): Promise<TurnResult> {
-    const { userText, traceId, extracted } = context;
-    const route = await this.routing.routeFrame(traceId, SESSION_RUN_ID, extracted.frame);
+  protected async routeNormalTurn(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }> }): Promise<TurnResult> {
+    const { userText, traceId, behaviorContext, extracted } = context;
+    const route = await this.routing.routeFrame(traceId, SESSION_RUN_ID, extracted.frame, behaviorContext, userText);
     const evidence = buildEvidence(route, extracted.frame);
     // 抽取降级须保留在返回的路由证据中。
     if (extracted.semanticFallback) evidence.semanticFallback = true;
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
-      return this.finishNormalFallback({ userText, traceId, evidence });
+      return this.finishNormalFallback({ userText, traceId, behaviorContext, evidence });
     }
     const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame: extracted.frame, route });
     return this.finishNormalOutcome({ userText, traceId, evidence, outcome });
@@ -159,10 +161,10 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected async finishNormalFallback(context: { userText: string; traceId: string; evidence: RouteEvidence }): Promise<TurnResult> {
-    const { userText, traceId, evidence } = context;
+  protected async finishNormalFallback(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; evidence: RouteEvidence }): Promise<TurnResult> {
+    const { userText, traceId, behaviorContext, evidence } = context;
     // 未命中功能时只允许生成澄清回复，不能在兜底阶段隐式执行插件。
-    const reply = await trackModelResponseLimit(() => this.replies.fallbackReply({ traceId, runId: SESSION_RUN_ID, userText, reasonCode: evidence.reasonCode })).catch((error: unknown) => {
+    const reply = await trackModelResponseLimit(() => this.replies.fallbackReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext, reasonCode: evidence.reasonCode })).catch((error: unknown) => {
       // 非超限错误必须继续向调用方传播。
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
@@ -206,7 +208,7 @@ export class IarSandboxSession extends SandboxSessionCore {
   protected async finishNormalExecution(context: { userText: string; traceId: string; evidence: RouteEvidence; outcome: Extract<ExecuteTurnOutcome, { status: 'executed' }> }): Promise<TurnResult> {
     const { userText, traceId, evidence, outcome } = context;
     // 动作已经落地后，模型回复失败也必须保留 executed 事实，禁止重试动作。
-    const reply = await trackModelResponseLimit(() => this.replies.generateReply({ traceId, runId: SESSION_RUN_ID, userText, action: outcome.action, actionResult: outcome.actionResult })).catch((error: unknown) => {
+    const reply = await trackModelResponseLimit(() => this.replies.generateReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: this.projector.current(), action: outcome.action, actionResult: outcome.actionResult })).catch((error: unknown) => {
       // 非超限错误保持原有传播方式。
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
@@ -283,7 +285,7 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
   protected async finishConfirmedAction(action: ActionDefinition, actionResult: ActionResult): Promise<ConfirmResult> {
-    const reply = await trackModelResponseLimit(() => this.replies.generateReply({ traceId: resolveSandboxTraceId(`trace-sandbox-confirm-${String(this.turnCount)}`), runId: action.runId, userText: '（确认执行）', action, actionResult })).catch((error: unknown) => {
+    const reply = await trackModelResponseLimit(() => this.replies.generateReply({ traceId: resolveSandboxTraceId(`trace-sandbox-confirm-${String(this.turnCount)}`), runId: action.runId, userText: '（确认执行）', behaviorContext: this.projector.current(), action, actionResult })).catch((error: unknown) => {
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
     });
