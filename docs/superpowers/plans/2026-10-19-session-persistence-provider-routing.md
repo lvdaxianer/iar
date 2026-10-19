@@ -42,15 +42,19 @@
 
 **Files:**
 - Modify: `packages/subscriptions/src/events.ts`
+- Modify: `packages/subscriptions/src/types.ts`
+- Modify: `packages/subscriptions/src/dispatcher.ts`
+- Modify: `packages/contracts/src/types-state.ts`
+- Modify: `packages/contracts/src/schema-events.ts`
 - Create: `packages/persistence-runtime/src/subscriber.ts`
 - Modify: `packages/runtime/src/context-projector.ts`
 - Modify: `examples/agent-sandbox/src/session-core.ts`
 - Modify: `examples/agent-sandbox/src/session-types.ts`
 - Test: `tests/contract/persistence-subscription.test.ts`
 
-- [ ] **Step 1: Write the failing tests** — 覆盖 `message.received`、`message.sent`、`context.updated`、`session.restored` 的异步订阅、幂等、重试和队列边界。
-- [ ] **Step 2: Implement the bridge** — 让事件携带统一 SessionIdentity，由 Provider 订阅桥保存消息和快照，不直接依赖 SQLite。
-- [ ] **Step 3: Verify** — 聚焦订阅测试和现有结构化上下文回归测试通过。
+- [x] **Step 1: Write the failing tests** — 覆盖 `message.received`、`message.sent`、`context.updated`、`session.restored` 的异步订阅、幂等、重试和队列边界。
+- [x] **Step 2: Implement the bridge** — 让事件携带统一 SessionIdentity，由 Provider 订阅桥保存消息和快照，不直接依赖 SQLite。
+- [x] **Step 3: Verify** — 新增订阅契约、旧订阅回归和 Provider 恢复测试通过；Sandbox 全链路接入留在 Task 5。
 
 ### Task 4: Plugin 优先和 actionType 范围路由
 

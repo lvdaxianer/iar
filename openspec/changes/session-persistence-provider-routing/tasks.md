@@ -13,8 +13,8 @@
 
 ## 3. Hook event persistence
 
-- [ ] 3.1 增加 `message.received`、`message.sent`、`context.updated`、`session.restored` 等受控事件并验证事件契约和递归边界。
-- [ ] 3.2 实现 Provider 持久化订阅桥，验证异步投递、幂等、失败重试和故障不阻断主流程。
+- [x] 3.1 增加 `message.received`、`message.sent`、`context.updated`、`session.restored` 等受控事件并验证事件契约和递归边界。
+- [x] 3.2 实现 Provider 持久化订阅桥，验证异步投递、幂等、失败重试和故障不阻断主流程。
 - [ ] 3.3 将 Sandbox 消息、结构化上下文、动作结果和压缩结果接入订阅桥，并通过消息/快照回归测试验证事件顺序。
 
 ## 4. Scoped Plugin routing

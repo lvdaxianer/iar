@@ -12,6 +12,7 @@
     }
   },
   "dependencies": {
-    "@iar/persistence-spi": "0.1.0"
+    "@iar/persistence-spi": "0.1.0",
+    "@iar/subscriptions": "0.1.0"
   }
 }
