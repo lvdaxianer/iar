@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import { createHash } from 'node:crypto';
-import { ERROR_CODES, validateContract, type BehaviorContext, type ContractErrorResult, type EventEnvelope } from '@iar/contracts';
+import { ERROR_CODES, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_FIELDS, validateContract, type BehaviorContext, type ContractErrorResult, type EventEnvelope, type TrustedFact, type TrustedFactValue } from '@iar/contracts';
 
 /** 关键字段哈希固定使用 SHA-256，避免实现更换导致快照不可恢复。 */
 const HASH_ALGORITHM = 'sha256';
@@ -58,7 +58,8 @@ export function criticalFieldHash(context: BehaviorContext): string {
     workflow: context.workflow,
     pending: context.pending,
     confirmation: context.confirmation,
-    idempotencyKey: context.idempotencyKey
+    idempotencyKey: context.idempotencyKey,
+    ...(context.facts ? { facts: context.facts } : {})
   };
   return createHash(HASH_ALGORITHM).update(JSON.stringify(canonicalize(critical))).digest('hex');
 }
@@ -82,6 +83,7 @@ export function createInitialContext(runId = 'unknown-run'): BehaviorContext {
     workflow: { currentStep: 'initial', status: 'pending' },
     pending: { kind: 'input', status: 'none' },
     confirmation: { state: 'not_required' },
+    facts: {},
     idempotencyKey: `run:${runId}`,
     integrity: { criticalFieldHash: '', lastEventId: 'initial' }
   };
@@ -179,6 +181,7 @@ export class BehaviorContextProjector {
     if (event.eventName === 'action.started') this.state.action.status = 'resolved';
     if (event.eventName === 'action.completed') this.state.action.status = 'executed';
     if (event.eventName === 'action.failed') this.state.action.status = 'failed';
+    if (event.eventName === 'action.completed') this.applyTrustedFacts(payload, event.eventId);
   }
 
   /** 投影开始事件中的主语和意图。 */
@@ -224,6 +227,23 @@ export class BehaviorContextProjector {
     if (typeof payload.idempotencyKey === 'string') this.state.idempotencyKey = payload.idempotencyKey;
   }
 
+  /** 从成功 Action 的公开输出中投影有界、可追溯事实。 */
+  private applyTrustedFacts(payload: Record<string, unknown>, eventId: string): void {
+    if (payload.resultStatus !== 'succeeded' || !isRecord(payload.output)) return;
+    const functionId = stringValue(payload.functionId);
+    const pluginId = stringValue(payload.pluginId);
+    const publicFacts = payload.output.facts;
+    if (!isRecord(publicFacts) || Object.keys(publicFacts).length > MAX_TRUSTED_FACTS) return;
+    if (!functionId || !pluginId) return;
+    const next = { ...(this.state.facts ?? {}) };
+    for (const [field, value] of Object.entries(publicFacts)) {
+      if (!isTrustedFactField(field) || !isBoundedFactValue(value)) continue;
+      const fact: TrustedFact = { value, status: 'verified', sourceEventId: eventId, functionId, pluginId, field };
+      next[`${functionId}.${field}`] = fact;
+    }
+    this.state.facts = next;
+  }
+
   /** 确保每个事实事件都不能把投影推进到非法状态。 */
   private assertValidState(): void {
     if (!validateContract('behaviorContext', this.state).ok) throw new Error('事件投影产生非法 BehaviorContext');
@@ -238,6 +258,21 @@ function projectionError(message: string): ContractErrorResult {
 /** 判断事件中的对象是否为普通 JSON 对象。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** 读取非空字符串元数据。 */
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+/** 判断字段是否在通用事实白名单中。 */
+function isTrustedFactField(value: string): boolean {
+  return (TRUSTED_FACT_FIELDS as readonly string[]).includes(value);
+}
+
+/** 事实值只允许小型 JSON 原子值，避免把日志或任意对象带入上下文。 */
+function isBoundedFactValue(value: unknown): value is TrustedFactValue {
+  return (typeof value === 'string' && Array.from(value).length <= MAX_TRUSTED_FACT_STRING_LENGTH) || typeof value === 'number' || typeof value === 'boolean' || value === null;
 }
 
 /** 判断主语引用字段是否完整。 */

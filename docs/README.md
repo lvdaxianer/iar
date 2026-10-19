@@ -551,6 +551,15 @@ StateEvent
 | `workflow.currentStep` | 工作流位置 | 恢复时重复或跳过副作用 |
 | `pending` | 当前等待的用户输入 | 用户选择无法关联到问题 |
 | `confirmation` | 是否已确认、确认对象和版本 | 破坏性动作绕过确认 |
+| `facts` | 成功动作公开输出中的可信事实及来源 | 追问工单号、任务状态等结果时只能重复发起动作或凭空回答 |
+
+### 7.2.1 可信事实投影
+
+`BehaviorContext.facts` 是每个会话独立维护的事实索引，不是对最近对话原文的缓存。只有 `action.completed` 且 `resultStatus=succeeded` 的事件，才可以从 Function/Plugin 已声明的公开输出字段投影事实；待确认、失败或未知输出不会产生成功事实。每条事实都记录 `status=verified`、`sourceEventId`、`functionId`、`pluginId` 和字段名，因此模型回答“刚才创建的工单号是多少”时可以引用已成功事件，而不会再次选择 `ticket.create`。
+
+当前公开字段采用通用白名单：`ticketId`、`receipt`、`status`、`priority`、`jobName`、`serviceId`、`datasetId`、`reportId`、`requestId`、`caseId` 和 `operation`。插件必须通过成功输出中的 `facts` 信封显式声明要公开的字段；对象、数组、自由描述文本、超长文本、密钥和未声明字段不会进入事实索引。字段值只接受最多 256 个 Unicode 字符的字符串、数字、布尔值或 `null`，单个会话最多保留 64 条事实。事实键使用 `${functionId}.${field}`，同一 Function 的后续成功结果按来源事件顺序更新。
+
+事实投影在事件成功追加后、下一次模型决策前完成，并与行为状态一起进入不可变版本化 SQLite 快照。服务重启后通过原会话标识恢复快照时，事实及其来源一并恢复；事件来源编号带有会话实例唯一前缀，避免恢复后新事件复用旧来源编号。不同会话使用不同投影器和快照，不会共享事实。压缩摘要只能辅助理解，不能新增或覆盖事实。
 
 ### 7.3 压缩协议
 

@@ -156,7 +156,7 @@ export const dipManageHandler: PluginHandler = async (input) => {
   const name = String(task.name ?? '未知任务');
   const taskId = String(task.taskId ?? 'unknown');
   if (operation === 'detail') {
-    return succeed('detail', { task, summary: `任务「${name}」当前状态 ${String(task.status ?? 'unknown')}，调度周期 ${String(task.schedule ?? '未知')}` });
+    return succeed('detail', { task, summary: `任务「${name}」当前状态 ${String(task.status ?? 'unknown')}，调度周期 ${String(task.schedule ?? '未知')}` }, { status: task.status ?? 'unknown' });
   }
   if (operation === 'rerun') {
     return succeed('rerun', { receipt: `dip-rerun-${taskId}`, taskId, status: 'rerunning', summary: `已受理重跑任务「${name}」，新实例排队中` });

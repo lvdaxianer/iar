@@ -7,6 +7,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
+import { randomUUID } from 'node:crypto';
 import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type WorkflowDefinition } from '@iar/contracts';
 import { ModelGateway, ModelProfileRegistry } from '@iar/decision';
 import { PluginHost } from '@iar/plugin-host';
@@ -76,7 +77,7 @@ export class SandboxSessionCore {
   /** 线程属于该会话，构造失败、过期或服务关闭时释放。 */
   protected readonly bridge = new SyncPluginBridge();
   /** 工作流日志与投影按当前会话隔离，重置时一起替换。 */
-  protected workflowEventLog = new WorkflowEventLog({ correlationId: SESSION_CORRELATION_ID });
+  protected workflowEventLog = createSessionEventLog();
   /** 工作流实例复用本会话日志，但每一轮执行重新创建。 */
   protected workflow: LocalWorkflow;
   /** 投影只处理该会话事件，供 state 与压缩读取。 */
@@ -158,7 +159,7 @@ export class SandboxSessionCore {
   public async reset(): Promise<void> {
     this.projector = new BehaviorContextProjector();
     this.eventStore = new InMemoryEventStore();
-    this.workflowEventLog = new WorkflowEventLog({ correlationId: SESSION_CORRELATION_ID });
+    this.workflowEventLog = createSessionEventLog();
     this.workflow = this.createWorkflow();
     this.recentMessages = [];
     this.pending = null;
@@ -282,4 +283,9 @@ export class SandboxSessionCore {
       return { schemaVersion: SCHEMA_VERSIONS.action, actionId: action.actionId, status: 'failed', errorCode: 'plugin.executor_failed' };
     }
   }
+}
+
+/** 为每次会话实例生成不会跨进程复用的事件来源前缀。 */
+function createSessionEventLog(): WorkflowEventLog {
+  return new WorkflowEventLog({ correlationId: SESSION_CORRELATION_ID, eventIdPrefix: `workflow-event-${randomUUID()}` });
 }

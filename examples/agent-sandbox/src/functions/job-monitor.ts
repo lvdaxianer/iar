@@ -155,7 +155,7 @@ export const jobMonitorHandler: PluginHandler = async (input) => {
     const logs = JOB_LOGS[jobName] ?? [];
     return succeed('logs', { jobName, logs: [...logs], summary: `任务「${jobName}」最近一次实例日志 ${String(logs.length)} 行` });
   }
-  return succeed('status', { job, summary: `任务「${jobName}」状态 ${String(job.status ?? 'unknown')}：${String(job.result ?? '无结果信息')}` });
+  return succeed('status', { job, summary: `任务「${jobName}」状态 ${String(job.status ?? 'unknown')}：${String(job.result ?? '无结果信息')}` }, { jobName, status: job.status ?? 'unknown' });
 };
 
 /** 可直接交给 PluginHost.install 的 job.monitor 注册对象。 */

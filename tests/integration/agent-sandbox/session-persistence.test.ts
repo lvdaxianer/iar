@@ -40,3 +40,41 @@ test('服务重启后可通过原会话标识恢复最新结构化快照', async
     } finally { await second.close(); }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('成功动作产生的可信事实会随 SQLite 快照恢复', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'iar-fact-persistence-')); const path = join(directory, 'session.sqlite');
+  const port = await availablePort();
+  try {
+    const first = await startSandboxServer({ mode: 'scripted', port, snapshotPath: path });
+    const created = await fetch(`http://127.0.0.1:${port}/api/sessions`, { method: 'POST' });
+    const sessionId = (await created.json() as { sessionId: string }).sessionId;
+    const pendingResponse = await fetch(`http://127.0.0.1:${port}/api/sessions/${sessionId}/chat`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: '请帮我创建一个工单' }) });
+    const pending = await pendingResponse.json() as { status: string; pending?: { actionId: string } };
+    assert.equal(pendingResponse.status, 200); assert.equal(pending.status, 'awaiting_confirmation'); assert.ok(pending.pending?.actionId);
+    const waitingState = await fetch(`http://127.0.0.1:${port}/api/sessions/${sessionId}/state`);
+    const waitingBody = await waitingState.json() as { context: { facts?: Record<string, unknown> } };
+    assert.equal(waitingBody.context.facts?.['ticket.create.ticketId'], undefined);
+    const confirmedResponse = await fetch(`http://127.0.0.1:${port}/api/sessions/${sessionId}/confirm`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accepted: true, actionId: pending.pending!.actionId }) });
+    const confirmed = await confirmedResponse.json() as { status: string };
+    assert.equal(confirmedResponse.status, 200); assert.equal(confirmed.status, 'executed');
+    await first.close();
+
+    const second = await startSandboxServer({ mode: 'scripted', port, snapshotPath: path });
+    try {
+      const resumed = await fetch(`http://127.0.0.1:${port}/api/sessions/${sessionId}/resume`, { method: 'POST' });
+      assert.equal(resumed.status, 200);
+      const state = await fetch(`http://127.0.0.1:${port}/api/sessions/${sessionId}/state`);
+      const body = await state.json() as { context: { facts?: Record<string, { value: unknown; sourceEventId: string; status: string }> } };
+      const ticket = body.context.facts?.['ticket.create.ticketId'];
+      assert.equal(state.status, 200); assert.match(String(ticket?.value ?? ''), /^ticket-20261018-\d{3}$/); assert.equal(ticket?.status, 'verified'); assert.match(ticket?.sourceEventId ?? '', /^workflow-event-/);
+      const nextPendingResponse = await fetch(`http://127.0.0.1:${port}/api/sessions/${sessionId}/chat`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: '请再创建一个工单' }) });
+      const nextPending = await nextPendingResponse.json() as { pending?: { actionId: string } };
+      assert.equal(nextPendingResponse.status, 200); assert.ok(nextPending.pending?.actionId);
+      const nextConfirmedResponse = await fetch(`http://127.0.0.1:${port}/api/sessions/${sessionId}/confirm`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accepted: true, actionId: nextPending.pending!.actionId }) });
+      assert.equal(nextConfirmedResponse.status, 200);
+      const nextState = await fetch(`http://127.0.0.1:${port}/api/sessions/${sessionId}/state`);
+      const nextBody = await nextState.json() as { context: { facts?: Record<string, { sourceEventId: string }> } };
+      assert.notEqual(nextBody.context.facts?.['ticket.create.ticketId']?.sourceEventId, ticket?.sourceEventId);
+    } finally { await second.close(); }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});

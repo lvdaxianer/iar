@@ -12,6 +12,20 @@ export type JsonValue = string | number | boolean | null | JsonValue[] | { [key:
 /** 嵌入式 JSON Schema 文档，具体语义由 Ajv 校验。 */
 export type JsonSchema = Record<string, unknown>;
 
+/** 允许进入通用结构化上下文的公开输出字段白名单。 */
+export const TRUSTED_FACT_FIELDS = [
+  'ticketId', 'receipt', 'status', 'priority', 'jobName', 'serviceId', 'datasetId', 'reportId', 'requestId', 'caseId', 'operation'
+] as const;
+
+/** 单个可信事实字符串的最大 Unicode 字符数。 */
+export const MAX_TRUSTED_FACT_STRING_LENGTH = 256;
+
+/** 单个事实键的最大长度，覆盖 Function 和字段名。 */
+export const MAX_TRUSTED_FACT_KEY_LENGTH = 320;
+
+/** 单个 BehaviorContext 允许保存的事实数量。 */
+export const MAX_TRUSTED_FACTS = 64;
+
 /** 契约中允许声明的风险等级。 */
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 
