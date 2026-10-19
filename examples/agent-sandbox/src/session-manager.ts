@@ -6,11 +6,12 @@
 import { randomBytes } from 'node:crypto';
 import { AsyncResource } from 'node:async_hooks';
 import { IarSandboxSession, type SandboxMode } from './session.js';
+import type { SnapshotStore } from '../../../packages/storage/src/index.js';
 
 /** 会话管理可配置上限；包含正在执行的请求。 */
 /** 每个节点单独记录开始和取消状态，避免重复释放容量。 */
 export type SandboxSessionLimits = { maxSessions?: number; idleMs?: number; maxPending?: number; maxOperations?: number };
-type Entry = { session: IarSandboxSession; queue: QueueNode[]; active: QueueNode | undefined; pending: number; operations: number; confirmations: Set<string>; lastUsed: number; closing: boolean };
+type Entry = { session: IarSandboxSession; ready: Promise<void> | undefined; queue: QueueNode[]; active: QueueNode | undefined; pending: number; operations: number; confirmations: Set<string>; lastUsed: number; closing: boolean };
 type QueueNode = { isDeleting: boolean; isStarted: boolean; isCancelled: boolean; action?: () => Promise<unknown>; result: Promise<unknown>; resolve: (value: unknown) => void; reject: (error: unknown) => void };
 export type Operation = 'read' | 'mutate' | 'confirm' | 'cancel' | 'reset' | 'delete' | { kind: 'confirm' | 'cancel'; actionId: unknown; accepted?: unknown };
 type Reservation = { run: <T>(operation: Operation, action: (session: IarSandboxSession) => Promise<T>) => Promise<T>; cancel: () => void };
@@ -40,12 +41,13 @@ export class SandboxSessionManager {
   private readonly legacy: Entry;
   private readonly limits: Required<SandboxSessionLimits>;
   private readonly timer: NodeJS.Timeout;
+  private readonly restoring = new Map<string, Promise<void>>();
 
   /** 初始化限制与空闲清理定时器，兼容会话由服务持有。
    * @param mode - 会话运行模式 @param session - 兼容会话 @param limits - 资源上限
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  public constructor(private readonly mode: SandboxMode, session: IarSandboxSession, limits: SandboxSessionLimits = {}) {
+  public constructor(private readonly mode: SandboxMode, session: IarSandboxSession, limits: SandboxSessionLimits = {}, private readonly snapshotStore?: SnapshotStore) {
     this.limits = { ...DEFAULT_LIMITS, ...limits };
     if (Object.values(this.limits).some((value) => !Number.isSafeInteger(value) || value <= 0)) throw new Error('Invalid session limits');
     this.legacy = this.createEntry(session);
@@ -60,8 +62,34 @@ export class SandboxSessionManager {
     this.sweep();
     if (this.entries.size >= this.limits.maxSessions) throw new SessionError(503, 'session_capacity');
     const id = randomBytes(ID_BYTES).toString('base64url');
-    this.entries.set(id, this.createEntry(new IarSandboxSession({ mode: this.mode })));
+    const sessionOptions = this.snapshotStore ? { mode: this.mode, sessionId: id, snapshotStore: this.snapshotStore } : { mode: this.mode, sessionId: id };
+    this.entries.set(id, this.createEntry(new IarSandboxSession(sessionOptions)));
     return id;
+  }
+
+  /** 通过持久化快照恢复一个已知会话，供服务重启后的显式恢复入口使用。 */
+  public async restore(id: string): Promise<void> {
+    if (!/^[A-Za-z0-9_-]{32}$/.test(id)) throw new SessionError(400, 'invalid_session_id');
+    if (this.entries.has(id)) return;
+    if (!this.snapshotStore) throw new SessionError(404, 'session_not_found');
+    const existing = this.restoring.get(id);
+    if (existing) return existing;
+    const operation = this.restoreEntry(id);
+    this.restoring.set(id, operation);
+    try { await operation; } finally { this.restoring.delete(id); }
+  }
+
+  /** 读取快照并等待新会话完成恢复，失败时不把半初始化条目放入索引。 */
+  private async restoreEntry(id: string): Promise<void> {
+    const snapshot = await this.snapshotStore!.get(id);
+    if (!snapshot) throw new SessionError(404, 'session_not_found');
+    this.sweep();
+    if (this.entries.size >= this.limits.maxSessions) throw new SessionError(503, 'session_capacity');
+    const sessionOptions = this.snapshotStore ? { mode: this.mode, sessionId: id, snapshotStore: this.snapshotStore } : { mode: this.mode, sessionId: id };
+    const session = new IarSandboxSession(sessionOptions);
+    const entry = this.createEntry(session);
+    try { if (entry.ready) await entry.ready; } catch { session.dispose(); throw new SessionError(503, 'session_restore_failed'); }
+    this.entries.set(id, entry);
   }
 
   /** 将指定操作加入会话队列，执行和失败均释放队列位置。
@@ -189,6 +217,7 @@ export class SandboxSessionManager {
     if (entry) this.retired.add(entry);
     this.entries.delete(id);
     session.dispose();
+    void this.snapshotStore?.delete(id).catch(() => undefined);
   }
 
   /** 等待所有已接收操作，包括客户端已断开的流式操作。
@@ -196,7 +225,8 @@ export class SandboxSessionManager {
    */
   public async drain(): Promise<void> {
     const entries = [this.legacy, ...this.entries.values(), ...this.retired];
-    await Promise.all(entries.flatMap((entry) => [entry.active, ...entry.queue].filter((node): node is QueueNode => node !== undefined).map((node) => node.result.catch(() => undefined))));
+    const queued = entries.flatMap((entry) => [entry.active, ...entry.queue].filter((node): node is QueueNode => node !== undefined).map((node) => node.result.catch(() => undefined)));
+    await Promise.all([...queued, ...this.restoring.values()].map((operation) => operation.catch(() => undefined)));
   }
 
   /** 关闭定时器并释放所有会话；仅在 HTTP 排空后调用。
@@ -224,6 +254,8 @@ export class SandboxSessionManager {
    * @returns 操作结果 @author lvdaxianer@yeah.net @date 2026-10-18
    */
   private async execute<T>(entry: Entry, operation: Operation, action: (session: IarSandboxSession) => Promise<T>): Promise<T> {
+    // 状态读取只读当前内存投影；会话动作和模型决策必须等快照恢复完成。
+    if (operation !== 'read' && entry.ready) await entry.ready;
     // 独立确认必须在队首核对当前动作，不能预先判断。
     if (typeof operation === 'object') await this.validateConfirmation(entry, operation);
     const kind = typeof operation === 'string' ? operation : operation.kind;
@@ -275,7 +307,8 @@ export class SandboxSessionManager {
    * @param session - 会话实例 @returns 新条目 @author lvdaxianer@yeah.net @date 2026-10-18
    */
   private createEntry(session: IarSandboxSession): Entry {
-    return { session, queue: [], active: undefined, pending: 0, operations: 0, confirmations: new Set(), lastUsed: Date.now(), closing: false };
+    const ready = typeof session.whenReady === 'function' ? session.whenReady() : undefined;
+    return { session, ready, queue: [], active: undefined, pending: 0, operations: 0, confirmations: new Set(), lastUsed: Date.now(), closing: false };
   }
 
   /** 只回收没有在途或排队操作的过期会话。

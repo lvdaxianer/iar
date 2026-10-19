@@ -40,6 +40,10 @@ The system SHALL enqueue every structured context update as an immutable, versio
 - **WHEN** the service shuts down normally
 - **THEN** it awaits outstanding writes; abrupt termination before a write commits may lose that update and is not represented as durable
 
+#### Scenario: File-backed resume
+- **WHEN** `IAR_SANDBOX_SQLITE_PATH` or `snapshotPath` configures a file-backed database and the client calls `POST /api/sessions/{sessionId}/resume`
+- **THEN** the known session loads its latest valid snapshot before accepting its next operation; without a configured path, in-process SQLite remains suitable for tests and single-process operation
+
 ### Requirement: Model calls receive structured conversational context
 The system SHALL provide role-appropriate, bounded structured state and relevant verified facts to applicable semantic extraction, decision, fallback and response-generation model calls, while keeping the current user message distinct and omitting raw historical chat messages. Context content SHALL be treated as data, not privileged instructions.
 

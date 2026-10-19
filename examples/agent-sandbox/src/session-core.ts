@@ -11,13 +11,14 @@ import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type Workflo
 import { ModelGateway, ModelProfileRegistry } from '@iar/decision';
 import { PluginHost } from '@iar/plugin-host';
 import { BehaviorContextProjector, type AsyncDecisionAdapter } from '@iar/runtime';
-import { InMemoryEventStore } from '../../../packages/storage/src/index.js';
+import { InMemoryEventStore, type SnapshotStore } from '../../../packages/storage/src/index.js';
 import { LocalWorkflow, WorkflowEventLog, type ActionExecutor } from '@iar/workflow';
 import { SyncPluginBridge } from './execution/sync-plugin-bridge.js';
 import { BrainModelProvider } from './models/llm-provider.js';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
 import { createSandboxModels, createSandboxPluginHost } from './session-dependencies.js';
 import { summarizeAction } from './session-helpers.js';
+import { writeSafeLog } from './safe-log.js';
 import type { SandboxDecisionBackend, SandboxMode, SandboxState } from './session-types.js';
 
 /** 会话内所有事件共享的 runId，保证压缩校验的单运行边界。 */
@@ -51,6 +52,14 @@ export const TURN_DEFINITION: WorkflowDefinition = {
  * @date 2026-10-18
  */
 export class SandboxSessionCore {
+  /** 服务端稳定会话标识，作为 SQLite 快照的隔离键。 */
+  protected readonly sessionId: string;
+  /** 共享的异步快照存储，由服务生命周期统一关闭。 */
+  protected readonly snapshotStore: SnapshotStore | undefined;
+  /** 恢复完成前禁止处理该会话的新请求。 */
+  private readonly restoration: Promise<void>;
+  /** 已排入快照的单调版本。 */
+  protected snapshotRevision = 0;
   /** 本会话选择的模型模式；重置不改变依赖配置。 */
   protected readonly mode: SandboxMode;
   /** 会话私有插件宿主，执行时只访问已启用候选。 */
@@ -95,9 +104,11 @@ export class SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public constructor(options: { mode: SandboxMode; decisionBackend?: SandboxDecisionBackend }) {
+  public constructor(options: { mode: SandboxMode; decisionBackend?: SandboxDecisionBackend; sessionId?: string; snapshotStore?: SnapshotStore }) {
     try {
       this.mode = options.mode;
+      this.sessionId = options.sessionId ?? SESSION_RUN_ID;
+      this.snapshotStore = options.snapshotStore;
       this.pluginHost = createSandboxPluginHost();
       const models = createSandboxModels(options);
       this.brainProvider = models.brain;
@@ -106,12 +117,16 @@ export class SandboxSessionCore {
       this.functionDecisionAdapter = models.functionAdapter;
       this.pluginDecisionAdapter = models.pluginAdapter;
       this.workflow = this.createWorkflow();
+      this.restoration = this.restoreSnapshot();
     } catch (error) {
       // 任一依赖失败时必须释放已启动的执行线程。
       this.bridge.dispose();
       throw error;
     }
   }
+
+  /** 等待持久化上下文恢复完成，避免新问题读取到半初始化状态。 */
+  public whenReady(): Promise<void> { return this.restoration; }
 
 
   /**
@@ -151,6 +166,7 @@ export class SandboxSessionCore {
     this.compactCount = 0;
     this.decisionEventCount = 0;
     this.consumedWorkflowEvents = 0;
+    this.queueSnapshot('reset');
   }
 
 
@@ -206,7 +222,32 @@ export class SandboxSessionCore {
       await this.eventStore.append(event);
       this.projector.apply(event);
       this.consumedWorkflowEvents += 1;
+      this.queueSnapshot(event.eventId);
     }
+  }
+
+  /** 从最新有效快照恢复当前投影；无效快照只降级为空上下文。 */
+  private async restoreSnapshot(): Promise<void> {
+    if (!this.snapshotStore) return;
+    try {
+      const snapshot = await this.snapshotStore.get(this.sessionId);
+      if (!snapshot) return;
+      this.projector = new BehaviorContextProjector(snapshot.context);
+      this.snapshotRevision = snapshot.revision;
+    } catch {
+      // 持久化损坏不能阻止会话建立，更不能把不可信内容交给模型。
+      writeSafeLog({ level: 'warn', event: 'sandbox.snapshot', outcome: 'snapshot_failed' });
+    }
+  }
+
+  /** 将不可变完整上下文异步排入 SQLite，不阻塞当前会话动作。 */
+  private queueSnapshot(eventId: string): void {
+    if (!this.snapshotStore) return;
+    const snapshot = { runId: this.sessionId, eventId, revision: ++this.snapshotRevision, context: this.projector.current() };
+    void this.snapshotStore.save(snapshot).catch(() => {
+      // 持久化故障不阻塞当前请求，但必须以固定枚举留下可观测信号。
+      writeSafeLog({ level: 'warn', event: 'sandbox.snapshot', outcome: 'snapshot_failed' });
+    });
   }
 
 

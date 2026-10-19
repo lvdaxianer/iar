@@ -22,6 +22,10 @@ export function registerSessionLifecycleRoutes(app: FastifyInstance, options: { 
   const { manager, run, indexHtml } = options;
   app.get('/', async (_request, reply) => { void reply.type('text/html; charset=utf-8'); return indexHtml; });
   app.post('/api/sessions', async (_request, reply) => handleError(reply, async () => reply.code(201).send({ sessionId: manager.create() })));
+  app.post('/api/sessions/:sessionId/resume', async (request, reply) => handleError(reply, async () => {
+    await manager.restore(readSessionId(request)!);
+    return reply.code(200).send({ sessionId: readSessionId(request), resumed: true });
+  }));
   app.delete('/api/sessions/:sessionId', async (request, reply) => handleError(reply, async () => {
     await run(request, 'delete', async (session) => { manager.removeReserved(readSessionId(request)!, session); });
     return reply.code(204).send();
