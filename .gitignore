@@ -9,6 +9,8 @@ node_modules/
 *.tsbuildinfo
 .env
 .env.*
+.agents/
+.claude/
 dist
 !.env.example
 !.env.sample

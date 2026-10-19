@@ -9,7 +9,8 @@
     "packages/adapters/*"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -b tsconfig.build.json",
+    "clean": "tsc -b tsconfig.build.json --clean",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node scripts/run-tests.mjs",
     "demo:fake-plugin": "npm run build && node scripts/run-fake-plugin-demo.mjs",
