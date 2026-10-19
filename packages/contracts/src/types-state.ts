@@ -145,6 +145,16 @@ export type TrustedFact = {
   field: string;
 };
 
+/** 已校验、可恢复但不可执行的上下文摘要。 */
+export type ContextSummary = {
+  /** 摘要正文，长度由 BehaviorContext Schema 限制。 */
+  text: string;
+  /** 摘要生成协议版本。 */
+  version: string;
+  /** 生成摘要的不可变压缩事件。 */
+  eventId: string;
+};
+
 /** 不可变事实投影出的当前 BehaviorContext。 */
 export type BehaviorContext = {
   // BehaviorContext 版本决定投影和重放方式。
@@ -167,6 +177,8 @@ export type BehaviorContext = {
   confirmation: ConfirmationState;
   // facts 只保存成功输出中的有限、可追溯事实。
   facts?: Record<string, TrustedFact>;
+  // summary 只用于辅助理解和恢复，不授予模型执行权限。
+  summary?: ContextSummary;
   // 幂等键贯穿一次 Action 提交和重试。
   idempotencyKey: string;
   // 关键字段哈希绑定最后事实事件。

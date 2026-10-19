@@ -6,9 +6,10 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validateContract } from '@iar/contracts';
+import { COMPACTION_LIMITS, REQUIRED_PRESERVED_FACTS, validateContract } from '@iar/contracts';
 import {
   ContextCompactionService,
+  criticalFieldHash,
   createInitialContext,
   type CompactionRequest,
   type CompactionResult
@@ -49,7 +50,7 @@ function buildResult(state: ReturnType<typeof createInitialContext>): Compaction
       confirmation: state.confirmation
     },
     references: [{ text: '第一个服务', resolvedTo: 'test1', sourceEventId: sourceEvent.eventId }],
-    preservedFacts: ['subject', 'action', 'functionId', 'pluginId', 'slots', 'workflow.currentStep', 'pending', 'confirmation', 'intent', 'idempotencyKey'],
+    preservedFacts: ['subject', 'action', 'functionId', 'pluginId', 'slots', 'workflow.currentStep', 'pending', 'confirmation', 'intent', 'idempotencyKey', 'facts'],
     warnings: []
   };
 }
@@ -158,4 +159,57 @@ test('event timestamps must be monotonic and failure ids cannot collide', () => 
 test('context events use dedicated payload schemas', () => {
   const invalid = { ...sourceEvent, eventName: 'context.compacted' as const, payload: { totally: 'invalid' } };
   assert.equal(validateContract('event', invalid).ok, false);
+});
+
+test('compression contract requires the trusted facts provenance marker', () => {
+  assert.ok(REQUIRED_PRESERVED_FACTS.includes('facts'));
+});
+
+test('successful compaction keeps trusted facts and their source metadata', () => {
+  const context = createInitialContext('run-compact');
+  context.facts = {
+    'ticket.create.ticketId': {
+      value: 'ticket-001',
+      status: 'verified',
+      sourceEventId: 'evt-ticket-created',
+      functionId: 'ticket.create',
+      pluginId: 'ticket-create-v1',
+      field: 'ticketId'
+    }
+  };
+  context.integrity.criticalFieldHash = criticalFieldHash(context);
+  const outcome = new ContextCompactionService().compact(buildRequest(buildResult(context), { current: context }));
+  assert.equal(outcome.ok, true);
+  if (outcome.ok) {
+    assert.deepEqual(outcome.context.facts, context.facts);
+    assert.deepEqual(outcome.event.payload.state.facts, context.facts);
+  }
+});
+
+test('summary beyond the contract limit is rejected without replacing the old view', () => {
+  const context = createInitialContext('run-compact');
+  const result = buildResult(context);
+  result.summary = 'x'.repeat(COMPACTION_LIMITS.maxSummaryLength + 1);
+  const outcome = new ContextCompactionService().compact(buildRequest(result, { current: context }));
+  assert.equal(outcome.ok, false);
+  if (!outcome.ok) assert.deepEqual(outcome.context, context);
+});
+
+test('event input beyond the compaction capacity is rejected without skipping events', () => {
+  const context = createInitialContext('run-compact');
+  const events = Array.from({ length: COMPACTION_LIMITS.maxEvents + 1 }, (_, index) => ({
+    ...sourceEvent,
+    eventId: `evt-source-${String(index)}`,
+    occurredAt: new Date(Date.parse(sourceEvent.occurredAt) + index * 1000).toISOString()
+  }));
+  const kept = { ...keptEvent, eventId: 'evt-kept-capacity', occurredAt: '2026-10-17T00:02:10.000Z' };
+  const outcome = new ContextCompactionService().compact(buildRequest(buildResult(context), {
+    current: context,
+    events: [...events, kept],
+    fromEventId: events[0]!.eventId,
+    toEventId: events[events.length - 1]!.eventId,
+    firstKeptEntryId: kept.eventId
+  }));
+  assert.equal(outcome.ok, false);
+  if (!outcome.ok) assert.deepEqual(outcome.context, context);
 });

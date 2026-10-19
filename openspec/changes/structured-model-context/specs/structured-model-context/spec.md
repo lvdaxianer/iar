@@ -85,6 +85,14 @@ The system SHALL use validated successful compaction results while retaining tru
 - **WHEN** a successful ticket creation is followed by successful or failed compaction and a follow-up query
 - **THEN** the original verified ticket identifier remains available and no new action is executed
 
+#### Scenario: Raw conversation history is excluded from compaction
+- **WHEN** a compaction request contains a bounded structured context and immutable events
+- **THEN** the compaction model receives no recent-message history and trusted facts remain sourced from the existing context and events
+
+#### Scenario: Compaction exceeds a documented bound
+- **WHEN** a summary or event window exceeds its configured capacity, or the model returns an invalid/truncated result
+- **THEN** the runtime rejects the candidate, records the failure path, and preserves the previous valid context without skipping events
+
 #### Scenario: Compression model inputs are structured
 - **WHEN** the system requests compaction
 - **THEN** it supplies structured state and relevant events without including raw conversation history

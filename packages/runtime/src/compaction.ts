@@ -123,7 +123,7 @@ export class ContextCompactionService {
     // 任一关键字段变化都不能推进 Workflow。
     if (!replacement.ok) return this.failure(request, trusted.projector.current(), replacement.error);
     // 成功压缩只更新恢复边界，不修改可执行关键字段。
-    const context = this.withCompactionBoundary(replacement.value, request.compactedEventId);
+    const context = this.withCompactionBoundary(replacement.value, request);
     // context 是新的成功快照，旧快照仍由 projector 保持。
     // Runtime 负责构造而不是信任模型的事件元数据。
     const event = this.createCompactedEvent(request, context);
@@ -153,12 +153,13 @@ export class ContextCompactionService {
   // Projector 也负责校验 candidate 的完整 BehaviorContext。
 
   /** 把成功压缩事件设置为新的恢复边界，但不改变关键字段哈希。 */
-  private withCompactionBoundary(context: BehaviorContext, eventId: string): BehaviorContext {
+  private withCompactionBoundary(context: BehaviorContext, request: CompactionRequest): BehaviorContext {
     // 先复制状态，避免修改 Projector 已保存的快照。
     const next = structuredClone(context);
     // 旧对象继续作为失败路径的快照。
     // 压缩事件成为后续恢复时可见的最后事件。
-    next.integrity.lastEventId = eventId;
+    next.summary = { text: request.result.summary, version: request.summaryVersion, eventId: request.compactedEventId };
+    next.integrity.lastEventId = request.compactedEventId;
     // 元数据变化不属于关键字段，因此哈希仍可稳定复算。
     next.integrity.criticalFieldHash = criticalFieldHash(next);
     return next;

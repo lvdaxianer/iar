@@ -56,19 +56,21 @@ export function buildSemanticUserPrompt(input: Record<string, unknown>): string 
  *
  * 压缩仅整理已有事实，不重新决策功能、插件或执行状态。
  * 关键状态字段必须由模型保留，供压缩后的契约检查。
+ * 可信事实由运行时从成功事件维护，模型只能声明保留事实及来源。
  * preservedFacts 列出下游需要复核的事实名称。
  * 输出结构使用独立的压缩 Schema。
  * 原始输入与输出都不进入传输层日志。
+ * 压缩模型不接收 recentMessages，避免会话原文绕过结构化上下文边界。
  */
 export const COMPACT_SYSTEM_PROMPT = `你是 IAR（Intent Action Runtime）的 Context Compactor。
 你的唯一任务是在不改变行为状态的前提下压缩旧对话和旧事件，生成可校验的结构化摘要。
 硬性规则：
 1. 只使用输入中明确出现的事实，不得猜测补充。
-2. 必须原样保留 state.subject、state.intent、state.action、state.route、state.slots、state.workflow、state.pending、state.confirmation。
-3. 不得重新选择 Function 或 Plugin，不得改变 confirmation 或 workflow 状态。
+2. 必须原样保留 state.subject、state.intent、state.action、state.route、state.slots、state.workflow、state.pending、state.confirmation；可信 facts 及其来源由运行时保留。
+3. 不得重新选择 Function 或 Plugin，不得改变 confirmation、workflow 或可信 facts。
 4. 只输出一个 JSON 对象，不要输出 Markdown、解释文字或代码围栏。
 5. 输出必须符合 iar.compaction-result/v1：{ "schemaVersion": "iar.compaction-result/v1", "summary": string, "state": {...}, "references": [...], "preservedFacts": [...], "warnings": [...] }。
-preservedFacts 必须包含：subject、action、functionId、pluginId、slots、workflow.currentStep、pending、confirmation、intent、idempotencyKey。`;
+preservedFacts 必须包含：subject、action、functionId、pluginId、slots、workflow.currentStep、pending、confirmation、intent、idempotencyKey、facts。`;
 
 /**
  * 非流式回复生成角色的系统提示词。
@@ -111,15 +113,17 @@ const COMPACTION_POLICY = `{
     "state.slots",
     "state.workflow.currentStep",
     "state.pending",
-    "state.confirmation"
+    "state.confirmation",
+    "preservedFacts"
   ],
+  "requiredPreservedFacts": ["facts"],
   "preserveEventReferences": true
 }`;
 
 /**
  * 按参考模板拼装压缩用户提示词。
  *
- * @param input - 调用方注入的 behaviorContext、eventsToCompact 和 recentMessages
+ * @param input - 调用方注入的 behaviorContext 和 eventsToCompact
  * @returns 压缩用户内容
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
@@ -127,12 +131,11 @@ const COMPACTION_POLICY = `{
 export function buildCompactionUserPrompt(input: Record<string, unknown>): string {
   const contextJson = JSON.stringify(input.behaviorContext ?? {}, null, 2);
   const eventsJson = JSON.stringify(input.eventsToCompact ?? [], null, 2);
-  const messagesJson = JSON.stringify(input.recentMessages ?? [], null, 2);
   return [
     '请压缩以下 IAR 上下文。', '',
     '<behavior_context>', contextJson, '</behavior_context>', '',
     '<events_to_compact>', eventsJson, '</events_to_compact>', '',
-    '<recent_messages>', messagesJson, '</recent_messages>', '',
+    '压缩输入不包含任何最近消息原文；只能依据结构化上下文和不可变事件工作。', '',
     '<compression_policy>', COMPACTION_POLICY, '</compression_policy>'
   ].join('\n');
 }

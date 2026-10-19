@@ -87,12 +87,9 @@
     "contextHash": "sha256:pending-context-hash"
   },
   "summary": {
-    "summaryVersion": "compactor@1",
+    "version": "compactor@1",
     "text": "用户要停止从服务列表第一项解析出的 DIP 服务 test1。功能为 dip.service.stop，插件为 dip-api-stop-v1，当前等待确认。",
-    "coveredEventRange": {
-      "fromEventId": "evt_0001",
-      "toEventId": "evt_0012"
-    }
+    "eventId": "evt_0012"
   },
   "references": [
     {
