@@ -117,7 +117,7 @@ export class SandboxSessionReplies {
    */
   protected scriptedFallbackReply(userText: string, behaviorContext: BehaviorContext): string | undefined {
     const text = userText.trim();
-    if (/(刚才|之前|上次|前面)/.test(text)) {
+    if (isFactFollowUp(text)) {
       const facts = Object.values(behaviorContext.facts ?? {}).filter((fact) => fact.status === 'verified');
       if (facts.length > 0) return `根据当前会话已确认的信息：${facts.map((fact) => `${fact.field}=${String(fact.value ?? '空')}`).join('、')}。`;
       return '当前会话没有足够的已确认事实。请说明你想查询的对象或需要补充的信息。';
@@ -220,4 +220,9 @@ export class SandboxSessionReplies {
     this.context.recentMessages.push({ role: 'assistant', text: assistantReply });
     if (this.context.recentMessages.length > 20) this.context.recentMessages.splice(0, this.context.recentMessages.length - 20);
   }
+}
+
+/** 判断用户是否在询问当前会话已经确认的事实，而不是发起新操作。 */
+function isFactFollowUp(text: string): boolean {
+  return /刚才|之前|上次|前面|这个|该|那条|编号|单号|结果|进度|状态|多少|哪个/.test(text);
 }

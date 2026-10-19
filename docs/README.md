@@ -643,6 +643,12 @@ StateEvent
 
 如果模型无法确认字段，必须保留字段并返回显式的 `unresolved`，例如 `{"status":"unresolved","value":null}`，不能通过删除字段表示未知。`fromEventId`、`toEventId`、输入/输出 token 数、状态哈希和生成器版本由运行时补齐，不能由模型编造。
 
+### 7.5 端到端验收链路
+
+沙箱端到端回归覆盖同一服务内的两个独立会话：会话 A 创建并确认工单，会话 B 查询其他业务；A 的成功 `ticketId` 不会出现在 B 的 `BehaviorContext`。A 随后可以使用“将这个工单单号告诉我下”“这个工单编号是多少”等自然追问，兜底只读取当前会话的已验证事实，不重新路由或执行创建动作。
+
+回归还覆盖 A 的新工单操作仍需显式确认、压缩后摘要与事实进入异步 SQLite 快照、服务重启后显式 `resume` 恢复并继续追问，以及 JEV 优先和 Intent Model-only 的统一 `iar.decision/v1` 返回契约。该链路由 `tests/integration/agent-sandbox/e2e-structured-context.test.ts` 与现有模型后端、持久化测试共同锁定。
+
 ## 8. 工作流、策略与副作用
 
 IAR 将“理解”和“执行”隔离：

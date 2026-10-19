@@ -2,7 +2,7 @@
 
 IAR（Intent Action Runtime）是一个面向可恢复行为执行的 TypeScript 运行时。它把用户意图、Function/Plugin 决策、策略确认、Workflow 执行和事件重放组织在同一套可审计的运行时契约中。
 
-> 当前状态：Phase 1～2 已实现；Phase 3 的可信事实投影已实现，模型上下文、结构化压缩和端到端验收仍在推进。
+> 当前状态：Phase 1～6 已实现，包含实时结构化上下文、可信事实、结构化压缩、异步 SQLite 恢复和端到端验收。
 
 ## 核心能力
 
@@ -131,4 +131,4 @@ agent-sandbox 默认同时加载 JEV 和 Intent Model，并固定 JEV 优先。�
 - [Phase 1～5 最终实现审计](docs/implementation-audits/phase-1-5-final.md)
 - [已归档的 OpenSpec 计划](openspec/changes/archive/2026-10-17-iar-five-phase-roadmap/tasks.md)
 
-最终验证结果：`npm run lint`、`npm run build` 通过，`npm test` 为 **296/296 PASS**；模型决策、路由和安全 focused tests 也全部通过。
+最终验证结果以当前提交的 `npm run lint`、`npm run build`、`npm test` 和 OpenSpec 严格校验为准；端到端回归覆盖多会话隔离、自然追问、新操作确认、压缩及重启恢复。
