@@ -234,8 +234,9 @@ test('dependencies are sorted and lifecycle unload is reversible', () => {
  */
 test('system plugin is excluded from business candidates', () => {
   const host = new PluginHost({ functionIds: ['dip.service.stop'] });
-  const { functionId, ...systemBase } = loadManifest();
+  const { functionId, actionTypes, ...systemBase } = loadManifest();
   void functionId;
+  void actionTypes;
   const system: PluginManifest = { ...systemBase, pluginId: 'iar.observability.log', pluginKind: 'system', scope: 'runtime' };
   assert.equal(host.install(system).ok, true);
   assert.equal(host.enable(system.pluginId).ok, true);

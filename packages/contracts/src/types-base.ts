@@ -24,8 +24,17 @@ export const MAX_TRUSTED_FACT_KEY_LENGTH = 320;
 /** 单个 BehaviorContext 允许保存的事实数量。 */
 export const MAX_TRUSTED_FACTS = 64;
 
+/** 单次路由上下文允许保留的 Plugin 候选数量。 */
+export const MAX_ROUTING_SCOPE_PLUGINS = 32;
+
 /** 契约中允许声明的风险等级。 */
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
+
+/** Function 路由只允许使用这组稳定动作语义，模型不能动态创造动作类型。 */
+export const ACTION_TYPES = ['query', 'create', 'update', 'delete', 'transfer', 'execute'] as const;
+
+/** Function/Plugin Manifest 声明的固定动作类型。 */
+export type ActionType = typeof ACTION_TYPES[number];
 
 /** 插件的业务或系统实现类型。 */
 export type PluginKind = 'function' | 'system';
@@ -45,6 +54,8 @@ export type FunctionDefinition = {
   name: string;
   // 描述供有限候选的解释。
   description: string;
+  // actionTypes 是 Function 可承载的固定动作集合。
+  actionTypes: ActionType[];
   // 输入输出 Schema 描述 Function 数据边界。
   inputSchema: JsonSchema;
   outputSchema: JsonSchema;
@@ -92,6 +103,8 @@ export type FunctionPluginManifest = {
   version: string;
   // 描述供审计和候选展示。
   description: string;
+  // actionTypes 是模型筛选 Plugin 后可继续选择的动作范围。
+  actionTypes: ActionType[];
   // 能力不能由模型动态扩展。
   capabilities: string[];
   // 输入输出 Schema 是插件调用边界。

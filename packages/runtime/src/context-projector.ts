@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import { createHash } from 'node:crypto';
-import { ERROR_CODES, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, validateContract, type BehaviorContext, type ContractErrorResult, type EventEnvelope, type TrustedFact, type TrustedFactValue } from '@iar/contracts';
+import { ERROR_CODES, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, validateContract, type BehaviorContext, type ContractErrorResult, type EventEnvelope, type RoutingScope, type TrustedFact, type TrustedFactValue } from '@iar/contracts';
 
 /** 关键字段哈希固定使用 SHA-256，避免实现更换导致快照不可恢复。 */
 const HASH_ALGORITHM = 'sha256';
@@ -54,6 +54,7 @@ export function criticalFieldHash(context: BehaviorContext): string {
     intent: context.intent,
     action: context.action,
     route: context.route,
+    ...(context.routingScope ? { routingScope: context.routingScope } : {}),
     slots: context.slots,
     workflow: context.workflow,
     pending: context.pending,
@@ -79,6 +80,7 @@ export function createInitialContext(runId = 'unknown-run'): BehaviorContext {
     intent: 'unknown',
     action: { name: 'unknown', status: 'proposed' },
     route: {},
+    routingScope: { candidatePluginIds: [], actionTypes: [], continuation: 'none' },
     slots: {},
     workflow: { currentStep: 'initial', status: 'pending' },
     pending: { kind: 'input', status: 'none' },
@@ -227,12 +229,14 @@ export class BehaviorContextProjector {
     if (isSlotMap(payload.slots)) this.state.slots = structuredClone(payload.slots);
     if (isPendingInput(payload.pending)) this.state.pending = { ...payload.pending };
     if (isConfirmationState(payload.confirmation)) this.state.confirmation = { ...payload.confirmation };
+    if (isRoutingScope(payload.routingScope)) this.state.routingScope = structuredClone(payload.routingScope);
   }
 
   /** 投影决策事件中的 Function 和 Plugin 路由。 */
   private applyDecision(payload: Record<string, unknown>): void {
     if (typeof payload.functionId === 'string') this.state.route.functionId = payload.functionId;
     if (typeof payload.pluginId === 'string') this.state.route.pluginId = payload.pluginId;
+    if (isRoutingScope(payload.routingScope)) this.state.routingScope = structuredClone(payload.routingScope);
   }
 
   /** 投影工作流位置和幂等键。 */
@@ -275,6 +279,15 @@ function projectionError(message: string): ContractErrorResult {
 /** 判断事件中的对象是否为普通 JSON 对象。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** 判断事件中的路由范围是否满足运行时的有界结构。 */
+function isRoutingScope(value: unknown): value is RoutingScope {
+  if (!isRecord(value)) return false;
+  if (value.activePluginId !== undefined && typeof value.activePluginId !== 'string') return false;
+  if (!Array.isArray(value.candidatePluginIds) || !value.candidatePluginIds.every((item) => typeof item === 'string')) return false;
+  if (!Array.isArray(value.actionTypes) || !value.actionTypes.every((item) => ['query', 'create', 'update', 'delete', 'transfer', 'execute'].includes(item as string))) return false;
+  return value.continuation === 'none' || value.continuation === 'reuse' || value.continuation === 'replace';
 }
 
 /** 读取非空字符串元数据。 */

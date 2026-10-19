@@ -25,6 +25,7 @@ function manifest(overrides: Partial<PluginManifest> = {}): PluginManifest {
     functionId: 'function.remote',
     version: '1.0.0',
     description: 'remote distribution fixture',
+    actionTypes: ['query'],
     capabilities: ['remote.read'],
     inputSchema: { type: 'object', additionalProperties: false },
     outputSchema: { type: 'object', additionalProperties: false },

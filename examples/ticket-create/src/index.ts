@@ -20,6 +20,7 @@ export const ticketCreateManifest: FunctionPluginManifest = {
   functionId: 'ticket.create',
   version: '1.0.0',
   description: '创建确定性工单的示例插件',
+  actionTypes: ['query', 'create'],
   capabilities: ['ticket.write'],
   inputSchema: {
     $schema: 'https://json-schema.org/draft/2020-12/schema',

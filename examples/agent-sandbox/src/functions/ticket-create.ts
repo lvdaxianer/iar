@@ -61,6 +61,7 @@ export const ticketCreateManifest: FunctionPluginManifest = {
   functionId: 'ticket.create',
   version: '1.0.0',
   description: '工单支持插件，提供工单进度查询与工单创建的确定性模拟',
+  actionTypes: ['query', 'create'],
   capabilities: ['ticket.read', 'ticket.write'],
   inputSchema: sandboxInputSchema(),
   outputSchema: sandboxOutputSchema(),

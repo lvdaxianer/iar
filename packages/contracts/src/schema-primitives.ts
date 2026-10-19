@@ -5,6 +5,7 @@
  * @date 2026-10-17
  */
 import { Type } from '@sinclair/typebox';
+import { ACTION_TYPES } from './types-base.js';
 import { IAR_API_VERSION, SCHEMA_VERSIONS } from './versions.js';
 
 /** API 版本固定宿主与插件之间的兼容边界。 */
@@ -41,6 +42,12 @@ export const RiskLevelSchema = Type.Union([
   Type.Literal('critical')
 ]);
 
+/** Function 可声明的固定动作类型集合。 */
+export const ActionTypeSchema = Type.Union(ACTION_TYPES.map((actionType) => Type.Literal(actionType)));
+
+/** ActionType 数组的统一边界，拒绝未知动作和重复声明。 */
+export const ActionTypesSchema = Type.Array(ActionTypeSchema, { minItems: 1, maxItems: ACTION_TYPES.length, uniqueItems: true });
+
 /** Function 的路由和输入输出边界。 */
 export const FunctionDefinitionSchema = Type.Object({
   // 版本字段用于兼容性判断。
@@ -52,6 +59,8 @@ export const FunctionDefinitionSchema = Type.Object({
   // 名称和描述供宿主展示与审计。
   name: Type.String({ minLength: 1 }),
   description: Type.String({ minLength: 1 }),
+  // Function 的动作集合是模型筛选的静态边界。
+  actionTypes: ActionTypesSchema,
   // 输入输出 Schema 是 Function 的数据边界。
   inputSchema: JsonSchemaSchema,
   outputSchema: JsonSchemaSchema,
@@ -117,7 +126,9 @@ export const FunctionPluginManifestSchema = Type.Object({
   // functionId 是业务插件可路由性的硬约束。
   pluginKind: Type.Literal('function'),
   scope: Type.Literal('function'),
-  functionId: Type.String({ minLength: 1 })
+  functionId: Type.String({ minLength: 1 }),
+  // 业务 Plugin 必须声明其 Function 的固定动作集合。
+  actionTypes: ActionTypesSchema
 }, { additionalProperties: false });
 
 /** 通过 Hook/订阅运行且不参与业务路由的系统插件。 */

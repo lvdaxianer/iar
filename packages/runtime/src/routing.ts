@@ -10,9 +10,9 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { ERROR_CODES, type BehaviorContext, type DecisionResult } from '@iar/contracts';
+import { ERROR_CODES, MAX_ROUTING_SCOPE_PLUGINS, type BehaviorContext, type DecisionResult, type RoutingScope } from '@iar/contracts';
 import { providerFailureResult, type DecisionCandidate, type DecisionProvider, type DecisionRequest, type ModelGatewayResult } from '@iar/decision';
-import type { FunctionRule, PluginRule, RuleEvaluationFacts, RuleEvaluationResult } from '@iar/rule-engine';
+import type { FunctionRule, PluginCandidate, PluginRule, RuleEvaluationFacts, RuleEvaluationResult } from '@iar/rule-engine';
 import { RuleEngine } from '@iar/rule-engine';
 import type { PluginHost, PluginRecord } from '@iar/plugin-host';
 
@@ -28,8 +28,8 @@ type RouteEvidence = {
 };
 
 type RouteContext = Pick<RouteRequest, 'tenantId' | 'actorId' | 'environment' | 'pluginRules' | 'pluginHost' | 'authorizePlugin'>;
-type FinalizeRouteInput = RouteEvidence & { request: RouteContext };
-type MatchedRouteInput = RouteEvidence & { pluginId: string };
+type FinalizeRouteInput = RouteEvidence & { request: RouteContext; routingScope?: RoutingScope };
+type MatchedRouteInput = RouteEvidence & { pluginId: string; routingScope?: RoutingScope };
 
 /** 异步模型决策适配器的最小结构，UnifiedDecisionAdapter 可直接满足该接口。 */
 export type AsyncDecisionAdapter = {
@@ -109,6 +109,8 @@ export type RouteResult = {
   functionDecision?: DecisionResult;
   /** Plugin provider 的受控输出。 */
   pluginDecision?: DecisionResult;
+  /** 供下一轮意图识别使用的有界 Plugin/Action 范围。 */
+  routingScope?: RoutingScope;
 };
 
 /**
@@ -194,6 +196,58 @@ export class TwoStageRouter {
     return finalizePluginRoute({ request, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision });
   }
 }
+
+/**
+ * Plugin-first 的受限路由器。
+ *
+ * 该路由器先把当前可用且被规则命中的 Plugin 描述交给模型，再把已选 Plugin
+ * 的唯一 Function 作为二级候选。它不会先构造跨 Plugin 的 Function 候选集合。
+ */
+export class PluginFirstRouter {
+  private readonly engine = new RuleEngine();
+
+  /** 执行 Plugin-first → Function-secondary 的异步路由。 */
+  public async routeAsync(request: AsyncRouteRequest): Promise<RouteResult> {
+    const records = request.pluginHost.businessCandidates();
+    const authorized = authorizeCandidates(request, records);
+    const pluginEvaluation = evaluatePluginScope(this.engine, request.facts, authorized, request.pluginRules);
+    if (pluginEvaluation.status === 'no_match' || pluginEvaluation.candidates.length === 0) {
+      return evaluationResult('plugin', pluginEvaluation);
+    }
+    const pluginDecision = await safeAsyncDecision(
+      request.pluginDecisionAdapter,
+      request.traceId,
+      request.runId,
+      decisionRequest('plugin.select', pluginEvaluation, records),
+      request.behaviorContext,
+      request.currentMessage
+    );
+    if (pluginDecision.status !== 'choice' || !pluginDecision.choice) {
+      return { status: routeStatus(pluginDecision.status), reasonCode: `plugin_${pluginDecision.status}`, pluginEvaluation, pluginDecision };
+    }
+    const selected = records.find((record) => record.manifest.pluginId === pluginDecision.choice);
+    if (!selected || selected.manifest.pluginKind !== 'function') {
+      return rejectedResult({ functionId: '', functionEvaluation: emptyFunctionEvaluation(), functionDecision: emptyFunctionDecision(''), pluginEvaluation, pluginDecision, reasonCode: 'plugin_unavailable' });
+    }
+    const selectedManifest = selected.manifest;
+    const functionId = selectedManifest.functionId;
+    const functionEvaluation = singleFunctionEvaluation(functionId);
+    const functionDecision = await safeAsyncDecision(
+      request.functionDecisionAdapter,
+      request.traceId,
+      request.runId,
+      decisionRequest('function.select', functionEvaluation),
+      request.behaviorContext,
+      request.currentMessage
+    );
+    if (functionDecision.status !== 'choice' || functionDecision.choice !== functionId) {
+      return { status: routeStatus(functionDecision.status), reasonCode: `function_${functionDecision.status}`, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision };
+    }
+    const routingScope = buildRoutingScope(pluginEvaluation, selected, request.behaviorContext);
+    return finalizePluginRoute({ request, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision, routingScope });
+  }
+}
+
 /**
  * 将宿主记录转为规则引擎的授权候选快照。
  *
@@ -238,7 +292,7 @@ function finalizePluginRoute(input: FinalizeRouteInput): RouteResult {
   if (!rule) return rejectedResult({ functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision, reasonCode: 'plugin_rule_missing' });
   // 能力只来自重新读取的 Manifest，provider 不能补充权限。
   if (!hasCapabilities(finalRecord, rule.requiredCapabilities)) return rejectedResult({ functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision, reasonCode: 'missing_capability' });
-  return matchedResult({ functionId, pluginId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision });
+  return matchedResult({ functionId, pluginId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision, ...(input.routingScope ? { routingScope: input.routingScope } : {}) });
 }
 
 /**
@@ -290,8 +344,9 @@ function deepFreeze<T>(value: T): T {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function decisionRequest(decisionType: DecisionRequest['decisionType'], evaluation: RuleEvaluationResult): DecisionRequest {
-  return { decisionType, decisionVersion: DECISION_VERSION, threshold: DECISION_THRESHOLD, candidates: evaluation.candidates.map(toDecisionCandidate) };
+function decisionRequest(decisionType: DecisionRequest['decisionType'], evaluation: RuleEvaluationResult, records?: readonly PluginRecord[]): DecisionRequest {
+  const recordsById = new Map((records ?? []).map((record) => [record.manifest.pluginId, record]));
+  return { decisionType, decisionVersion: DECISION_VERSION, threshold: DECISION_THRESHOLD, candidates: evaluation.candidates.map((candidate) => toDecisionCandidate(candidate, recordsById.get(candidate.candidateId))) };
 }
 
 /** 解包 UnifiedDecisionAdapter 结果；模型 gateway 失败收敛为既有 provider_failed 决策，不暴露 provider 错误。 @param adapter - 异步决策适配器 @param traceId - 链路标识 @param runId - 运行标识 @param request - 有限候选请求 @returns 稳定 DecisionResult @author lvdaxianer@yeah.net @date 2026-10-17 */
@@ -313,8 +368,13 @@ async function safeAsyncDecision(adapter: AsyncDecisionAdapter, traceId: string,
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function toDecisionCandidate(candidate: RuleEvaluationResult['candidates'][number]): DecisionCandidate {
+function toDecisionCandidate(candidate: RuleEvaluationResult['candidates'][number], record?: PluginRecord): DecisionCandidate {
   const base: DecisionCandidate = { candidateId: candidate.candidateId, priority: candidate.priority, specificity: candidate.specificity, requiredSlots: candidate.requiredSlots, evidenceCodes: candidate.evidenceCodes };
+  if (record?.manifest.pluginKind === 'function') {
+    base.description = record.manifest.description;
+    base.functionId = record.manifest.functionId;
+    base.actionTypes = [...record.manifest.actionTypes];
+  }
   // 未声明风险等级时不伪造 provider 解释元数据。
   if (candidate.riskLevel === undefined) return base;
   return { ...base, riskLevel: candidate.riskLevel };
@@ -412,4 +472,73 @@ function rejectedResult(input: RouteEvidence & { reasonCode: string }): RouteRes
  */
 function matchedResult(input: MatchedRouteInput): RouteResult {
   return { status: 'matched', reasonCode: 'route_matched', ...input };
+}
+
+/** 在不构造 Function 全局候选的前提下，合并各 Plugin 的规则证据。 */
+function evaluatePluginScope(engine: RuleEngine, facts: RuleEvaluationFacts, candidates: readonly PluginCandidate[], rules: readonly PluginRule[]): RuleEvaluationResult {
+  const evaluations = candidates.map((candidate) => engine.evaluatePlugins({
+    facts,
+    functionId: candidate.functionId,
+    candidates: [candidate],
+    rules: rules.filter((rule) => rule.pluginId === candidate.pluginId && rule.functionId === candidate.functionId)
+  }));
+  const matchedCandidates = evaluations.flatMap((evaluation) => evaluation.candidates);
+  const matchedRules = evaluations.flatMap((evaluation) => evaluation.matchedRules);
+  const excludedCandidates = evaluations.flatMap((evaluation) => evaluation.excludedCandidates);
+  const conflicts = evaluations.flatMap((evaluation) => evaluation.conflicts);
+  if (matchedCandidates.length === 0) return { status: 'no_match', candidates: [], matchedRules, excludedCandidates, conflicts };
+  const top = [...matchedCandidates].sort((left, right) => right.priority - left.priority || right.specificity - left.specificity);
+  const highest = top[0]!;
+  const topIds = top.filter((candidate) => candidate.priority === highest.priority && candidate.specificity === highest.specificity).map((candidate) => candidate.candidateId);
+  return {
+    status: 'matched',
+    ...(topIds.length === 1 ? { selectedCandidateId: topIds[0] } : {}),
+    candidates: matchedCandidates,
+    matchedRules,
+    excludedCandidates,
+    conflicts
+  };
+}
+
+/** 为已选 Plugin 构造只含一个 Function 的二级候选。 */
+function singleFunctionEvaluation(functionId: string): RuleEvaluationResult {
+  return {
+    status: 'matched',
+    selectedCandidateId: functionId,
+    candidates: [{ candidateId: functionId, priority: 100, specificity: 1, requiredSlots: [], evidenceCodes: ['plugin.selected'], matchedRuleIds: [] }],
+    matchedRules: [],
+    excludedCandidates: [],
+    conflicts: []
+  };
+}
+
+/** 构造未命中时使用的稳定 Function 决策证据。 */
+function emptyFunctionEvaluation(): RuleEvaluationResult {
+  return { status: 'no_match', candidates: [], matchedRules: [], excludedCandidates: [], conflicts: [] };
+}
+
+/** 构造稳定的 Function 非选择结果，避免错误分支读取未定义 choice。 */
+function emptyFunctionDecision(functionId: string): DecisionResult {
+  return {
+    schemaVersion: 'iar.decision/v1',
+    decisionType: 'function.select',
+    decisionVersion: DECISION_VERSION,
+    status: 'rejected',
+    reasonCode: 'plugin_unavailable',
+    candidateIds: functionId ? [functionId] : []
+  };
+}
+
+/** 将当前 Plugin 选择投影为下一轮模型可读取的有限路由范围。 */
+function buildRoutingScope(evaluation: RuleEvaluationResult, selected: PluginRecord, behaviorContext?: BehaviorContext): RoutingScope {
+  if (selected.manifest.pluginKind !== 'function') throw new Error('系统插件不能形成路由范围');
+  const manifest = selected.manifest;
+  const candidatePluginIds = evaluation.candidates.slice(0, MAX_ROUTING_SCOPE_PLUGINS).map((candidate) => candidate.candidateId);
+  const continuation = behaviorContext?.routingScope?.activePluginId === manifest.pluginId ? 'reuse' : 'replace';
+  return {
+    activePluginId: manifest.pluginId,
+    candidatePluginIds,
+    actionTypes: [...manifest.actionTypes],
+    continuation
+  };
 }

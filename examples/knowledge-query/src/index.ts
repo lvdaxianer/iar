@@ -23,6 +23,7 @@ export const knowledgeQueryManifest: FunctionPluginManifest = {
   functionId: 'knowledge.query',
   version: '1.0.0',
   description: '查询确定性知识片段的示例插件',
+  actionTypes: ['query'],
   capabilities: ['knowledge.read'],
   inputSchema: {
     $schema: 'https://json-schema.org/draft/2020-12/schema',

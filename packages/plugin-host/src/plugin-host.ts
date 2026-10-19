@@ -224,6 +224,14 @@ export class PluginHost {
       .sort((left, right) => compareStableIds(left.manifest.pluginId, right.manifest.pluginId))
       .map(cloneRecord);
   }
+
+  /** 返回所有启用的业务 Plugin，供 Plugin-first 意图识别建立有限候选。 */
+  public businessCandidates(): PluginRecord[] {
+    return [...this.records.values()]
+      .filter((record) => record.state === 'enabled' && record.manifest.pluginKind === 'function')
+      .sort((left, right) => compareStableIds(left.manifest.pluginId, right.manifest.pluginId))
+      .map(cloneRecord);
+  }
   /**
    * 解析单个候选并为 Function 归属失败留下可审计错误。
    *

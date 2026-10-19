@@ -18,7 +18,7 @@ const trustedSigners = new Map([['test-signer', signer.publicKey]]);
 /** 创建 control-plane 使用的最小合法 Manifest。 */
 function manifest(overrides: Partial<PluginManifest> = {}): PluginManifest {
   return {
-    apiVersion: 'iar.dev/v1', schemaVersion: SCHEMA_VERSIONS.pluginManifest, pluginId: 'tenant-plugin', pluginKind: 'function', scope: 'function', functionId: 'function.remote', version: '1.0.0', description: 'tenant control plane fixture', capabilities: ['remote.read'], inputSchema: { type: 'object', additionalProperties: false }, outputSchema: { type: 'object', additionalProperties: false }, lifecycle: { entrypoint: 'tenant.entry' }, policy: { riskLevel: 'low', requiresConfirmation: false, allowedCapabilities: ['remote.read'] }, dependencies: [], ...overrides
+    apiVersion: 'iar.dev/v1', schemaVersion: SCHEMA_VERSIONS.pluginManifest, pluginId: 'tenant-plugin', pluginKind: 'function', scope: 'function', functionId: 'function.remote', version: '1.0.0', description: 'tenant control plane fixture', actionTypes: ['query'], capabilities: ['remote.read'], inputSchema: { type: 'object', additionalProperties: false }, outputSchema: { type: 'object', additionalProperties: false }, lifecycle: { entrypoint: 'tenant.entry' }, policy: { riskLevel: 'low', requiresConfirmation: false, allowedCapabilities: ['remote.read'] }, dependencies: [], ...overrides
   } as PluginManifest;
 }
 

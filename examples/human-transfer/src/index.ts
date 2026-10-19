@@ -20,6 +20,7 @@ export const humanTransferManifest: FunctionPluginManifest = {
   functionId: 'human.transfer',
   version: '1.0.0',
   description: '将行为请求转交人工队列的示例插件',
+  actionTypes: ['query', 'transfer'],
   capabilities: ['human.transfer'],
   inputSchema: {
     $schema: 'https://json-schema.org/draft/2020-12/schema',

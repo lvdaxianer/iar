@@ -72,9 +72,9 @@
 - Modify: `examples/agent-sandbox/src/session-dependencies.ts`
 - Test: `tests/routing/scoped-plugin-routing.test.ts`
 
-- [ ] **Step 1: Write the failing tests** — 覆盖不构造全局 `query` 候选、范围复用、显式切换、未知动作拒绝和模型不具备授权能力。
-- [ ] **Step 2: Implement scoped routing** — 为 Function Manifest 增加固定 action vocabulary，为 BehaviorContext 增加 bounded routing scope，Plugin 优先后再按动作过滤 Function。
-- [ ] **Step 3: Verify** — 路由聚焦测试、JEV/Intent Model 回归和全量测试通过。
+- [x] **Step 1: Write the failing tests** — 覆盖不构造全局 `query` 候选、范围复用、显式切换、未知动作拒绝和模型不具备授权能力。
+- [x] **Step 2: Implement scoped routing** — 为 Function Manifest 增加固定 action vocabulary，为 BehaviorContext 增加 bounded routing scope，Plugin 优先后再按动作过滤 Function。
+- [x] **Step 3: Verify** — 路由聚焦测试、JEV/Intent Model 回归和全量测试通过。
 
 ### Task 5: sessionId 标准化、恢复入口和文档
 

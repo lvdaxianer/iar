@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { SCHEMA_VERSIONS, validateContract, type DecisionResult } from '@iar/contracts';
+import { ACTION_TYPES, SCHEMA_VERSIONS, validateContract, type DecisionResult } from '@iar/contracts';
 import type { DecisionCandidate, DecisionRequest, SelectionDecisionType } from './types.js';
 
 const MIN_SCORE = 0;
@@ -109,7 +109,7 @@ function isValidRequest(request: DecisionRequest, candidateIds: readonly string[
  * @date 2026-10-17
  */
 function isValidCandidate(candidate: DecisionCandidate): boolean {
-  const allowedKeys = new Set(['candidateId', 'priority', 'specificity', 'requiredSlots', 'riskLevel', 'evidenceCodes']);
+  const allowedKeys = new Set(['candidateId', 'priority', 'specificity', 'requiredSlots', 'riskLevel', 'evidenceCodes', 'description', 'functionId', 'actionTypes']);
   return isRecord(candidate)
     && Object.keys(candidate).every((key) => allowedKeys.has(key))
     && typeof candidate.candidateId === 'string'
@@ -118,7 +118,19 @@ function isValidCandidate(candidate: DecisionCandidate): boolean {
     && Number.isFinite(candidate.specificity)
     && isOptionalStringArray(candidate.requiredSlots)
     && isOptionalStringArray(candidate.evidenceCodes)
+    && isOptionalBoundedString(candidate.description)
+    && isOptionalBoundedString(candidate.functionId)
+    && isOptionalActionTypes(candidate.actionTypes)
     && isOptionalRiskLevel(candidate.riskLevel);
+}
+
+function isOptionalBoundedString(value: unknown): boolean {
+  return value === undefined || (typeof value === 'string' && value.length > 0 && value.length <= 256);
+}
+
+function isOptionalActionTypes(value: unknown): boolean {
+  return value === undefined
+    || (Array.isArray(value) && value.length > 0 && value.length <= ACTION_TYPES.length && new Set(value).size === value.length && value.every((item) => ACTION_TYPES.includes(item as typeof ACTION_TYPES[number])));
 }
 
 /**

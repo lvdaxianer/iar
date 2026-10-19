@@ -30,6 +30,7 @@ export const humanTransferManifest: FunctionPluginManifest = {
   functionId: 'human.transfer',
   version: '1.0.0',
   description: '人工服务插件，提供转接人工客服队列的确定性模拟',
+  actionTypes: ['query', 'transfer'],
   capabilities: ['human.transfer'],
   inputSchema: sandboxInputSchema(),
   outputSchema: sandboxOutputSchema(),

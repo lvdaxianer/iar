@@ -19,10 +19,10 @@
 
 ## 4. Scoped Plugin routing
 
-- [ ] 4.1 为 Function Manifest 增加固定 `actionTypes` 词表和 Schema 校验，验证未知动作被拒绝。
-- [ ] 4.2 为 BehaviorContext 增加受限 `routingScope`，验证连续追问复用 Plugin、显式业务切换替换 Plugin、歧义输入只澄清。
-- [ ] 4.3 调整候选构建为 Plugin 优先、Action 次级，验证十个 Plugin 同时有 `query` 时不会构造全局 Function 候选。
-- [ ] 4.4 保持 JEV 优先、Intent Model 统一决策契约和最终授权/策略/确认校验，并通过现有路由回归测试。
+- [x] 4.1 为 Function Manifest 增加固定 `actionTypes` 词表和 Schema 校验，验证未知动作被拒绝。
+- [x] 4.2 为 BehaviorContext 增加受限 `routingScope`，验证连续追问复用 Plugin、显式业务切换替换 Plugin、歧义输入只澄清。
+- [x] 4.3 调整候选构建为 Plugin 优先、Action 次级，验证十个 Plugin 同时有 `query` 时不会构造全局 Function 候选。
+- [x] 4.4 保持 JEV 优先、Intent Model 统一决策契约和最终授权/策略/确认校验，并通过现有路由回归测试。
 
 ## 5. HTTP session recovery and documentation
 
