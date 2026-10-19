@@ -17,7 +17,12 @@ IAR SHALL expose versioned contracts for Function、Plugin、Rule、Workflow、A
 
 ### Requirement: Function plugins declare an auditable ownership boundary
 
-Every function plugin manifest SHALL declare exactly one `functionId`, a fixed version, input and output schemas, capabilities, lifecycle entrypoint, and policy metadata; a plugin SHALL NOT be eligible for routing outside its declared Function.
+Every function plugin manifest SHALL declare exactly one `functionId`, a fixed version, input and output schemas, capabilities, lifecycle entrypoint, policy metadata, and a bounded list of versioned fixed `actionTypes` used only for candidate narrowing inside the selected Plugin scope; a plugin SHALL NOT be eligible for routing outside its declared Function.
+
+#### Scenario: Unknown action type is rejected
+
+- **WHEN** a Function manifest declares an action type outside the Runtime action vocabulary
+- **THEN** manifest validation rejects it before the Function can enter routing candidates
 
 #### Scenario: Plugin is not routable outside its Function
 
@@ -35,7 +40,12 @@ The runtime SHALL support discovered, validated, installed, enabled, disabled, d
 
 ### Requirement: System plugins are excluded from model routing
 
-Plugins declared as runtime system handlers SHALL be invoked through subscriptions or internal hooks and SHALL NOT appear in Function or Plugin decision candidates.
+Runtime system plugins, including Persistence Providers and observability handlers, SHALL be loaded through explicit lifecycle or subscription registration and SHALL NOT appear in Function or Plugin decision candidates.
+
+#### Scenario: Persistence Provider is not a business candidate
+
+- **WHEN** the runtime builds candidates for a business Function
+- **THEN** a persistence system plugin is absent from the candidate set and can only be invoked by the persistence bridge
 
 #### Scenario: Logging system plugin does not become a business candidate
 

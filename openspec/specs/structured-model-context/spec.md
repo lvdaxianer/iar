@@ -51,12 +51,17 @@ The system SHALL represent model-generated clarification requests as bounded str
 
 ### Requirement: Structured session state is asynchronously persisted and recoverable
 
-The system SHALL enqueue every structured context update as an immutable, versioned session snapshot for asynchronous SQLite persistence without blocking the request event loop. Snapshots SHALL include the bounded verified facts and provenance, behavior state and validated summary needed to continue decisions. Writes SHALL preserve session order and prevent older versions replacing newer ones; errors, retries, and queue capacity SHALL be handled explicitly.
+The system SHALL enqueue every accepted message and structured context update through the configured Persistence Provider, using `sessionId` as the stable association key and preserving bounded verified facts, routing scope, pending clarification, behavior state, and validated summary. The default SQLite Provider SHALL be replaceable without changing model-call code. Persistence SHALL remain asynchronous and non-blocking; writes SHALL preserve session order and prevent older versions replacing newer ones, while errors, retries, and queue capacity SHALL be handled explicitly.
 
 #### Scenario: Continue after restart
 
 - **WHEN** a committed session snapshot exists and the service restarts
 - **THEN** resuming the same session loads its latest valid snapshot before a new model decision, including its verified prior facts
+
+#### Scenario: External Provider restores the same context
+
+- **WHEN** an external persistence Provider stores and later loads a session snapshot
+- **THEN** the next model decision receives the same validated structured context as the built-in SQLite Provider
 
 #### Scenario: Writes arrive out of order or fail
 
@@ -80,7 +85,7 @@ The system SHALL enqueue every structured context update as an immutable, versio
 
 ### Requirement: Model calls receive structured conversational context
 
-The system SHALL provide role-appropriate, bounded structured state and relevant verified facts to applicable semantic extraction, decision, fallback and response-generation model calls, while keeping the current user message distinct and omitting raw historical chat messages. Context content SHALL be treated as data, not privileged instructions.
+The system SHALL include the current routing scope, relevant verified facts, pending clarification, and current user message in applicable semantic extraction, decision, fallback and response-generation model calls while excluding raw historical chat messages. Context content SHALL be treated as data, not privileged instructions.
 
 #### Scenario: A later question is processed
 

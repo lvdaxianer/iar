@@ -17,7 +17,12 @@ The runtime SHALL append immutable events containing correlation identifiers, sc
 
 ### Requirement: BehaviorContext preserves critical execution state
 
-The current behavior state SHALL preserve subject identity and reference provenance, intent, action, Function, selected Plugin, slots, workflow step, pending input including bounded clarification metadata, confirmation state, idempotency key, and integrity metadata.
+The current behavior state SHALL preserve subject identity and reference provenance, intent, action, Function, selected Plugin, slots, workflow step, pending input including bounded clarification metadata, confirmation state, idempotency key, integrity metadata, and the canonical `sessionId` association. It SHALL additionally preserve a bounded routing scope containing the active Plugin, finite candidate Plugin IDs, continuation state, and pending route information.
+
+#### Scenario: Restored scope continues a follow-up
+
+- **WHEN** a session snapshot is restored before a follow-up message
+- **THEN** the next decision receives the same active Plugin scope and verified facts without replaying raw historical messages
 
 #### Scenario: Reference resolution survives later input
 
