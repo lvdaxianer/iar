@@ -7,6 +7,7 @@
   "functionId": "dip.service.stop",
   "version": "1.0.0",
   "description": "调用 DIP API 停止指定服务",
+  "actionTypes": ["execute"],
   "capabilities": ["dip.service.write"],
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",

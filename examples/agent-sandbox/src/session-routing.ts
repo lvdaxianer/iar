@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { SCHEMA_VERSIONS, type ActionDefinition, type BehaviorContext, type EventEnvelope, type JsonValue, type PluginPolicyMetadata } from '@iar/contracts';
 import { ModelGateway, SemanticExtractorAdapter, type ModelGatewayResult, type ModelProfileRegistry, type SemanticFrame } from '@iar/decision';
-import { TwoStageRouter, type AsyncDecisionAdapter, type RouteResult } from '@iar/runtime';
+import { PluginFirstRouter, type AsyncDecisionAdapter, type RouteResult } from '@iar/runtime';
 import type { PluginHost } from '@iar/plugin-host';
 import type { ActionExecutor, LocalWorkflow } from '@iar/workflow';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
@@ -107,7 +107,7 @@ export class SandboxSessionRouting {
    * @date 2026-10-18
    */
   public routeFrame(traceId: string, runId: string, frame: SemanticFrame, behaviorContext: BehaviorContext, currentMessage: string): Promise<RouteResult> {
-    return new TwoStageRouter().routeAsync({
+    return new PluginFirstRouter().routeAsync({
       traceId,
       runId,
       facts: buildFacts(frame),
@@ -258,6 +258,7 @@ export class SandboxSessionRouting {
     };
     if (route.functionDecision?.score !== undefined) payload.functionScore = route.functionDecision.score;
     if (route.pluginDecision?.score !== undefined) payload.pluginScore = route.pluginDecision.score;
+    if (route.routingScope !== undefined) payload.routingScope = route.routingScope as unknown as JsonValue;
     return payload;
   }
 

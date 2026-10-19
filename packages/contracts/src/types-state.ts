@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import type { JsonValue, RiskLevel } from './types-base.js';
+import type { ActionType, JsonValue, RiskLevel } from './types-base.js';
 import type { WorkflowStatus } from './types-routing.js';
 
 /** 待执行的副作用 Action。 */
@@ -98,6 +98,18 @@ export type BehaviorRoute = {
   pluginId?: string;
 };
 
+/** 当前会话交给意图识别模型的有界路由范围。 */
+export type RoutingScope = {
+  /** 上一轮已选中的 Plugin，用于连续追问时提高复用优先级。 */
+  activePluginId?: string;
+  /** 本轮允许模型观察的 Plugin 标识，不是授权结果。 */
+  candidatePluginIds: string[];
+  /** 已选 Plugin 允许继续选择的固定动作集合。 */
+  actionTypes: ActionType[];
+  /** none 表示初始范围，reuse 表示沿用，replace 表示发生业务切换。 */
+  continuation: 'none' | 'reuse' | 'replace';
+};
+
 /** BehaviorContext 当前工作流位置。 */
 export type BehaviorWorkflow = {
   // workflowId 绑定当前编排定义。
@@ -169,6 +181,8 @@ export type BehaviorContext = {
   action: { name: string; status: 'proposed' | 'resolved' | 'executed' | 'failed' };
   // route 保留 Function 和已固定 Plugin。
   route: BehaviorRoute;
+  // routingScope 限制下一轮模型可观察的 Plugin/Action 范围。
+  routingScope?: RoutingScope;
   // slots 记录已解析和待确认参数。
   slots: Record<string, SlotValue>;
   // workflow 记录可恢复的状态机位置。

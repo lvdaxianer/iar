@@ -78,6 +78,7 @@ export const dipManageManifest: FunctionPluginManifest = {
   functionId: 'dip.manage',
   version: '1.0.0',
   description: '数据集成管理插件，提供 DIP 任务列表、详情、重跑与停止的确定性模拟',
+  actionTypes: ['query', 'execute'],
   capabilities: ['dip.read', 'dip.control'],
   inputSchema: sandboxInputSchema(),
   outputSchema: sandboxOutputSchema(),

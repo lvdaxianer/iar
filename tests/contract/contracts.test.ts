@@ -76,6 +76,7 @@ function assertInvalidFunctionSchema(): void {
     version: '1.0.0',
     name: 'Broken Function',
     description: '用于验证嵌入 Schema 拒绝路径',
+    actionTypes: ['query'],
     inputSchema: { type: 'not-a-json-schema-type' },
     outputSchema: { type: 'object' },
     capabilities: [],

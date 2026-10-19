@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import type { DecisionResult, DecisionType, RiskLevel } from '@iar/contracts';
+import type { ActionType, DecisionResult, DecisionType, RiskLevel } from '@iar/contracts';
 
 /** 决策选择允许使用的后端标识。 */
 export type DecisionBackend = 'jev' | 'intent-model';
@@ -23,6 +23,12 @@ export type DecisionCandidate = {
   requiredSlots?: readonly string[];
   riskLevel?: RiskLevel;
   evidenceCodes?: readonly string[];
+  /** Plugin 描述只用于模型理解，不授予执行权限。 */
+  description?: string;
+  /** Plugin 归属 Function 的稳定标识。 */
+  functionId?: string;
+  /** Plugin/Function 可承载的固定动作类型。 */
+  actionTypes?: readonly ActionType[];
 };
 
 /** Mock 或未来真实 provider 接收的结构化决策约束。 */

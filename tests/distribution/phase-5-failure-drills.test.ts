@@ -32,6 +32,7 @@ function manifest(overrides: Partial<PluginManifest> = {}): PluginManifest {
     functionId: 'function.drill',
     version: '1.0.0',
     description: 'phase 5 distribution drill',
+    actionTypes: ['query'],
     capabilities: ['remote.read'],
     inputSchema: { type: 'object', additionalProperties: false },
     outputSchema: { type: 'object', additionalProperties: false },

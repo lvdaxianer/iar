@@ -5,12 +5,20 @@
  * @date 2026-10-17
  */
 import { Type } from '@sinclair/typebox';
-import { JsonValueSchema } from './schema-primitives.js';
-import { MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN } from './types-base.js';
+import { ActionTypeSchema, JsonValueSchema } from './schema-primitives.js';
+import { MAX_ROUTING_SCOPE_PLUGINS, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN } from './types-base.js';
 import { SCHEMA_VERSIONS } from './versions.js';
 
 /** BehaviorContext 摘要文本的统一长度边界。 */
 export const MAX_CONTEXT_SUMMARY_LENGTH = 1200;
+
+/** 下一轮模型可观察的有限 Plugin/Action 范围。 */
+export const RoutingScopeSchema = Type.Object({
+  activePluginId: Type.Optional(Type.String({ minLength: 1, maxLength: 320 })),
+  candidatePluginIds: Type.Array(Type.String({ minLength: 1, maxLength: 320 }), { maxItems: MAX_ROUTING_SCOPE_PLUGINS, uniqueItems: true }),
+  actionTypes: Type.Array(ActionTypeSchema, { maxItems: 6, uniqueItems: true }),
+  continuation: Type.Union([Type.Literal('none'), Type.Literal('reuse'), Type.Literal('replace')])
+}, { additionalProperties: false });
 
 /** BehaviorContext 的主语及其不可变来源。 */
 export const SubjectReferenceSchema = Type.Object({
@@ -169,6 +177,8 @@ export const BehaviorContextSchema = Type.Object({
     // pluginId 是重试时固定的实现版本。
     pluginId: Type.Optional(Type.String({ minLength: 1 }))
   }, { additionalProperties: false }),
+  // routingScope 限制下一轮意图识别的 Plugin 和动作范围。
+  routingScope: Type.Optional(RoutingScopeSchema),
   // slots 记录已解析和待确认参数。
   slots: Type.Record(Type.String(), SlotValueSchema),
   // workflow 记录可恢复的状态机位置。

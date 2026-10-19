@@ -7,6 +7,7 @@
   "functionId": "dip.service.stop",
   "version": "1.0.0",
   "description": "嵌入 Schema 无效的插件",
+  "actionTypes": ["query"],
   "capabilities": [],
   "inputSchema": { "type": "not-a-json-schema-type" },
   "outputSchema": { "type": "object" },

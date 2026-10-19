@@ -95,5 +95,6 @@ function freezeCandidate(candidate: DecisionCandidate): DecisionCandidate {
   if (candidate.requiredSlots !== undefined) frozen.requiredSlots = Object.freeze([...candidate.requiredSlots]);
   // 复制证据数组，防止 provider 反向修改调用方输入。
   if (candidate.evidenceCodes !== undefined) frozen.evidenceCodes = Object.freeze([...candidate.evidenceCodes]);
+  if (candidate.actionTypes !== undefined) frozen.actionTypes = Object.freeze([...candidate.actionTypes]);
   return Object.freeze(frozen);
 }

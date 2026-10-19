@@ -17,6 +17,7 @@ const fakeStopManifest: FunctionPluginManifest = {
   functionId: 'dip.service.stop',
   version: '1.0.0',
   description: '用于 Phase 1 生命周期和重放演示的内存 DIP 服务停止插件',
+  actionTypes: ['execute'],
   capabilities: ['dip.service.write'],
   inputSchema: {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
