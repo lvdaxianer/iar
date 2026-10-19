@@ -28,7 +28,8 @@ const secret = 'private-startup-key-sentinel';
 function start(args: string[], key: string, port: number): Record<string, unknown> {
   const env = { ...process.env, IAR_SANDBOX_PORT: String(port), IAR_LLM_API_KEY: key, IAR_MODEL_API_KEY: 'CHANGE_ME',
     IAR_LLM_BASE_URL: 'http://127.0.0.1:1' };
-  const child = spawnSync(process.execPath, ['scripts/run-agent-sandbox.mjs', ...args], { encoding: 'utf8', env, timeout: 700 });
+  // 启动包含 node:sqlite 工作线程初始化；超时只保护测试不挂死，不是服务 SLA。
+  const child = spawnSync(process.execPath, ['scripts/run-agent-sandbox.mjs', ...args], { encoding: 'utf8', env, timeout: 2000 });
   assert.equal((child.error as NodeJS.ErrnoException | undefined)?.code, 'ETIMEDOUT', child.stderr);
   assert.equal(child.stdout, '');
   assert.ok(child.stderr.length > 0, '启动后应有安全启动状态');

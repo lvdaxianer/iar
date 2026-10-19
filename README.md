@@ -111,7 +111,7 @@ agent-sandbox 默认同时加载 JEV 和 Intent Model，并固定 JEV 优先。�
 
 ### 沙箱会话
 
-`POST /api/sessions` 创建独立会话并返回 `sessionId`；随后使用 `/api/sessions/{sessionId}/chat`、`confirm`、`compact`、`state` 和 `reset`，用 `DELETE /api/sessions/{sessionId}` 释放。原 `/api/*` 入口仍共用一个兼容会话。默认最多 32 个独立会话、空闲 30 分钟过期，每会话最多 16 个在途或排队请求；达到状态操作预算后需重置。会话只在当前进程内保存，重启后丢失。
+`POST /api/sessions` 创建独立会话并返回 `sessionId`；随后使用 `/api/sessions/{sessionId}/chat`、`confirm`、`compact`、`state` 和 `reset`，用 `DELETE /api/sessions/{sessionId}` 释放。服务重启后可先调用 `POST /api/sessions/{sessionId}/resume` 恢复最近成功写入的结构化快照，再继续提问。原 `/api/*` 入口仍共用一个兼容会话。默认最多 32 个独立会话、空闲 30 分钟过期，每会话最多 16 个在途或排队请求；达到状态操作预算后需重置。未配置快照路径时使用进程内 SQLite；需要跨进程重启恢复时设置 `IAR_SANDBOX_SQLITE_PATH`，正常关闭会等待已接受快照写入，进程突然退出前尚未提交的更新可能丢失。
 
 会话 ID 仅隔离沙箱状态，不是身份认证或租户授权；持有 ID 的客户端可以读取状态并确认操作。沙箱只适合受信任的本机使用，生产接入必须另外实施认证、逐会话授权和传输保护。调用约束及错误码详见[会话接口与安全边界](docs/README.md#1221-沙箱会话接口与安全边界)。
 

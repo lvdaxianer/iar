@@ -7,4 +7,5 @@
 export * from './types.js';
 export * from './memory-stores.js';
 export * from './sqlite-stores.js';
+export * from './async-sqlite-snapshot-store.js';
 export * from './json.js';

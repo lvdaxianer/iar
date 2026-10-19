@@ -15,6 +15,7 @@ import { IarSandboxSession, type SandboxMode } from './session.js';
 import { registerSandboxRoutes } from './http-transport.js';
 import { SandboxSessionManager, type SandboxSessionLimits } from './session-manager.js';
 import { loadSandboxPage } from './page-template.js';
+import { AsyncSqliteSnapshotStore, type SnapshotStore } from '../../../packages/storage/src/index.js';
 
 /** sandbox 服务的启动配置。 */
 export type SandboxServerOptions = {
@@ -24,7 +25,12 @@ export type SandboxServerOptions = {
   port?: number;
   /** 独立会话与请求的资源上限。 */
   sessionLimits?: SandboxSessionLimits;
+  /** SQLite 文件路径；未配置时使用进程内 SQLite，生产重启恢复应显式配置。 */
+  snapshotPath?: string;
+  /** 测试或宿主注入的快照存储。 */
+  snapshotStore?: SnapshotStore;
 };
+type ClosableSnapshotStore = SnapshotStore & { close?: () => Promise<void> };
 
 /** 已启动的 sandbox 服务句柄。 */
 export type SandboxServerHandle = {
@@ -57,19 +63,19 @@ const CLOSING_STATUS = 503;
 export async function startSandboxServer(options: SandboxServerOptions): Promise<SandboxServerHandle> {
   // 先补齐 .env 中的环境变量，再初始化会话，保证 provider 能读到密钥。
   loadDotEnv();
-  const session = new IarSandboxSession({ mode: options.mode });
-  let manager: SandboxSessionManager | undefined;
-  let app: FastifyInstance | undefined;
+  const snapshotStore: ClosableSnapshotStore = options.snapshotStore ?? new AsyncSqliteSnapshotStore({ filename: options.snapshotPath ?? process.env.IAR_SANDBOX_SQLITE_PATH ?? ':memory:' });
+  const session = new IarSandboxSession({ mode: options.mode, sessionId: 'legacy', snapshotStore });
+  let manager: SandboxSessionManager | undefined, app: FastifyInstance | undefined;
   try {
-    manager = new SandboxSessionManager(options.mode, session, options.sessionLimits);
+    manager = new SandboxSessionManager(options.mode, session, options.sessionLimits, snapshotStore);
     const indexHtml = loadSandboxPage();
     app = Fastify({ logger: false });
     const lifecycle: SandboxLifecycle = { isClosing: false };
-    configureSandboxApp(app, { manager, indexHtml, lifecycle });
-    return await listenSandbox(app, { manager, session, lifecycle, options });
+    configureSandboxApp(app, { manager, indexHtml, lifecycle, snapshotStore });
+    return await listenSandbox(app, { manager, session, lifecycle, snapshotStore, options });
   } catch (error) {
     // 保留启动异常，同时尽力释放已经分配的监听器及工作线程。
-    await cleanupFailedStartup({ app, manager, session });
+    await cleanupFailedStartup({ app, manager, session, snapshotStore });
     throw error;
   }
 }
@@ -81,13 +87,13 @@ export async function startSandboxServer(options: SandboxServerOptions): Promise
  * @author lvdaxianer@yeah.net
  * @date 2026-10-19
  */
-async function listenSandbox(app: FastifyInstance, context: { manager: SandboxSessionManager; session: IarSandboxSession; lifecycle: SandboxLifecycle; options: SandboxServerOptions }): Promise<SandboxServerHandle> {
-  const { manager, session, lifecycle, options } = context;
+async function listenSandbox(app: FastifyInstance, context: { manager: SandboxSessionManager; session: IarSandboxSession; lifecycle: SandboxLifecycle; snapshotStore: ClosableSnapshotStore; options: SandboxServerOptions }): Promise<SandboxServerHandle> {
+  const { manager, session, lifecycle, snapshotStore, options } = context;
   const requestedPort = options.port ?? Number(process.env.IAR_SANDBOX_PORT ?? 8787);
   const port = Number.isInteger(requestedPort) && requestedPort > 0 ? requestedPort : 8787;
   await app.listen({ port, host: '127.0.0.1' });
   const releaseSignal = registerDebugSignal();
-  return { app, session, port, mode: options.mode, close: createSandboxClose(app, manager, { releaseSignal, lifecycle }) };
+  return { app, session, port, mode: options.mode, close: createSandboxClose(app, manager, snapshotStore, { releaseSignal, lifecycle }) };
 }
 
 /**
@@ -98,10 +104,11 @@ async function listenSandbox(app: FastifyInstance, context: { manager: SandboxSe
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-function configureSandboxApp(app: FastifyInstance, options: { manager: SandboxSessionManager; indexHtml: string; lifecycle: SandboxLifecycle }): void {
+function configureSandboxApp(app: FastifyInstance, options: { manager: SandboxSessionManager; indexHtml: string; lifecycle: SandboxLifecycle; snapshotStore: ClosableSnapshotStore }): void {
   registerRequestAudit(app);
   registerClosingGuard(app, options.lifecycle);
   registerSandboxRoutes(app, options.manager, options.indexHtml);
+  app.addHook('onClose', async () => { await options.snapshotStore.close?.(); });
 }
 
 /**
@@ -111,9 +118,10 @@ function configureSandboxApp(app: FastifyInstance, options: { manager: SandboxSe
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-async function cleanupFailedStartup(resources: { app: FastifyInstance | undefined; manager: SandboxSessionManager | undefined; session: IarSandboxSession }): Promise<void> {
+async function cleanupFailedStartup(resources: { app: FastifyInstance | undefined; manager: SandboxSessionManager | undefined; session: IarSandboxSession; snapshotStore: ClosableSnapshotStore }): Promise<void> {
   try { await resources.app?.close(); } catch { /* 保留原启动故障。 */ }
   try { if (resources.manager) resources.manager.dispose(); else resources.session.dispose(); } catch { /* 保留原启动故障。 */ }
+  try { await resources.snapshotStore.close?.(); } catch { /* 保留原启动故障。 */ }
 }
 
 /**
@@ -141,7 +149,7 @@ function registerClosingGuard(app: FastifyInstance, lifecycle: SandboxLifecycle)
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-function createSandboxClose(app: FastifyInstance, manager: SandboxSessionManager, options: { releaseSignal: () => void; lifecycle: SandboxLifecycle }): () => Promise<void> {
+function createSandboxClose(app: FastifyInstance, manager: SandboxSessionManager, snapshotStore: ClosableSnapshotStore, options: { releaseSignal: () => void; lifecycle: SandboxLifecycle }): () => Promise<void> {
   let pending: Promise<void> | undefined;
   let isClosed = false;
   const cleanup = createSandboxCleanup(manager);
@@ -152,6 +160,7 @@ function createSandboxClose(app: FastifyInstance, manager: SandboxSessionManager
     try { await app.close(); isClosed = true; } finally { options.releaseSignal(); }
     await manager.drain();
     cleanup();
+    await snapshotStore.close?.();
   };
   return () => pending ??= attempt().catch((error: unknown) => {
     // 只有底层关闭未完成时才允许重新尝试。
