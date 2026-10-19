@@ -6,7 +6,7 @@
  */
 import { ModelProviderError } from '@iar/decision';
 import { logModelInvalidResponse, logModelNetworkFailure, logModelSuccess } from '../safe-log.js';
-import { cancelModelBody, fetchModelResponse, type ModelTransportRequest } from './model-transport.js';
+import { cancelModelBody, countModelBytes, fetchModelResponse, ModelResponseLimitError, type ModelTransportRequest } from './model-transport.js';
 
 /** SSE 帧最小形状。 */
 type StreamChunk = { choices?: Array<{ delta?: { content?: unknown } }> };
@@ -30,7 +30,7 @@ export async function callModelStream(request: ModelTransportRequest, onDelta: (
     logModelInvalidResponse(startTime, response.status);
     throw new ModelProviderError('provider_failed');
   }
-  const content = await readModelStream(response.body, onDelta, { startTime, signal: request.signal });
+  const content = await readModelStream(response.body, onDelta, { startTime, signal: request.signal, status: response.status });
   // 空流无法生成回复。
   if (content.length === 0) {
     logModelInvalidResponse(startTime, response.status);
@@ -51,21 +51,37 @@ export async function callModelStream(request: ModelTransportRequest, onDelta: (
  * @date 2026-10-18
  */
 async function readModelStream(body: ReadableStream<Uint8Array>, onDelta: (delta: string) => void,
-  timing: { startTime: number; signal: AbortSignal }): Promise<string> {
+  timing: { startTime: number; signal: AbortSignal; status: number }): Promise<string> {
   const reader = body.getReader();
   const state: StreamState = { pending: '', chunks: [], onDelta };
   try {
     await consumeStream(reader, state);
-  } catch {
+  } catch (error) {
     // 中断时保持原有 provider 错误并只记录安全分类。
     cancelModelBody(() => reader.cancel());
-    logModelNetworkFailure(timing.startTime, timing.signal);
-    throw new ModelProviderError('provider_unavailable');
+    throw classifyStreamFailure(error, timing);
   } finally {
     // 无论读取结束或异常，释放持有的 reader 锁。
     reader.releaseLock();
   }
   return state.chunks.join('');
+}
+
+/** 将超限与连接故障分开记录，并保持对外稳定错误。
+ * @param error - 流读取错误
+ * @param timing - 状态码、计时及取消信号
+ * @returns 应向上抛出的安全错误
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-19
+ */
+function classifyStreamFailure(error: unknown, timing: { startTime: number; signal: AbortSignal; status: number }): Error {
+  // 超限必须继续向上抛出，不能把已有增量当作完整答复。
+  if (error instanceof ModelResponseLimitError) {
+    logModelInvalidResponse(timing.startTime, timing.status);
+    return error;
+  }
+  logModelNetworkFailure(timing.startTime, timing.signal);
+  return new ModelProviderError('provider_unavailable');
 }
 
 /**
@@ -79,10 +95,12 @@ async function readModelStream(body: ReadableStream<Uint8Array>, onDelta: (delta
  */
 async function consumeStream(reader: ReadableStreamDefaultReader<Uint8Array>, state: StreamState): Promise<void> {
   const decoder = new TextDecoder();
+  let size = 0;
   for (;;) {
     const { done, value } = await reader.read();
     // 流结束时保留既有的尾帧处理语义。
     if (done) return;
+    size = countModelBytes(size, value);
     processStreamChunk(state, decoder.decode(value, { stream: true }));
   }
 }

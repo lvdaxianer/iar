@@ -109,6 +109,12 @@ Function 和 Plugin 决策都经过 `ModelGateway` 与 `UnifiedDecisionAdapter`�
 
 agent-sandbox 默认同时加载 JEV 和 Intent Model，并固定 JEV 优先。设置 `IAR_SANDBOX_DECISION_BACKEND=intent-model` 可运行 Intent-only 路径；两条路径都通过同一个 `iar.decision/v1` 返回契约。
 
+### 沙箱会话
+
+`POST /api/sessions` 创建独立会话并返回 `sessionId`；随后使用 `/api/sessions/{sessionId}/chat`、`confirm`、`compact`、`state` 和 `reset`，用 `DELETE /api/sessions/{sessionId}` 释放。原 `/api/*` 入口仍共用一个兼容会话。默认最多 32 个独立会话、空闲 30 分钟过期，每会话最多 16 个在途或排队请求；达到状态操作预算后需重置。会话只在当前进程内保存，重启后丢失。
+
+会话 ID 仅隔离沙箱状态，不是身份认证或租户授权；持有 ID 的客户端可以读取状态并确认操作。沙箱只适合受信任的本机使用，生产接入必须另外实施认证、逐会话授权和传输保护。调用约束及错误码详见[会话接口与安全边界](docs/README.md#1221-沙箱会话接口与安全边界)。
+
 ### 沙箱安全日志
 
 沙箱记录 HTTP 请求审计和模型调用的安全元数据，默认不输出正常模型调用的 DEBUG 日志。拥有进程信号权限的本机运维人员可以向沙箱进程发送 `SIGHUP` 切换模型 DEBUG，重复发送恢复关闭；部署环境须限制进程信号权限并确认没有其他 SIGHUP 处理约定。日志不记录模型输入、输出、请求头、凭据、URL 查询或原始异常。详见[安全与观测方案](docs/README.md#123-观测字段)。

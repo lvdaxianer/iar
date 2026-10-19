@@ -1,0 +1,100 @@
+/** 创建沙箱会话的插件、模型和决策依赖。 */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { SCHEMA_VERSIONS } from '@iar/contracts';
+import { DecisionBackendResolver, IntentModelDecisionAdapter, JevDecisionAdapter, ModelGateway, ModelProfileRegistry, UnifiedDecisionAdapter, loadModelProfiles, type DecisionRequest, type ModelProvider } from '@iar/decision';
+import { PluginHost } from '@iar/plugin-host';
+import { allSandboxPlugins, sandboxFunctionIds } from './functions/index.js';
+import { assertSandboxKnowledgeBases } from './knowledge/retrieval.js';
+import { BrainModelProvider, IntentModelProvider } from './models/llm-provider.js';
+import { ScriptedModelProvider } from './models/scripted-provider.js';
+import type { SandboxDecisionBackend, SandboxMode } from './session-types.js';
+
+/** 安装沙箱的固定插件集合并预检知识库。
+ * 只要一个依赖失败，调用方就不能继续提供部分初始化的会话。
+ * 插件注册按既有集合顺序执行，保持候选集行为稳定。
+ * @returns 已启用插件的宿主
+ * @throws Error 安装、启用或知识库校验失败
+ * @author lvdaxianer@yeah.net @date 2026-10-18
+ */
+export function createSandboxPluginHost(): PluginHost {
+  assertSandboxKnowledgeBases(sandboxFunctionIds);
+  const host = new PluginHost({ functionIds: sandboxFunctionIds });
+  for (const registration of allSandboxPlugins) {
+    // 初始化不完整时立即失败，由会话构造器释放线程。
+    if (!host.install(registration).ok) throw new Error(`插件安装失败: ${registration.manifest.pluginId}`);
+    if (!host.enable(registration.manifest.pluginId).ok) throw new Error(`插件启用失败: ${registration.manifest.pluginId}`);
+  }
+  return host;
+}
+
+/** 从受控配置构建模型网关和两个决策适配器。
+ * @param options - 模式与可选决策后端
+ * @returns 相互绑定的模型依赖
+ * @author lvdaxianer@yeah.net @date 2026-10-18
+ */
+export function createSandboxModels(options: { mode: SandboxMode; decisionBackend?: SandboxDecisionBackend }) {
+  // 离线模式不访问远程模型，brain 模式保留真实 provider。
+  const scripted = new ScriptedModelProvider();
+  const brain = options.mode === 'brain' ? new BrainModelProvider() : scripted;
+  const decision = createDecisionModelProvider();
+  const intent = options.mode === 'brain' ? new IntentModelProvider() : decision;
+  const registry = createSandboxRegistry(options.decisionBackend);
+  const gateway = new ModelGateway({ registry, providers: { brain, mock: decision, 'intent-model': intent } });
+  const resolver = new DecisionBackendResolver(registry);
+  return { brain, registry, gateway, functionAdapter: createAdapter(resolver, gateway, 'function.select'), pluginAdapter: createAdapter(resolver, gateway, 'plugin.select') };
+}
+
+/** 按配置选择决策后端，未指定时保留完整配置。
+ * @param backend - 显式指定的后端
+ * @returns 经过过滤的模型注册表
+ * @author lvdaxianer@yeah.net @date 2026-10-18
+ */
+function createSandboxRegistry(backend: SandboxDecisionBackend | undefined): ModelProfileRegistry {
+  const text = readFileSync(join(process.cwd(), 'examples', 'agent-sandbox', 'config', 'models.brain.json'), 'utf8');
+  // 显式参数优先于进程配置；未指定时保留所有决策配置。
+  const selected = backend ?? readSandboxDecisionBackend();
+  const profiles = loadModelProfiles(text).filter((profile) => profile.role !== 'function.select' && profile.role !== 'plugin.select' || selected === undefined || (profile.decisionBackend ?? 'jev') === selected);
+  return new ModelProfileRegistry(profiles);
+}
+
+/** 创建指定角色的统一决策适配器。
+ * @param resolver - 后端选择器
+ * @param gateway - 模型网关
+ * @param role - 决策角色
+ * @returns 对应角色的适配器
+ * @author lvdaxianer@yeah.net @date 2026-10-18
+ */
+function createAdapter(resolver: DecisionBackendResolver, gateway: ModelGateway, role: 'function.select' | 'plugin.select'): UnifiedDecisionAdapter {
+  return new UnifiedDecisionAdapter(resolver, new JevDecisionAdapter(gateway, role), new IntentModelDecisionAdapter(gateway, role));
+}
+
+/** 读取可选的进程级决策后端。
+ * @returns 已验证的后端或未配置
+ * @throws Error 配置值不受支持
+ * @author lvdaxianer@yeah.net @date 2026-10-18
+ */
+function readSandboxDecisionBackend(): SandboxDecisionBackend | undefined {
+  const value = process.env.IAR_SANDBOX_DECISION_BACKEND;
+  // 空值表示不筛选后端，其他未支持值不可静默回退。
+  if (value === undefined || value.length === 0) return undefined;
+  if (value === 'jev' || value === 'intent-model') return value;
+  throw new Error('IAR_SANDBOX_DECISION_BACKEND 必须是 jev 或 intent-model');
+}
+
+/** 创建离线决策 provider，输出有限候选契约。
+ * 该 provider 不生成新的候选标识，不能扩大调用方授权范围。
+ * 决策版本和候选列表来自当前请求，供后续契约校验。
+ * @returns 确定性本地 provider
+ * @author lvdaxianer@yeah.net @date 2026-10-18
+ */
+function createDecisionModelProvider(): ModelProvider {
+  // 本地 provider 仅从运行时提供的候选集中选取第一项。
+  return { complete: async (request) => {
+    const input = request.input as { request?: DecisionRequest } & Partial<DecisionRequest>;
+    const decision = input.request ?? input as DecisionRequest;
+    return { schemaVersion: SCHEMA_VERSIONS.decision, decisionType: decision.decisionType, decisionVersion: decision.decisionVersion,
+      status: 'choice', choice: decision.candidates[0]?.candidateId, score: 0.99, reasonCode: 'sandbox.choice',
+      candidateIds: decision.candidates.map((candidate) => candidate.candidateId) };
+  } };
+}

@@ -66,6 +66,26 @@ function assertConcurrentTraces(fixture: ObservabilityFixture, traces: string[])
 
 test('并发普通和流式请求的网关审计与传输日志沿用各自入口 trace', () => withObservabilityFixture(checkConcurrentTraces));
 
+test('独立会话各入口审计使用路由模板且不泄漏标识', () => withObservabilityFixture(async (fixture) => {
+  const server = await fixture.start({ mode: 'scripted', port: 29887 });
+  const created = await server.app.inject({ method: 'POST', url: '/api/sessions' });
+  const id = (created.json() as { sessionId: string }).sessionId;
+  const routes = [
+    { method: 'GET' as const, suffix: '/state' },
+    { method: 'POST' as const, suffix: '/chat', payload: { message: '你好' } },
+    { method: 'POST' as const, suffix: '/confirm', payload: { accepted: false } },
+    { method: 'POST' as const, suffix: '/compact' },
+    { method: 'POST' as const, suffix: '/reset' },
+    { method: 'DELETE' as const, suffix: '' }
+  ];
+  for (const route of routes) await server.app.inject({ ...route, url: `/api/sessions/${id}${route.suffix}` });
+  await flushObservabilityLogs();
+  const starts = fixture.records().filter((record) => record.event === 'http.request.start');
+  assert.deepEqual(starts.map((record) => record.path), ['/api/sessions', ...routes.map((route) => `/api/sessions/:sessionId${route.suffix}`)]);
+  assert.ok(!fixture.lines.join('').includes(id));
+  assert.equal(new Set(starts.map((record) => record.traceId)).size, starts.length);
+}));
+
 /**
  * 正常 SSE 流不得产生 stream_failed，异常流必须额外记录失败。
  * 状态码保持 200，因为发送异常时响应头已经发出。

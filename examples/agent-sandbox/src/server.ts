@@ -7,14 +7,14 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { loadDotEnv } from './env.js';
 import { registerRequestAudit } from './request-audit.js';
 import { registerDebugSignal } from './safe-log.js';
 import { IarSandboxSession, type SandboxMode } from './session.js';
 import { registerSandboxRoutes } from './http-transport.js';
+import { SandboxSessionManager, type SandboxSessionLimits } from './session-manager.js';
+import { loadSandboxPage } from './page-template.js';
 
 /** sandbox 服务的启动配置。 */
 export type SandboxServerOptions = {
@@ -22,6 +22,8 @@ export type SandboxServerOptions = {
   mode: SandboxMode;
   /** 监听端口，缺省取 IAR_SANDBOX_PORT 或 8787。 */
   port?: number;
+  /** 独立会话与请求的资源上限。 */
+  sessionLimits?: SandboxSessionLimits;
 };
 
 /** 已启动的 sandbox 服务句柄。 */
@@ -56,18 +58,62 @@ export async function startSandboxServer(options: SandboxServerOptions): Promise
   // 先补齐 .env 中的环境变量，再初始化会话，保证 provider 能读到密钥。
   loadDotEnv();
   const session = new IarSandboxSession({ mode: options.mode });
-  const indexHtml = readFileSync(join(process.cwd(), 'examples', 'agent-sandbox', 'web', 'index.html'), 'utf8');
-  const app = Fastify({ logger: false });
-  registerRequestAudit(app);
-  const lifecycle: SandboxLifecycle = { isClosing: false };
-  registerClosingGuard(app, lifecycle);
-  registerSandboxRoutes(app, session, indexHtml);
+  let manager: SandboxSessionManager | undefined;
+  let app: FastifyInstance | undefined;
+  try {
+    manager = new SandboxSessionManager(options.mode, session, options.sessionLimits);
+    const indexHtml = loadSandboxPage();
+    app = Fastify({ logger: false });
+    const lifecycle: SandboxLifecycle = { isClosing: false };
+    configureSandboxApp(app, { manager, indexHtml, lifecycle });
+    return await listenSandbox(app, { manager, session, lifecycle, options });
+  } catch (error) {
+    // 保留启动异常，同时尽力释放已经分配的监听器及工作线程。
+    await cleanupFailedStartup({ app, manager, session });
+    throw error;
+  }
+}
+
+/** 监听成功后才注册信号，并将同一组资源交给关闭句柄。
+ * @param app - 已配置的服务
+ * @param context - 会话及生命周期配置
+ * @returns 可供调用方关闭的服务句柄
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-19
+ */
+async function listenSandbox(app: FastifyInstance, context: { manager: SandboxSessionManager; session: IarSandboxSession; lifecycle: SandboxLifecycle; options: SandboxServerOptions }): Promise<SandboxServerHandle> {
+  const { manager, session, lifecycle, options } = context;
   const requestedPort = options.port ?? Number(process.env.IAR_SANDBOX_PORT ?? 8787);
   const port = Number.isInteger(requestedPort) && requestedPort > 0 ? requestedPort : 8787;
   await app.listen({ port, host: '127.0.0.1' });
-  const releaseDebugSignal = registerDebugSignal();
-  return { app, session, port, mode: options.mode,
-    close: createSandboxClose(app, session, { releaseSignal: releaseDebugSignal, lifecycle }) };
+  const releaseSignal = registerDebugSignal();
+  return { app, session, port, mode: options.mode, close: createSandboxClose(app, manager, { releaseSignal, lifecycle }) };
+}
+
+/**
+ * 配置统一审计、关闭保护及会话路由。
+ * @param app - 新建的 HTTP 服务
+ * @param options - 会话管理器、页面和服务生命周期
+ * @returns 无返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-18
+ */
+function configureSandboxApp(app: FastifyInstance, options: { manager: SandboxSessionManager; indexHtml: string; lifecycle: SandboxLifecycle }): void {
+  registerRequestAudit(app);
+  registerClosingGuard(app, options.lifecycle);
+  registerSandboxRoutes(app, options.manager, options.indexHtml);
+}
+
+/**
+ * 启动失败时尽力释放已分配资源，不覆盖原始启动异常。
+ * @param resources - 已分配的服务及会话
+ * @returns 清理结束后完成
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-18
+ */
+async function cleanupFailedStartup(resources: { app: FastifyInstance | undefined; manager: SandboxSessionManager | undefined; session: IarSandboxSession }): Promise<void> {
+  try { await resources.app?.close(); } catch { /* 保留原启动故障。 */ }
+  try { if (resources.manager) resources.manager.dispose(); else resources.session.dispose(); } catch { /* 保留原启动故障。 */ }
 }
 
 /**
@@ -95,15 +141,16 @@ function registerClosingGuard(app: FastifyInstance, lifecycle: SandboxLifecycle)
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-function createSandboxClose(app: FastifyInstance, session: IarSandboxSession, options: { releaseSignal: () => void; lifecycle: SandboxLifecycle }): () => Promise<void> {
+function createSandboxClose(app: FastifyInstance, manager: SandboxSessionManager, options: { releaseSignal: () => void; lifecycle: SandboxLifecycle }): () => Promise<void> {
   let pending: Promise<void> | undefined;
   let isClosed = false;
-  const cleanup = createSandboxCleanup(session);
+  const cleanup = createSandboxCleanup(manager);
   const attempt = async () => {
     // 同步关闭入口，再开始可能失败的异步监听器关闭。
     options.lifecycle.isClosing = true;
     // 信号引用在任何关闭结果下都释放；失败时会话留给在途请求。
     try { await app.close(); isClosed = true; } finally { options.releaseSignal(); }
+    await manager.drain();
     cleanup();
   };
   return () => pending ??= attempt().catch((error: unknown) => {
@@ -120,12 +167,12 @@ function createSandboxClose(app: FastifyInstance, session: IarSandboxSession, op
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-function createSandboxCleanup(session: IarSandboxSession): () => void {
+function createSandboxCleanup(manager: SandboxSessionManager): () => void {
   let isCleaned = false;
   return () => {
     // 即使会话释放失败，也不能再次执行清理。
     if (isCleaned) return;
     isCleaned = true;
-    session.dispose();
+    manager.dispose();
   };
 }

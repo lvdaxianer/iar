@@ -42,7 +42,8 @@ const traceId = '15bb85f1-191d-4d7b-b2d7-ea6f01324f6a';
  */
 function makeReply(options: ReplyOptions): FastifyReply {
   const raw = Object.assign(new EventEmitter(), { destroyed: Boolean(options.disconnected), writableEnded: false, writeHead: () => {},
-    end: () => { if (options.failEnd) throw new Error('private-write-error'); },
+    end: () => { if (options.failEnd) throw new Error('private-write-error'); queueMicrotask(() => raw.emit('finish')); },
+    destroy: () => { raw.destroyed = true; queueMicrotask(() => raw.emit('close')); },
     write: () => {
       if (options.failWrite) throw new Error('private-write-error');
       if (options.asyncError) queueMicrotask(() => raw.emit('error', new Error('private-write-error')));

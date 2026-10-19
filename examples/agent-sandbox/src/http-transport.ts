@@ -1,65 +1,40 @@
-/**
- * 注册沙箱已有 HTTP 交互入口。
- *
- * @author lvdaxianer@yeah.net
- * @date 2026-10-18
- */
+/** 注册沙箱 HTTP 入口，并把预约、生命周期和会话操作委托给独立模块。 */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { SandboxSessionManager, type Operation } from './session-manager.js';
+import { registerSessionLifecycleRoutes } from './http-lifecycle-routes.js';
+import { registerSessionRoutes } from './http-session-routes.js';
+import { createReservationState, registerReservationHooks, type RunOperation } from './http-reservation.js';
 import type { IarSandboxSession } from './session.js';
-import { streamTurn } from './http-stream-transport.js';
 
 /**
+ * 同会话请求共享一份预约状态，避免路由模块各自维护队列。
+ * 路由拆分只改变文件边界，不改变统一错误和顺序控制。
+ * 请求生命周期钩子在所有业务路由注册前安装，确保慢请求也遵循接收顺序。
+ * 兼容入口和独立入口共用同一个 RunOperation 类型，避免行为分叉。
+ * @param app - Fastify 服务
+ * @param manager - 会话管理器
+ * @param indexHtml - 自包含页面内容
+ * @returns 无返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-19
+ */
+/**
  * 为已有会话注册 HTTP 路由。
- *
  * @param app - 沙箱 HTTP 服务
- * @param session - 沙箱会话
+ * @param manager - 会话管理器
  * @param indexHtml - 静态页面内容
  * @returns 无返回值
  * @author lvdaxianer@yeah.net
- * @date 2026-10-18
+ * @date 2026-10-19
  */
-export function registerSandboxRoutes(app: FastifyInstance, session: IarSandboxSession, indexHtml: string): void {
-  app.get('/', async (_request, reply) => {
-    void reply.type('text/html; charset=utf-8');
-    return indexHtml;
-  });
-  app.post('/api/chat', async (request, reply) => {
-    const body = asRecord(request.body);
-    const message = typeof body.message === 'string' ? body.message.trim() : '';
-    // 空消息沿用既有响应契约。
-    if (message.length === 0) return { status: 'failed', reply: '消息不能为空。', reasonCode: 'empty_message' };
-    return wantsStream(request, body) ? streamTurn(session, message, reply) : session.turn(message);
-  });
-  app.post('/api/confirm', async (request) => session.confirm(asRecord(request.body).accepted === true));
-  app.post('/api/compact', async () => session.compact());
-  app.get('/api/state', async () => session.state());
-  app.post('/api/reset', async () => { await session.reset(); return { ok: true }; });
-}
-
-/**
- * 把未知请求体收窄为普通对象。
- *
- * @param value - 未知请求体
- * @returns 普通对象或空对象
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-/**
- * 判断本次聊天请求是否要求流式响应。
- *
- * @param request - Fastify 请求
- * @param body - 请求体
- * @returns 是否走 SSE 流式
- * @author lvdaxianer@yeah.net
- * @date 2026-10-18
- */
-function wantsStream(request: FastifyRequest, body: Record<string, unknown>): boolean {
-  // 请求体指定流式时无需检查查询参数。
-  if (body.stream === true) return true;
-  const query = asRecord(request.query);
-  return query.stream === '1' || query.stream === 'true';
+export function registerSandboxRoutes(app: FastifyInstance, manager: SandboxSessionManager, indexHtml: string): void {
+  const state = createReservationState(manager);
+  registerReservationHooks(app, state);
+  const run: RunOperation = <T>(request: FastifyRequest, operation: Operation, action: (session: IarSandboxSession) => Promise<T>) => {
+    state.clearTimer(request);
+    return state.reservations.get(request)!.run(operation, action);
+  };
+  registerSessionLifecycleRoutes(app, { manager, run, indexHtml });
+  registerSessionRoutes(app, run, '/api');
+  registerSessionRoutes(app, run, '/api/sessions/:sessionId');
 }

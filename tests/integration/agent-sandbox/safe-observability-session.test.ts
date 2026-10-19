@@ -5,11 +5,113 @@
  * @date 2026-10-18
  */
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { createServer } from 'node:net';
 import test from 'node:test';
 import type { ModelProfileRegistry } from '../../../packages/decision/src/model-gateway/index.js';
+import { MAX_MODEL_RESPONSE_BYTES } from '../../../examples/agent-sandbox/src/models/model-transport.js';
 import { safeModelTraceId } from '../../../examples/agent-sandbox/src/safe-log.js';
 import { createStreamRequest, createTestProvider, flushObservabilityLogs, observeAuditTraces, withObservabilityFixture,
   type ObservabilityFixture } from './observability-fixture.js';
+
+/** 流先交付可观察增量，再超过响应上限，以验证不完整结果处理。
+ * @param state - 记录服务端是否取消上游流
+ * @returns 测试用响应体
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-19
+ */
+function oversizedStream(state: { isCancelled: boolean }): Response {
+  let index = 0;
+  return new Response(new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (index++ === 0) controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"partial-private"}}]}\n\n'));
+      else controller.enqueue(new Uint8Array(MAX_MODEL_RESPONSE_BYTES));
+    },
+    cancel() { state.isCancelled = true; }
+  }));
+}
+
+/** 安装本地模型替身，语义失败时沿用真实的离线降级路径。
+ * @param state - 记录上游流取消状态
+ * @returns 无返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-19
+ */
+function installOversizedModel(state: { isCancelled: boolean }): void {
+  globalThis.fetch = async (_url, options) => {
+    const payload = JSON.parse(String(options?.body)) as { stream?: boolean; messages?: Array<{ content: string }> };
+    if (payload.stream) return oversizedStream(state);
+    // 语义模型按已有方式回退，回复模型返回超限响应。
+    if (payload.messages?.[0]?.content.includes('iar.semantic-frame')) return new Response('', { status: 503 });
+    return new Response(new Uint8Array(MAX_MODEL_RESPONSE_BYTES + 1));
+  };
+}
+
+/** 未执行动作时，超限必须返回失败且 done 事件不能伪装为完整回复。
+ * @param server - 使用超限模型替身的真实会话服务
+ * @returns 无返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-19
+ */
+async function assertOversizedFallback(server: Awaited<ReturnType<ObservabilityFixture['start']>>): Promise<void> {
+  const normal = await server.session.turn('你好');
+  const events: Array<{ type: string; text?: string }> = [];
+  const streamed = await server.session.turnStreamed('你好', (event) => { events.push(event); });
+  assert.ok(events.some((event) => event.type === 'delta' && event.text === 'partial-private'));
+  assert.equal(normal.status, 'failed'); assert.doesNotMatch(normal.reply, /partial-private/);
+  assert.equal(streamed.status, 'failed'); assert.doesNotMatch(streamed.reply, /partial-private/);
+  assert.equal(streamed.reasonCode, 'model_response_too_large');
+  assert.ok(events.some((event) => event.type === 'done' && JSON.stringify(event).includes('model_response_too_large')));
+}
+
+/** 动作已经执行时，超限只标记回复不完整，不能诱导用户重复动作。
+ * @param server - 使用超限模型替身的真实会话服务
+ * @returns 无返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-19
+ */
+async function assertOversizedExecution(server: Awaited<ReturnType<ObservabilityFixture['start']>>): Promise<void> {
+  const executedEvents: Array<{ type: string; text?: string }> = [];
+  const normalExecuted = await server.session.turn('列出今天的集成任务');
+  assert.equal(normalExecuted.status, 'executed');
+  assert.equal((normalExecuted as { reasonCode?: string }).reasonCode, 'model_response_too_large');
+  assert.match(normalExecuted.reply, /已执行/);
+  const executed = await server.session.turnStreamed('列出今天的集成任务', (event) => executedEvents.push(event));
+  assert.equal(executed.status, 'executed');
+  assert.equal((executed as { reasonCode?: string }).reasonCode, 'model_response_too_large');
+  assert.ok(executed.actionResult);
+  assert.match(executed.reply, /已执行/);
+  assert.ok(executedEvents.some((event) => event.type === 'delta' && event.text === 'partial-private'));
+  assert.ok(executedEvents.some((event) => event.type === 'done' && JSON.stringify(event).includes('model_response_too_large')));
+}
+
+/** HTTP 可观察增量仍必须伴随失败原因，且截断内容不能进入历史。
+ * @param server - 使用超限模型替身的真实会话服务
+ * @param state - 上游流取消状态
+ * @returns 无返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-19
+ */
+async function assertOversizedHttpStream(server: Awaited<ReturnType<ObservabilityFixture['start']>>, state: { isCancelled: boolean }): Promise<void> {
+  const httpStream = await server.app.inject({ method: 'POST', url: '/api/chat?stream=1', payload: { message: '列出今天的集成任务' } });
+  assert.match(httpStream.body, /partial-private/);
+  assert.match(httpStream.body, /model_response_too_large/);
+  assert.match(httpStream.body, /"status":"executed"/);
+  assert.equal(state.isCancelled, true);
+  const messages = (server.session as unknown as { recentMessages: Array<{ text: string }> }).recentMessages;
+  assert.ok(messages.every((message) => !message.text.includes('partial-private')));
+}
+
+test('模型响应超限时普通和流式会话明确失败，不保存截断增量', () => withObservabilityFixture(async (fixture) => {
+  const state = { isCancelled: false }; installOversizedModel(state);
+  const probe = createServer().listen(0, '127.0.0.1'); await once(probe, 'listening');
+  const address = probe.address(); assert.ok(address && typeof address !== 'string');
+  await new Promise<void>((resolve) => probe.close(() => resolve()));
+  const server = await fixture.start({ mode: 'brain', port: address.port });
+  await assertOversizedFallback(server);
+  await assertOversizedExecution(server);
+  await assertOversizedHttpStream(server, state);
+}));
 
 /**
  * 模拟普通模型失败、流式调用等待超时取消的响应。

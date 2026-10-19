@@ -4,122 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>IAR Agent Sandbox</title>
-<style>
-  :root {
-    --bg: #f4f6fa;
-    --panel: #ffffff;
-    --border: #e3e8f0;
-    --text: #1f2937;
-    --muted: #6b7280;
-    --accent: #2563eb;
-    --accent-soft: #dbeafe;
-    --user-bg: #2563eb;
-    --bot-bg: #ffffff;
-    --ok: #059669;
-    --warn: #d97706;
-    --err: #dc2626;
-    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-  }
-  header {
-    display: flex; align-items: center; gap: 12px;
-    padding: 12px 20px;
-    background: var(--panel);
-    border-bottom: 1px solid var(--border);
-  }
-  header h1 { font-size: 16px; font-weight: 600; }
-  .badge {
-    font-size: 12px; padding: 2px 10px; border-radius: 999px;
-    background: var(--accent-soft); color: var(--accent); font-weight: 500;
-  }
-  .badge.scripted { background: #fef3c7; color: var(--warn); }
-  main {
-    flex: 1; display: grid; grid-template-columns: minmax(360px, 1fr) 400px;
-    gap: 16px; padding: 16px 20px; min-height: 0;
-  }
-  .chat {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
-    display: flex; flex-direction: column; min-height: 0; overflow: hidden;
-  }
-  .messages { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
-  .msg { max-width: 78%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
-  .msg.user { align-self: flex-end; background: var(--user-bg); color: #fff; border-bottom-right-radius: 4px; }
-  .msg.bot { align-self: flex-start; background: var(--bot-bg); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
-  .msg .meta { display: block; margin-top: 6px; font-size: 11px; color: var(--muted); }
-  /* Markdown 渲染 */
-  .md-body { display: block; }
-  .md-body p { margin: 4px 0; }
-  .md-body ul, .md-body ol { margin: 4px 0; padding-left: 18px; }
-  .md-body li { margin: 2px 0; }
-  .md-body code { background: rgba(0,0,0,.06); padding: 1px 4px; border-radius: 4px; font-family: var(--mono); font-size: 12px; }
-  .md-body pre { background: #f6f8fa; border: 1px solid var(--border); border-radius: 6px; padding: 8px; overflow-x: auto; margin: 6px 0; }
-  .md-body pre code { background: none; padding: 0; }
-  .md-body h3, .md-body h4, .md-body h5 { margin: 8px 0 4px; font-size: 13px; }
-  .md-body strong { font-weight: 600; }
-
-  .confirm-box {
-    align-self: flex-start; background: #fffbeb; border: 1px solid #fde68a;
-    border-radius: 12px; padding: 12px 14px; font-size: 13px; max-width: 78%;
-  }
-  .confirm-box .actions { margin-top: 10px; display: flex; gap: 8px; }
-  .input-bar {
-    display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--border); background: #fafbfd;
-  }
-  .input-bar input {
-    flex: 1; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px;
-    font-size: 14px; outline: none;
-  }
-  .input-bar input:focus { border-color: var(--accent); }
-  button {
-    cursor: pointer; border: none; border-radius: 8px; padding: 9px 16px;
-    font-size: 13px; font-weight: 500; background: var(--accent); color: #fff;
-  }
-  button:disabled { opacity: .5; cursor: not-allowed; }
-  button.ghost { background: #eef2f7; color: var(--text); }
-  button.danger { background: var(--err); }
-  button.ok { background: var(--ok); }
-  aside {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
-    padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px;
-  }
-  aside h2 { font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: .04em; }
-  .kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; font-size: 13px; }
-  .kv dt { color: var(--muted); }
-  .kv dd { font-family: var(--mono); font-size: 12px; word-break: break-all; }
-  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; background: var(--accent-soft); color: var(--accent); }
-  .pill.high { background: #fee2e2; color: var(--err); }
-  .events { list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
-  .events li {
-    font-family: var(--mono); padding: 5px 8px; background: #f8fafc; border: 1px solid var(--border);
-    border-radius: 6px; display: flex; justify-content: space-between; gap: 8px;
-  }
-  .events li .t { color: var(--muted); flex-shrink: 0; }
-  details { border: 1px solid var(--border); border-radius: 8px; }
-  details summary {
-    cursor: pointer; padding: 8px 10px; font-size: 12px; color: var(--muted); user-select: none;
-  }
-  details pre {
-    max-height: 320px; overflow: auto; padding: 10px; font-size: 11px; font-family: var(--mono);
-    border-top: 1px solid var(--border); background: #f8fafc; border-radius: 0 0 8px 8px;
-  }
-  .toolbar { display: flex; gap: 8px; }
-  .toolbar button { flex: 1; }
-  #compactResult { font-size: 12px; line-height: 1.6; padding: 8px 10px; border-radius: 8px; display: none; }
-  #compactResult.show { display: block; }
-  #compactResult.ok { background: #ecfdf5; color: var(--ok); border: 1px solid #a7f3d0; }
-  #compactResult.fail { background: #fef2f2; color: var(--err); border: 1px solid #fecaca; }
-  .hint { font-size: 12px; color: var(--muted); line-height: 1.7; }
-</style>
+<!-- 启动时将本地样式内联，首页不依赖后续静态资源请求。
+     此标记必须唯一；缺失或重复会使服务安全地启动失败。 -->
+<!-- IAR_SANDBOX_STYLES -->
 </head>
 <body>
+<!-- 模式徽标先显示加载状态，脚本读取当前会话快照后更新。
+     标题与模式使用可见文字，不仅通过颜色传达运行状态。 -->
 <header>
   <h1>IAR Agent Sandbox</h1>
   <span id="modeBadge" class="badge">加载中…</span>
@@ -127,6 +18,9 @@
   <span class="hint">意图 → Function → Plugin → 执行 · 全链路可调试</span>
 </header>
 <main>
+  <!-- 聊天区按消息顺序追加输入、增量及确认控件。
+       表单提交由脚本拦截，避免导航导致标签页会话丢失。
+       请求进行时输入和确认操作都受同一个忙碌状态约束。 -->
   <section class="chat">
     <div id="messages" class="messages"></div>
     <form id="inputBar" class="input-bar">
@@ -134,6 +28,8 @@
       <button id="sendBtn" type="submit">发送</button>
     </form>
   </section>
+  <!-- 调试区读取当前独立会话的快照，而不是共享兼容入口。
+       状态展示仅供观察；执行权限仍由服务端策略决定。 -->
   <aside>
     <div>
       <h2>路由</h2>
@@ -151,14 +47,17 @@
     </div>
     <div>
       <h2>最近事件</h2>
+      <!-- 事件列表由脚本写入文本，不应将事件内容作为可信 HTML。 -->
       <ul id="eventList" class="events" style="margin-top:8px"></ul>
     </div>
+    <!-- 原生折叠控件保留键盘操作；长 JSON 在内部滚动。 -->
     <details>
       <summary>BehaviorContext（点击查看 JSON）</summary>
       <pre id="contextJson">{}</pre>
     </details>
     <div>
       <h2>上下文压缩</h2>
+      <!-- 压缩和重置不是表单提交；执行期间确认控件保持禁用。 -->
       <div class="toolbar" style="margin-top:8px">
         <button id="compactBtn" class="ghost" type="button">触发压缩</button>
         <button id="resetBtn" class="ghost" type="button">重置会话</button>
@@ -170,373 +69,8 @@
     </p>
   </aside>
 </main>
-<script>
-(function () {
-  var messagesEl = document.getElementById('messages');
-  var inputEl = document.getElementById('messageInput');
-  var sendBtn = document.getElementById('sendBtn');
-  var pendingRunId = null;
-
-  /** HTML 转义：任何模型输出渲染前必须先转义，防注入。 */
-  function escapeHtml(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
-  /** 行内 Markdown：代码、加粗、斜体。输入必须是已转义文本。 */
-  function inlineMd(s) {
-    return s
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>');
-  }
-
-  /** 轻量 Markdown 渲染：代码块、标题、无序/有序列表、段落；先转义再渲染，安全子集。 */
-  function renderMarkdown(src) {
-    var codeBlocks = [];
-    var text = String(src).replace(/```([\s\S]*?)```/g, function (_, code) {
-      codeBlocks.push(code.replace(/^\n+|\n+$/g, ''));
-      return ' ' + (codeBlocks.length - 1) + ' ';
-    });
-    var lines = escapeHtml(text).split('\n');
-    var html = '';
-    var inUl = false;
-    var inOl = false;
-    function closeLists() {
-      if (inUl) { html += '</ul>'; inUl = false; }
-      if (inOl) { html += '</ol>'; inOl = false; }
-    }
-    for (var i = 0; i < lines.length; i++) {
-      var trimmed = lines[i].trim();
-      var ulMatch = /^[-*]\s+(.+)/.exec(trimmed);
-      var olMatch = /^\d+[.、)]\s*(.+)/.exec(trimmed);
-      if (ulMatch) {
-        if (inOl) { html += '</ol>'; inOl = false; }
-        if (!inUl) { html += '<ul>'; inUl = true; }
-        html += '<li>' + inlineMd(ulMatch[1]) + '</li>';
-        continue;
-      }
-      if (olMatch) {
-        if (inUl) { html += '</ul>'; inUl = false; }
-        if (!inOl) { html += '<ol>'; inOl = true; }
-        html += '<li>' + inlineMd(olMatch[1]) + '</li>';
-        continue;
-      }
-      closeLists();
-      if (trimmed === '') continue;
-      var h = /^(#{1,4})\s+(.+)$/.exec(trimmed);
-      if (h) {
-        var level = h[1].length + 2;
-        html += '<h' + level + '>' + inlineMd(h[2]) + '</h' + level + '>';
-        continue;
-      }
-      html += '<p>' + inlineMd(lines[i]) + '</p>';
-    }
-    closeLists();
-    return html.replace(/ (\d+) /g, function (_, idx) {
-      return '<pre><code>' + escapeHtml(codeBlocks[+idx]) + '</code></pre>';
-    });
-  }
-
-  function appendMsg(role, text, meta) {
-    var div = document.createElement('div');
-    div.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
-    if (role === 'user') {
-      div.textContent = text;
-    } else {
-      var body = document.createElement('div');
-      body.className = 'md-body';
-      body.innerHTML = renderMarkdown(text);
-      div.appendChild(body);
-    }
-    if (meta) {
-      var span = document.createElement('span');
-      span.className = 'meta';
-      span.textContent = meta;
-      div.appendChild(span);
-    }
-    messagesEl.appendChild(div);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-    return div;
-  }
-
-  function showConfirmBox(pending, onDone) {
-    var box = document.createElement('div');
-    box.className = 'confirm-box';
-    var title = document.createElement('div');
-    title.textContent = '待确认动作：' + pending.functionId + ' / ' + pending.pluginId + '（风险等级 ' + pending.riskLevel + '）';
-    var detail = document.createElement('div');
-    detail.style.cssText = 'margin-top:6px;font-family:var(--mono);font-size:11px;color:var(--muted)';
-    detail.textContent = JSON.stringify(pending.input);
-    var actions = document.createElement('div');
-    actions.className = 'actions';
-    var yes = document.createElement('button');
-    yes.className = 'ok';
-    yes.textContent = '确认执行';
-    var no = document.createElement('button');
-    no.className = 'danger';
-    no.textContent = '取消';
-    actions.appendChild(yes);
-    actions.appendChild(no);
-    box.appendChild(title);
-    box.appendChild(detail);
-    box.appendChild(actions);
-    messagesEl.appendChild(box);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-    yes.onclick = function () { box.remove(); onDone(true); };
-    no.onclick = function () { box.remove(); onDone(false); };
-  }
-
-  function setBusy(busy) {
-    sendBtn.disabled = busy;
-    inputEl.disabled = busy;
-  }
-
-  function api(path, body) {
-    return fetch(path, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body || {})
-    }).then(function (res) { return res.json(); });
-  }
-
-  var STAGE_LABELS = {
-    semantic: '正在理解意图…',
-    route: '正在路由…',
-    action: '正在执行插件…',
-    response: '正在生成回复…'
-  };
-
-  /** 创建流式助手气泡：流式期间纯文本追加，finalize 时渲染 Markdown；stage 行展示阶段进度。 */
-  function createStreamBubble() {
-    var div = document.createElement('div');
-    div.className = 'msg bot';
-    var textEl = document.createElement('div');
-    textEl.className = 'md-body';
-    var stageEl = document.createElement('span');
-    stageEl.className = 'meta';
-    stageEl.textContent = STAGE_LABELS.semantic;
-    div.appendChild(textEl);
-    div.appendChild(stageEl);
-    messagesEl.appendChild(div);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-    var gotDelta = false;
-    return {
-      setStage: function (stage) {
-        if (!gotDelta && STAGE_LABELS[stage]) stageEl.textContent = STAGE_LABELS[stage];
-      },
-      appendDelta: function (text) {
-        // 收到第一个增量即收尾阶段行，开始逐字渲染回复（纯文本，结束时统一渲染 Markdown）。
-        if (!gotDelta) { gotDelta = true; stageEl.remove(); }
-        textEl.textContent += text;
-        messagesEl.scrollTop = messagesEl.scrollHeight;
-      },
-      finalize: function (result) {
-        stageEl.remove();
-        if (!result) return;
-        if (textEl.textContent.length === 0 && result.reply) textEl.textContent = result.reply;
-        // 流式结束，把累积正文渲染为 Markdown（内部已做 HTML 转义）。
-        textEl.innerHTML = renderMarkdown(textEl.textContent);
-        var metaText = result.status === 'executed'
-          ? '已执行 · ' + (result.route && result.route.functionId ? result.route.functionId : '')
-          : result.status === 'awaiting_confirmation' ? '等待确认'
-          : result.status === 'clarification' ? '需要澄清' : '失败';
-        var meta = document.createElement('span');
-        meta.className = 'meta';
-        meta.textContent = metaText;
-        div.appendChild(meta);
-        messagesEl.scrollTop = messagesEl.scrollHeight;
-        if (result.status === 'awaiting_confirmation' && result.pending) runConfirm(result.pending);
-      },
-      remove: function () { div.remove(); }
-    };
-  }
-
-  /** 优先走 SSE 流式；res 非 2xx 或流读取失败时抛错，由调用方回退 JSON 路径。 */
-  function streamChat(text) {
-    return fetch('/api/chat?stream=1', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text })
-    }).then(function (res) {
-      if (!res.ok || !res.body) throw new Error('stream unavailable');
-      var bubble = createStreamBubble();
-      var reader = res.body.getReader();
-      var decoder = new TextDecoder();
-      var buffer = '';
-      var doneResult = null;
-      var handleLine = function (line) {
-        if (line.indexOf('data: ') !== 0) return;
-        var event;
-        try { event = JSON.parse(line.slice('data: '.length)); } catch (err) { return; }
-        if (event.type === 'stage') bubble.setStage(event.stage);
-        else if (event.type === 'delta') bubble.appendDelta(event.text);
-        else if (event.type === 'done') doneResult = event.result;
-        else if (event.type === 'error') bubble.appendDelta(event.message || '处理出错');
-      };
-      var pump = function () {
-        return reader.read().then(function (chunk) {
-          if (chunk.done) {
-            bubble.finalize(doneResult);
-            return;
-          }
-          buffer += decoder.decode(chunk.value, { stream: true });
-          var blocks = buffer.split('\n\n');
-          buffer = blocks.pop() || '';
-          blocks.forEach(function (block) {
-            block.split('\n').forEach(handleLine);
-          });
-          return pump();
-        });
-      };
-      return pump().catch(function (err) {
-        bubble.remove();
-        throw err;
-      });
-    });
-  }
-
-  /** 确认/取消待确认动作，流程保持走 /api/confirm。 */
-  function runConfirm(pending) {
-    showConfirmBox(pending, function (accepted) {
-      setBusy(true);
-      api('/api/confirm', { accepted: accepted }).then(function (confirmResult) {
-        setBusy(false);
-        if (confirmResult.status === 'executed') {
-          appendMsg('bot', confirmResult.reply, '已执行');
-        } else if (confirmResult.status === 'cancelled') {
-          appendMsg('bot', confirmResult.reply, '已取消');
-        } else {
-          appendMsg('bot', confirmResult.reply || '操作失败', '失败');
-        }
-        refreshState();
-      });
-    });
-  }
-
-  function handleTurnResult(result) {
-    if (result.status === 'awaiting_confirmation' && result.pending) {
-      appendMsg('bot', result.reply, '等待确认');
-      runConfirm(result.pending);
-    } else if (result.status === 'executed') {
-      var meta = '已执行 · ' + (result.route && result.route.functionId ? result.route.functionId : '');
-      appendMsg('bot', result.reply, meta);
-    } else {
-      appendMsg('bot', result.reply, result.status === 'clarification' ? '需要澄清' : '失败');
-    }
-  }
-
-  document.getElementById('inputBar').onsubmit = function (event) {
-    event.preventDefault();
-    var text = inputEl.value.trim();
-    if (!text) return;
-    inputEl.value = '';
-    appendMsg('user', text);
-    setBusy(true);
-    streamChat(text)
-      .catch(function () {
-        // 流式不可用（如 5xx）时回退原有 JSON 路径。
-        return api('/api/chat', { message: text }).then(handleTurnResult);
-      })
-      .catch(function () {
-        appendMsg('bot', '请求失败，请稍后重试。', '失败');
-      })
-      .then(function () {
-        setBusy(false);
-        refreshState();
-      });
-  };
-
-  document.getElementById('compactBtn').onclick = function () {
-    var btn = this;
-    btn.disabled = true;
-    api('/api/compact').then(function (result) {
-      btn.disabled = false;
-      var el = document.getElementById('compactResult');
-      el.className = 'show ' + (result.ok ? 'ok' : 'fail');
-      if (result.ok) {
-        el.textContent = '压缩成功：' + (result.summary || '') + '（哈希 ' + result.hashBefore.slice(0, 12) + '… → ' + result.hashAfter.slice(0, 12) + '…）';
-      } else {
-        el.textContent = '压缩失败：' + (result.reasonCode || '') + ' ' + (result.error || '') + '（哈希保持不变）';
-      }
-      refreshState();
-    });
-  };
-
-  document.getElementById('resetBtn').onclick = function () {
-    api('/api/reset').then(function () {
-      messagesEl.innerHTML = '';
-      appendMsg('bot', '会话已重置，开始新的对话吧。');
-      document.getElementById('compactResult').className = '';
-      refreshState();
-    });
-  };
-
-  function refreshState() {
-    fetch('/api/state').then(function (res) { return res.json(); }).then(function (state) {
-      var badge = document.getElementById('modeBadge');
-      badge.textContent = state.mode === 'brain' ? 'brain real · 真实 LLM' : 'brain scripted · 离线假大脑';
-      badge.className = 'badge' + (state.mode === 'brain' ? '' : ' scripted');
-      var route = state.context.route || {};
-      document.getElementById('routeFunction').textContent = route.functionId || '-';
-      document.getElementById('routePlugin').textContent = route.pluginId || '-';
-      document.getElementById('routeStatus').textContent = state.context.workflow.status + ' / ' + state.context.workflow.currentStep;
-      document.getElementById('routeConfidence').textContent = state.context.intent && state.context.intent !== 'unknown'
-        ? state.context.intent
-        : '-';
-      var score = state.context.action && state.context.action.name !== 'unknown' ? state.context.action.name + '（' + state.context.action.status + '）' : '-';
-      document.getElementById('routeScore').textContent = score;
-      document.getElementById('contextJson').textContent = JSON.stringify(state.context, null, 2);
-      var list = document.getElementById('eventList');
-      list.innerHTML = '';
-      state.events.slice(-8).forEach(function (event) {
-        var li = document.createElement('li');
-        var name = document.createElement('span');
-        name.textContent = event.eventName;
-        var time = document.createElement('span');
-        time.className = 't';
-        time.textContent = event.eventId;
-        li.appendChild(name);
-        li.appendChild(time);
-        list.appendChild(li);
-      });
-    });
-  }
-
-  var SUBSYSTEMS = [
-    ['knowledge.query', '平台通用知识'],
-    ['dip.manage', '数据集成管理'],
-    ['job.monitor', '任务调度监控'],
-    ['api.gateway', 'API 网关管理'],
-    ['dataset.query', '数据资产目录'],
-    ['report.center', '报表中心'],
-    ['system.status', '系统状态与告警'],
-    ['account.privilege', '账户与权限'],
-    ['ticket.create', '工单支持'],
-    ['human.transfer', '人工服务']
-  ];
-
-  function renderSubsystems() {
-    var list = document.getElementById('subsystemList');
-    list.innerHTML = '';
-    SUBSYSTEMS.forEach(function (item) {
-      var li = document.createElement('li');
-      li.style.cssText = 'display:flex;justify-content:space-between;gap:8px;padding:4px 8px;background:#f8fafc;border:1px solid var(--border);border-radius:6px';
-      var name = document.createElement('span');
-      name.textContent = item[1];
-      var id = document.createElement('span');
-      id.style.cssText = 'font-family:var(--mono);color:var(--muted);font-size:11px';
-      id.textContent = item[0];
-      li.appendChild(name);
-      li.appendChild(id);
-      list.appendChild(li);
-    });
-  }
-
-  appendMsg('bot', '你好，我是 IAR Agent Sandbox。当前模拟的企业数据平台包含 10 个子系统：平台通用知识、数据集成管理（DIP）、任务调度监控、API 网关管理、数据资产目录、报表中心、系统状态与告警、账户与权限、工单支持与人工服务。输入一句话即可体验「意图 → Function → Plugin → 执行」全链路，右侧调试面板可查看路由证据、事件流和 BehaviorContext。');
-  renderSubsystems();
-  refreshState();
-  setInterval(refreshState, 3000);
-})();
-</script>
+<!-- 脚本按固定顺序内联，以共享词法作用域并保持首页自包含。
+     会话凭据不写入模板，也不通过页面资源 URL 传递。 -->
+<!-- IAR_SANDBOX_SCRIPT -->
 </body>
 </html>
