@@ -10,6 +10,11 @@ import { SCHEMA_VERSIONS } from './versions.js';
 
 /** 有限事件名称集合，保证投影语义稳定。 */
 export const EventNameSchema = Type.Union([
+  // 会话生命周期和消息事件供异步持久化订阅使用。
+  Type.Literal('message.received'),
+  Type.Literal('message.sent'),
+  Type.Literal('session.restored'),
+  Type.Literal('context.updated'),
   // 插件生命周期事件用于注册表和审计。
   Type.Literal('plugin.discovered'),
   Type.Literal('plugin.validated'),

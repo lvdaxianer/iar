@@ -189,6 +189,10 @@ export type BehaviorContext = {
 
 /** IAR 有限事件名称。 */
 export type EventName =
+  | 'message.received'
+  | 'message.sent'
+  | 'session.restored'
+  | 'context.updated'
   | 'plugin.discovered'
   | 'plugin.validated'
   | 'plugin.installed'

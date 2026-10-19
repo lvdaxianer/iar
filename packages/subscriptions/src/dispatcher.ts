@@ -222,6 +222,10 @@ function validateEvent(event: unknown, maxRecursionDepth: number): 'unknown_even
   if (!isPlainObject(event)) return 'invalid_event';
   const candidate = event as Partial<DispatchEvent>;
   if (!isNonEmptyString(candidate.eventId) || !isNonEmptyString(candidate.eventName) || !isNonEmptyString(candidate.runId) || !isNonEmptyString(candidate.correlationId) || !isJsonValue(candidate.payload)) return 'invalid_event';
+  if (candidate.sessionId !== undefined && !isNonEmptyString(candidate.sessionId)) return 'invalid_event';
+  if (candidate.messageId !== undefined && !isNonEmptyString(candidate.messageId)) return 'invalid_event';
+  if (candidate.traceId !== undefined && !isNonEmptyString(candidate.traceId)) return 'invalid_event';
+  if (candidate.occurredAt !== undefined && !isNonEmptyString(candidate.occurredAt)) return 'invalid_event';
   if (candidate.causationId !== undefined && !isNonEmptyString(candidate.causationId)) return 'invalid_event';
   if (!isKnownEventName(candidate.eventName)) return 'unknown_event';
   const depth = candidate.recursionDepth ?? 0;

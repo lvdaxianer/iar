@@ -56,6 +56,14 @@ export type DispatchEvent = {
   eventName: string;
   // runId 绑定一次可恢复运行。
   runId: string;
+  // sessionId 绑定会话聚合；兼容非会话 Runtime 事件时允许省略。
+  sessionId?: string;
+  // messageId 绑定消息事件；非消息事件可以省略。
+  messageId?: string;
+  // traceId 与 correlationId 等价时由宿主省略，保留显式链路标识能力。
+  traceId?: string;
+  // 事件发生时间；未提供时由订阅桥按 eventId 稳定补齐。
+  occurredAt?: string;
   // correlationId 贯穿派生事件和重试。
   correlationId: string;
   // payload 只能包含可重放 JSON。
