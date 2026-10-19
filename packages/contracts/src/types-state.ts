@@ -114,6 +114,8 @@ export type PendingInput = {
   kind: 'slot' | 'selection' | 'confirmation' | 'input';
   // status 记录输入是否已收到。
   status: 'required' | 'received' | 'none';
+  // options 是有限澄清选项，只用于下一轮理解，不授予执行权限。
+  options?: Array<{ key: string; label: string }>;
 };
 
 /** 高风险动作的确认状态及绑定范围。 */
@@ -201,6 +203,7 @@ export type EventName =
   | 'action.started'
   | 'action.completed'
   | 'action.failed'
+  | 'context.clarification.updated'
   | 'context.compacted'
   | 'context.compaction_failed';
 

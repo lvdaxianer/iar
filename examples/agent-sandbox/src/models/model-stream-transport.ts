@@ -4,14 +4,19 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import { ModelProviderError } from '@iar/decision';
+import { ModelProviderError, type ClarificationMetadata } from '@iar/decision';
 import { logModelInvalidResponse, logModelNetworkFailure, logModelSuccess } from '../safe-log.js';
 import { cancelModelBody, countModelBytes, fetchModelResponse, ModelResponseLimitError, type ModelTransportRequest } from './model-transport.js';
 
 /** SSE 帧最小形状。 */
 type StreamChunk = { choices?: Array<{ delta?: { content?: unknown } }> };
+export type StreamResponseEnvelope = {
+  schemaVersion: 'iar.response/v1';
+  text: string;
+  clarification?: ClarificationMetadata;
+};
 /** 流读取状态，仅用于本次调用。 */
-type StreamState = { pending: string; chunks: string[]; onDelta: (delta: string) => void };
+type StreamState = { pending: string; chunks: string[]; onDelta: (delta: string) => void; mode: 'unknown' | 'text' | 'structured'; probe: string };
 
 /**
  * 调用模型流式接口并返回完整正文。
@@ -22,7 +27,7 @@ type StreamState = { pending: string; chunks: string[]; onDelta: (delta: string)
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export async function callModelStream(request: ModelTransportRequest, onDelta: (delta: string) => void): Promise<string> {
+export async function callModelStream(request: ModelTransportRequest, onDelta: (delta: string) => void): Promise<string | StreamResponseEnvelope> {
   const startTime = Date.now();
   const response = await fetchModelResponse(request, true, startTime);
   // 无响应流属于无效响应。
@@ -36,8 +41,13 @@ export async function callModelStream(request: ModelTransportRequest, onDelta: (
     logModelInvalidResponse(startTime, response.status);
     throw new ModelProviderError('provider_failed');
   }
+  const structured = parseStructuredResponse(content);
+  if (content.trimStart().startsWith('{') && !structured) {
+    logModelInvalidResponse(startTime, response.status);
+    throw new ModelProviderError('provider_failed');
+  }
   logModelSuccess(startTime, response.status);
-  return content;
+  return structured ?? content;
 }
 
 /**
@@ -53,7 +63,7 @@ export async function callModelStream(request: ModelTransportRequest, onDelta: (
 async function readModelStream(body: ReadableStream<Uint8Array>, onDelta: (delta: string) => void,
   timing: { startTime: number; signal: AbortSignal; status: number }): Promise<string> {
   const reader = body.getReader();
-  const state: StreamState = { pending: '', chunks: [], onDelta };
+  const state: StreamState = { pending: '', chunks: [], onDelta, mode: 'unknown', probe: '' };
   try {
     await consumeStream(reader, state);
   } catch (error) {
@@ -64,7 +74,40 @@ async function readModelStream(body: ReadableStream<Uint8Array>, onDelta: (delta
     // 无论读取结束或异常，释放持有的 reader 锁。
     reader.releaseLock();
   }
+  if (state.mode === 'unknown' && state.probe.length > 0) deliverDelta(state, state.probe);
   return state.chunks.join('');
+}
+
+/** 解析流式响应中的可选结构化响应；普通正文保持原样。 */
+function parseStructuredResponse(content: string): StreamResponseEnvelope | undefined {
+  const first = content.trimStart();
+  if (!first.startsWith('{')) return undefined;
+  let raw: unknown;
+  try { raw = JSON.parse(first) as unknown; } catch { return undefined; }
+  if (!isRecord(raw) || raw.schemaVersion !== 'iar.response/v1' || !isNonEmptyString(raw.text)) return undefined;
+  if (raw.citations !== undefined && (!Array.isArray(raw.citations) || !raw.citations.every(isNonEmptyString))) return undefined;
+  if (raw.clarification !== undefined && !isClarificationMetadata(raw.clarification)) return undefined;
+  return structuredClone(raw) as StreamResponseEnvelope;
+}
+
+function isClarificationMetadata(value: unknown): value is ClarificationMetadata {
+  if (!isRecord(value) || !['slot', 'selection', 'input'].includes(String(value.kind)) || value.status !== 'required') return false;
+  if (value.options === undefined) return true;
+  if (!Array.isArray(value.options) || value.options.length === 0 || value.options.length > 12) return false;
+  const keys = new Set<string>();
+  return value.options.every((option) => {
+    if (!isRecord(option) || !isNonEmptyString(option.key) || option.key.length > 60 || !isNonEmptyString(option.label) || option.label.length > 200 || keys.has(option.key)) return false;
+    keys.add(option.key);
+    return true;
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
 }
 
 /** 将超限与连接故障分开记录，并保持对外稳定错误。
@@ -144,8 +187,19 @@ function processStreamLine(state: StreamState, line: string): void {
   }
   const delta = chunk.choices?.[0]?.delta?.content;
   // 有效文本才交给界面并加入最终结果。
-  if (typeof delta === 'string' && delta.length > 0) {
-    state.chunks.push(delta);
-    state.onDelta(delta);
+  if (typeof delta === 'string' && delta.length > 0) deliverDelta(state, delta);
+}
+
+/** 兼容纯文本增量和需要保存 pending 的完整 JSON 响应。 */
+function deliverDelta(state: StreamState, delta: string): void {
+  if (state.mode === 'unknown') {
+    state.probe += delta;
+    const first = state.probe.trimStart().slice(0, 1);
+    if (first.length === 0) return;
+    state.mode = first === '{' ? 'structured' : 'text';
+    delta = state.probe;
+    state.probe = '';
   }
+  state.chunks.push(delta);
+  if (state.mode === 'text') state.onDelta(delta);
 }

@@ -8,7 +8,7 @@
  * @date 2026-10-18
  */
 import { randomUUID } from 'node:crypto';
-import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type WorkflowDefinition } from '@iar/contracts';
+import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type PendingInput, type WorkflowDefinition } from '@iar/contracts';
 import { ModelGateway, ModelProfileRegistry } from '@iar/decision';
 import { PluginHost } from '@iar/plugin-host';
 import { BehaviorContextProjector, type AsyncDecisionAdapter } from '@iar/runtime';
@@ -207,6 +207,12 @@ export class SandboxSessionCore {
     this.workflow.cancel(this.pending.action.runId);
     await this.drainWorkflowEvents();
     this.pending = null;
+  }
+
+  /** 将响应模型的有限澄清状态写成事件并立即投影，再异步保存快照。 */
+  protected async updateClarification(pending: PendingInput): Promise<void> {
+    this.workflowEventLog.clarificationUpdated(SESSION_RUN_ID, pending);
+    await this.drainWorkflowEvents();
   }
 
 

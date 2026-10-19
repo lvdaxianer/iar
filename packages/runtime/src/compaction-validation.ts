@@ -220,9 +220,21 @@ export function normalizeCompactionState(state: Record<string, unknown>, current
   // slots 的完整结构随后由 Projector Schema 再次验证。
   // Projector 哈希校验最终决定候选是否可接受。
   mergeObject(next.workflow, recordValue(state.workflow), ['workflowId', 'currentStep', 'status']);
-  mergeObject(next.pending, recordValue(state.pending), ['kind', 'status']);
+  const pending = recordValue(state.pending);
+  mergeObject(next.pending, pending, ['kind', 'status']);
+  if (pending?.options !== undefined && isPendingOptions(pending.options)) next.pending.options = structuredClone(pending.options);
   mergeObject(next.confirmation, recordValue(state.confirmation), ['state', 'scopeHash', 'confirmedAt']);
   return next;
+}
+
+/** 压缩候选只允许有限且去重的澄清选项进入可信旧状态。 */
+function isPendingOptions(value: unknown): value is NonNullable<BehaviorContext['pending']['options']> {
+  if (!Array.isArray(value) || value.length > 12) return false;
+  const keys = new Set<string>();
+  return value.every((option) => isRecord(option)
+    && typeof option.key === 'string' && option.key.length > 0 && option.key.length <= 60
+    && typeof option.label === 'string' && option.label.length > 0 && option.label.length <= 200
+    && !keys.has(option.key) && (keys.add(option.key), true));
 }
 // 规范化之后仍必须调用 replaceIfIntegrityMatches。
 // 该调用阻止 subject、route、workflow 或 confirmation 被改变。

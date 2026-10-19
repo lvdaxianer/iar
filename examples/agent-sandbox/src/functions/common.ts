@@ -8,7 +8,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import { MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_FIELDS, type JsonValue } from '@iar/contracts';
+import { MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, type JsonValue } from '@iar/contracts';
 import type { PluginHandlerResult } from '@iar/plugin-sdk';
 
 /** Function 操作类型：read 免确认直接执行，action 需走确认流。 */
@@ -107,7 +107,7 @@ export function findSandboxOperation(operations: readonly SandboxOperation[], na
  * @date 2026-10-18
  */
 export function succeed(operation: string, payload: Record<string, JsonValue>, declaredFacts: Record<string, JsonValue> = {}): PluginHandlerResult {
-  const facts = selectTrustedFacts({ ...payload, ...declaredFacts });
+  const facts = selectTrustedFacts(declaredFacts);
   return { status: 'succeeded', output: { accepted: true, operation, ...payload, facts } };
 }
 
@@ -118,7 +118,12 @@ function isBoundedFactValue(value: JsonValue): boolean {
 
 /** 仅复制 Handler 明确公开的有限字段，避免把完整业务对象带入上下文。 */
 function selectTrustedFacts(values: Record<string, JsonValue>): Record<string, JsonValue> {
-  return Object.fromEntries(Object.entries(values).filter(([field, value]) => TRUSTED_FACT_FIELDS.includes(field as typeof TRUSTED_FACT_FIELDS[number]) && isBoundedFactValue(value)));
+  return Object.fromEntries(Object.entries(values).filter(([field, value]) => isTrustedFactKey(field) && isBoundedFactValue(value)).slice(0, MAX_TRUSTED_FACTS));
+}
+
+/** 事实键只能是稳定标识，核心不解释业务语义。 */
+function isTrustedFactKey(value: string): boolean {
+  return value.length <= MAX_TRUSTED_FACT_KEY_LENGTH && new RegExp(TRUSTED_FACT_KEY_PATTERN).test(value);
 }
 
 /**
@@ -165,7 +170,7 @@ export function sandboxInputSchema(): Record<string, unknown> {
  */
 export function sandboxOutputSchema(): Record<string, unknown> {
   const factValue = { anyOf: [{ type: 'string', maxLength: MAX_TRUSTED_FACT_STRING_LENGTH }, { type: 'number' }, { type: 'boolean' }, { type: 'null' }] };
-  const facts = { type: 'object', maxProperties: MAX_TRUSTED_FACTS, propertyNames: { enum: [...TRUSTED_FACT_FIELDS] }, additionalProperties: factValue };
+  const facts = { type: 'object', maxProperties: MAX_TRUSTED_FACTS, propertyNames: { pattern: TRUSTED_FACT_KEY_PATTERN, maxLength: MAX_TRUSTED_FACT_KEY_LENGTH }, additionalProperties: factValue };
   return {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     oneOf: [

@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { SCHEMA_VERSIONS, validateContract, type ActionDefinition, type ActionResult, type EventEnvelope, type JsonValue } from '@iar/contracts';
+import { SCHEMA_VERSIONS, validateContract, type ActionDefinition, type ActionResult, type EventEnvelope, type JsonValue, type PendingInput } from '@iar/contracts';
 import type { WorkflowRun } from './types.js';
 
 /** WorkflowEventLog 的时钟和链路配置。 */
@@ -122,6 +122,11 @@ export class WorkflowEventLog {
   public actionFailed(action: ActionDefinition, errorCode: string, reasonCode: string): void {
     assertAction(action);
     this.append('action.failed', action.runId, actionPayload(action, { actionStatus: 'failed', errorCode, reasonCode }));
+  }
+
+  /** 记录响应模型提出或结束澄清的结构化待输入状态。 */
+  public clarificationUpdated(runId: string, pending: PendingInput): void {
+    this.append('context.clarification.updated', runId, { pending: structuredClone(pending) as JsonValue });
   }
 
   /**

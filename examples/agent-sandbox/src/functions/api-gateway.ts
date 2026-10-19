@@ -107,7 +107,7 @@ export const apiGatewayHandler: PluginHandler = async (input) => {
     target,
     newLimit: rate,
     summary: `已受理调整「${target}」限流配额为 ${rate}，约 5 分钟内生效`
-  });
+  }, { receipt: `gateway-limit-${target}`, target, newLimit: rate });
 };
 
 /** 可直接交给 PluginHost.install 的 api.gateway 注册对象。 */

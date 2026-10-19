@@ -134,7 +134,11 @@ export const CompactionModelStateSchema = Type.Object({
     kind: Type.Optional(Type.Union([
       Type.Literal('slot'), Type.Literal('selection'), Type.Literal('confirmation'), Type.Literal('input')
     ])),
-    status: Type.Optional(Type.Union([Type.Literal('required'), Type.Literal('received'), Type.Literal('none')]))
+    status: Type.Optional(Type.Union([Type.Literal('required'), Type.Literal('received'), Type.Literal('none')])),
+    options: Type.Optional(Type.Array(Type.Object({
+      key: Type.String({ minLength: 1, maxLength: 60 }),
+      label: Type.String({ minLength: 1, maxLength: 200 })
+    }, { additionalProperties: false }), { maxItems: 12, uniqueItems: true }))
   }, { additionalProperties: false })),
   // confirmation 的 scopeHash 最终由关键字段哈希保护。
   confirmation: Type.Optional(Type.Object({

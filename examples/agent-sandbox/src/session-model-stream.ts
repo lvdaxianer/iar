@@ -1,6 +1,6 @@
 /** 流式模型回复的超时、增量和回退边界。 */
 import type { JsonValue } from '@iar/contracts';
-import type { ModelProfileRegistry } from '@iar/decision';
+import type { ClarificationMetadata, ModelProfileRegistry } from '@iar/decision';
 import { OpenAICompatibleModelProvider } from './models/llm-provider.js';
 import { ModelResponseLimitError } from './models/model-transport.js';
 import { readResponseText } from './session-helpers.js';
@@ -18,6 +18,8 @@ export type StreamReplyRequest = {
   input: JsonValue;
   /** 增量直接透传到本次请求的流消费者。 */
   onDelta: (delta: string) => void;
+  /** 结构化响应完成后更新 pending clarification。 */
+  onClarification?: (clarification: ClarificationMetadata | undefined) => Promise<void>;
   /** 未获得有效结构化文本时的回退策略。 */
   onInvalid: () => Promise<string>;
   /** 普通连接失败且没有增量时的回退策略。 */
@@ -48,7 +50,10 @@ export async function streamModelReply(request: StreamReplyRequest): Promise<str
       request.onDelta(delta);
     });
     const text = readResponseText(parsed);
-    if (text !== undefined) return text;
+    if (text !== undefined) {
+      if (request.onClarification) await request.onClarification(readClarification(parsed));
+      return text;
+    }
     if (streamed.trim().length > 0) return streamed;
     return request.onInvalid();
   } catch (error) {
@@ -57,4 +62,10 @@ export async function streamModelReply(request: StreamReplyRequest): Promise<str
     if (streamed.trim().length > 0) return streamed;
     return request.onFailure();
   } finally { clearTimeout(timer); }
+}
+
+function readClarification(raw: unknown): ClarificationMetadata | undefined {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined;
+  const clarification = (raw as { clarification?: unknown }).clarification;
+  return clarification as ClarificationMetadata | undefined;
 }

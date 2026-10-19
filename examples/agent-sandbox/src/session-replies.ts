@@ -2,8 +2,8 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { ActionDefinition, ActionResult, BehaviorContext, JsonValue } from '@iar/contracts';
-import { ResponseGeneratorAdapter, type ModelGateway, type ModelProfileRegistry } from '@iar/decision';
+import type { ActionDefinition, ActionResult, BehaviorContext, JsonValue, PendingInput } from '@iar/contracts';
+import { ResponseGeneratorAdapter, type ClarificationMetadata, type ModelGateway, type ModelProfileRegistry } from '@iar/decision';
 import { sandboxFunctionIds } from './functions/index.js';
 import { OpenAICompatibleModelProvider, type BrainModelProvider } from './models/llm-provider.js';
 import type { ScriptedModelProvider } from './models/scripted-provider.js';
@@ -26,7 +26,10 @@ export type SessionRepliesContext = CompactionContext & {
   brainProvider: BrainModelProvider | ScriptedModelProvider;
   registry: ModelProfileRegistry;
   gateway: ModelGateway;
+  updateClarification: (pending: PendingInput) => Promise<void>;
 };
+
+type ScriptedReply = { text: string; clarification?: ClarificationMetadata };
 
 /** 模型回复和最近消息历史。
  * @author lvdaxianer@yeah.net
@@ -73,10 +76,24 @@ export class SandboxSessionReplies {
         }
       });
       // 只有生成失败才回退固定话术。
-      if (generated.ok) return generated.value.text;
+      if (generated.ok) {
+        await this.persistClarification(behaviorContext, generated.value.clarification);
+        return generated.value.text;
+      }
       return FALLBACK_REPLY_TEXT;
     }
-    return this.scriptedFallbackReply(userText, behaviorContext) ?? FALLBACK_REPLY_TEXT;
+    const scripted = this.scriptedFallbackResponse(userText, behaviorContext);
+    await this.persistClarification(behaviorContext, scripted?.clarification);
+    return scripted?.text ?? FALLBACK_REPLY_TEXT;
+  }
+
+  /** 将模型通过契约返回的澄清元数据转换为可重放 pending 事件。 */
+  private async persistClarification(context: BehaviorContext, clarification: ClarificationMetadata | undefined): Promise<void> {
+    if (clarification) {
+      await this.context.updateClarification({ kind: clarification.kind, status: clarification.status, ...(clarification.options ? { options: structuredClone(clarification.options) } : {}) });
+      return;
+    }
+    if (context.pending.status === 'required') await this.context.updateClarification({ kind: context.pending.kind, status: 'none' });
   }
 
 
@@ -103,7 +120,7 @@ export class SandboxSessionReplies {
       reasonCode
     };
     const fallback = () => this.fallbackReply(context);
-    return streamModelReply({ provider: this.context.brainProvider, profile: this.context.registry.forRole('response.generate'), traceId, runId, input, onDelta, onInvalid: fallback, onFailure: fallback });
+    return streamModelReply({ provider: this.context.brainProvider, profile: this.context.registry.forRole('response.generate'), traceId, runId, input, onDelta, onClarification: (clarification) => this.persistClarification(behaviorContext, clarification), onInvalid: fallback, onFailure: fallback });
   }
 
 
@@ -116,17 +133,27 @@ export class SandboxSessionReplies {
    * @date 2026-10-18
    */
   protected scriptedFallbackReply(userText: string, behaviorContext: BehaviorContext): string | undefined {
+    return this.scriptedFallbackResponse(userText, behaviorContext)?.text;
+  }
+
+  /** 离线模型的通用结构化上下文兜底，不按业务关键词解释事实。 */
+  protected scriptedFallbackResponse(userText: string, behaviorContext: BehaviorContext): ScriptedReply | undefined {
     const text = userText.trim();
+    const pending = behaviorContext.pending;
+    if (pending.status === 'required' && pending.kind === 'selection' && pending.options && text.length <= 60) {
+      const selected = pending.options.find((option) => option.key === text);
+      if (selected) return { text: `已记录你的选择「${selected.label}」。如果还需要继续处理，请告诉我下一步需求。` };
+    }
     if (isFactFollowUp(text)) {
       const facts = Object.values(behaviorContext.facts ?? {}).filter((fact) => fact.status === 'verified');
-      if (facts.length > 0) return `根据当前会话已确认的信息：${facts.map((fact) => `${fact.field}=${String(fact.value ?? '空')}`).join('、')}。`;
-      return '当前会话没有足够的已确认事实。请说明你想查询的对象或需要补充的信息。';
+      if (facts.length > 0) return { text: `根据当前会话已确认的信息：${facts.map((fact) => `${fact.field}=${String(fact.value ?? '空')}`).join('、')}。` };
+      return { text: '当前会话没有足够的已确认事实。请说明你想查询的对象或需要补充的信息。' };
     }
     if (/(你是谁|你叫什么|自我介绍|你是什么)/.test(text)) {
-      return '我是 IAR Agent Sandbox，一个可交互的 IAR 插件沙盒。当前模拟的企业数据平台包含 10 个子系统：平台通用知识、数据集成管理（DIP）、任务调度监控、API 网关管理、数据资产目录、报表中心、系统状态与告警、账户与权限、工单支持和人工服务。你输入一句话，我会走完语义抽取、两阶段路由（Function → Plugin）、策略确认和插件执行，并在右侧展示完整的路由证据和事件流。';
+      return { text: '我是 IAR Agent Sandbox，一个可交互的 IAR 插件沙盒。当前模拟的企业数据平台包含 10 个子系统：平台通用知识、数据集成管理（DIP）、任务调度监控、API 网关管理、数据资产目录、报表中心、系统状态与告警、账户与权限、工单支持和人工服务。你输入一句话，我会走完语义抽取、两阶段路由（Function → Plugin）、策略确认和插件执行，并在右侧展示完整的路由证据和事件流。' };
     }
     if (/(能做什么|会什么|有什么功能|可以做什么|能干嘛|能干什么)/.test(text)) {
-      return '我目前支持十项能力：1）平台知识问答，如「如何申请数据权限」；2）数据集成管理，如「列出今天的集成任务」，重跑/停止需确认；3）任务调度监控，如「订单汇总 Job 跑完了吗」；4）API 网关管理，如「查看网关调用统计」，调整限流需确认；5）数据资产检索，如「搜一下用户表」；6）报表中心，如「列出销售报表」，导出需确认；7）系统状态与告警，如「现在有哪些告警」；8）账户与权限，如「我有哪些权限」，申请授权需确认；9）工单支持，如「帮我提个工单，网络很卡」；10）人工服务，如「转人工」，转接需确认。';
+      return { text: '我目前支持十项能力：1）平台知识问答，如「如何申请数据权限」；2）数据集成管理，如「列出今天的集成任务」，重跑/停止需确认；3）任务调度监控，如「订单汇总 Job 跑完了吗」；4）API 网关管理，如「查看网关调用统计」，调整限流需确认；5）数据资产检索，如「搜一下用户表」；6）报表中心，如「列出销售报表」，导出需确认；7）系统状态与告警，如「现在有哪些告警」；8）账户与权限，如「我有哪些权限」，申请授权需确认；9）工单支持，如「帮我提个工单，网络很卡」；10）人工服务，如「转人工」，转接需确认。' };
     }
     return undefined;
   }
@@ -159,7 +186,7 @@ export class SandboxSessionReplies {
       actionOutput: actionResult.output ?? null,
       behaviorContext
     };
-    return streamModelReply({ provider: this.context.brainProvider, profile: this.context.registry.forRole('response.generate'), traceId, runId, input, onDelta,
+    return streamModelReply({ provider: this.context.brainProvider, profile: this.context.registry.forRole('response.generate'), traceId, runId, input, onDelta, onClarification: (clarification) => this.persistClarification(behaviorContext, clarification),
       onInvalid: async () => `动作已执行（${action.functionId}），但回复生成失败（model.schema_invalid）。`, onFailure: () => this.generateReply(context) });
   }
 
@@ -189,6 +216,7 @@ export class SandboxSessionReplies {
       }
     });
     if (!generated.ok) return `动作已执行（${action.functionId}），但回复生成失败（${generated.error.code}）。`;
+    await this.persistClarification(behaviorContext, generated.value.clarification);
     return generated.value.text;
   }
 
@@ -224,5 +252,5 @@ export class SandboxSessionReplies {
 
 /** 判断用户是否在询问当前会话已经确认的事实，而不是发起新操作。 */
 function isFactFollowUp(text: string): boolean {
-  return /刚才|之前|上次|前面|这个|该|那条|编号|单号|结果|进度|状态|多少|哪个/.test(text);
+  return /刚才|之前|上次|前面|这个|该|那条|编号|单号|结果|进度|状态|多少|哪个|排名|排队|第几位|位置|位次|顺序/.test(text);
 }

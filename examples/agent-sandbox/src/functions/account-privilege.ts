@@ -108,7 +108,7 @@ export const accountPrivilegeHandler: PluginHandler = async (input) => {
     resource,
     status: 'pending_approval',
     summary: `已受理「${role}」授权申请（资源 ${resource}），等待数据负责人审批`
-  });
+  }, { receipt: `grant-req-${resource}`, grantRequestId: `grant-req-${resource}`, role, resource, status: 'pending_approval' });
 };
 
 /** 可直接交给 PluginHost.install 的 account.privilege 注册对象。 */

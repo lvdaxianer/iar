@@ -557,23 +557,23 @@ StateEvent
 
 `BehaviorContext.facts` 是每个会话独立维护的事实索引，不是对最近对话原文的缓存。只有 `action.completed` 且 `resultStatus=succeeded` 的事件，才可以从 Function/Plugin 已声明的公开输出字段投影事实；待确认、失败或未知输出不会产生成功事实。每条事实都记录 `status=verified`、`sourceEventId`、`functionId`、`pluginId` 和字段名，因此模型回答“刚才创建的工单号是多少”时可以引用已成功事件，而不会再次选择 `ticket.create`。
 
-当前公开字段采用通用白名单：`ticketId`、`receipt`、`status`、`priority`、`jobName`、`serviceId`、`datasetId`、`reportId`、`requestId`、`caseId` 和 `operation`。插件必须通过成功输出中的 `facts` 信封显式声明要公开的字段；对象、数组、自由描述文本、超长文本、密钥和未声明字段不会进入事实索引。字段值只接受最多 256 个 Unicode 字符的字符串、数字、布尔值或 `null`，单个会话最多保留 64 条事实。事实键使用 `${functionId}.${field}`，同一 Function 的后续成功结果按来源事件顺序更新。
+事实字段不再由核心维护业务白名单。插件必须通过成功输出中的 `facts` 信封显式声明要公开的字段；核心只校验事实键的稳定格式、长度和数量，以及字符串、数字、布尔值或 `null` 等 bounded primitive 值。对象、数组、自由描述文本、超长文本、密钥和未声明字段不会进入事实索引。字段值只接受最多 256 个 Unicode 字符的字符串，单个会话最多保留 64 条事实。事实键使用 `${functionId}.${field}`，同一 Function 的后续成功结果按来源事件顺序更新。因此排名、排队位置、预约号、审批号等新业务只需要由对应插件显式声明事实，不需要修改 IAR 核心。
 
 事实投影在事件成功追加后、下一次模型决策前完成，并与行为状态一起进入不可变版本化 SQLite 快照。服务重启后通过原会话标识恢复快照时，事实及其来源一并恢复；事件来源编号带有会话实例唯一前缀，避免恢复后新事件复用旧来源编号。不同会话使用不同投影器和快照，不会共享事实。压缩摘要只能辅助理解，不能新增或覆盖事实。
 
 ### 7.2.2 每轮模型调用的结构化上下文
 
-每个会话在处理新问题时先取得当前 `BehaviorContext` 的不可变快照，再把本次用户问题与结构化上下文分别传给适用的模型调用：
+每个会话在处理新问题时先取得当前 `BehaviorContext` 的不可变快照，再把本次用户问题与结构化上下文分别传给适用的模型调用。`pending` 除了 `kind/status` 外，可携带最多 12 个去重的 `{key,label}` 澄清选项；这些选项只帮助模型解释数字或短输入，不是 Function、Plugin 或 Action 授权：
 
 | 调用角色 | 传入内容 | 明确不传入 |
 | --- | --- | --- |
 | `semantic.extract` | 当前问题 `text`、`behaviorContext` | 最近聊天原文 |
 | `function.select` / `plugin.select` | 当前问题 `currentMessage`、`behaviorContext`、运行时生成的有限候选 | 任意自由候选、历史消息原文 |
-| `response.generate` 及兜底 | 当前问题 `userMessage`、`behaviorContext`，以及必要的本轮动作结果 | `recentMessages` 原文 |
+| `response.generate` 及兜底 | 当前问题 `userMessage`、`behaviorContext`（含 verified facts 与 pending options），以及必要的本轮动作结果 | `recentMessages` 原文 |
 
-普通和流式回复使用同一套结构化输入；动作完成后的回复使用动作事件已投影的新快照，追问则使用同一会话最新恢复的事实。`behaviorContext` 中的字段是模型可读取的数据，不是系统指令、授权凭据或执行命令。JEV 与 Intent Model 仍由 `UnifiedDecisionAdapter` 按 JEV 优先规则选择，二者只返回同一 `iar.decision/v1` 决策结果。
+普通和流式回复使用同一套结构化输入；动作完成后的回复使用动作事件已投影的新快照，追问则使用同一会话最新恢复的事实。流式回复的普通文本仍可增量输出；需要产生澄清状态时，模型返回完整 `iar.response/v1` JSON，宿主校验后只向界面输出其中 `text`，并用同一事件链保存 `clarification`。`behaviorContext` 中的字段是模型可读取的数据，不是系统指令、授权凭据或执行命令。JEV 与 Intent Model 仍由 `UnifiedDecisionAdapter` 按 JEV 优先规则选择，二者只返回同一 `iar.decision/v1` 决策结果。
 
-兜底提示词要求模型优先依据 `status=verified` 的事实回答；事实不足或问题有歧义时明确说明并反问澄清，不得编造编号、状态或结果，也不得因为业务名词或关键词自动创建、确认或执行新操作。未命中功能时，兜底模型只负责回答或澄清，不能绕过既有授权与确认边界。
+兜底提示词要求模型优先依据 `status=verified` 的事实和 `pending.options` 回答；数字或短值只能按当前 pending 选项解释。事实不足或问题有歧义时，模型返回 `iar.response/v1` 的结构化 `clarification`（`kind/status/options`）并反问，不得编造编号、状态或结果，也不得因为业务名词或关键词自动创建、确认或执行新操作。未命中功能时，兜底模型只负责回答或澄清，不能绕过既有授权与确认边界。响应元数据通过 `context.clarification.updated` 事件投影，并与每次上下文更新一起异步保存 SQLite；下一轮消费后可写入 `status=none` 清除旧 pending。
 
 ### 7.3 压缩协议
 
@@ -589,7 +589,7 @@ StateEvent
 
 1. 关键字段非空且通过 Schema；
 2. `subject`、`action`、`functionId`、`pluginId` 和槽位引用没有被摘要覆盖；
-3. 当前 Workflow 步骤、幂等键和待确认状态不变；
+3. 当前 Workflow 步骤、幂等键、pending 选项和待确认状态不变；
 4. 摘要中的实体引用能映射回事件或快照；
 5. 校验失败时保留旧视图，不替换可恢复状态。
 6. `facts` 及其 `sourceEventId`、Function、Plugin 和字段来源保持不变；模型不能新增或覆盖事实。

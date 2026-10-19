@@ -186,6 +186,15 @@ test('successful compaction keeps trusted facts and their source metadata', () =
   }
 });
 
+test('successful compaction keeps finite pending clarification options', () => {
+  const context = createInitialContext('run-compact');
+  context.pending = { kind: 'selection', status: 'required', options: [{ key: '1', label: '第一项' }, { key: '2', label: '第二项' }] };
+  context.integrity.criticalFieldHash = criticalFieldHash(context);
+  const outcome = new ContextCompactionService().compact(buildRequest(buildResult(context), { current: context }));
+  assert.equal(outcome.ok, true);
+  if (outcome.ok) assert.deepEqual(outcome.context.pending.options, context.pending.options);
+});
+
 test('summary beyond the contract limit is rejected without replacing the old view', () => {
   const context = createInitialContext('run-compact');
   const result = buildResult(context);

@@ -217,6 +217,15 @@ export type GeneratedResponse = {
   text: string;
   /** 可选的稳定引用标识。 */
   citations?: string[];
+  /** 可选的有限澄清元数据，只表达下一轮输入，不包含执行权限。 */
+  clarification?: ClarificationMetadata;
+};
+
+/** Response Generator 可以请求的有限澄清状态。 */
+export type ClarificationMetadata = {
+  kind: 'slot' | 'selection' | 'input';
+  status: 'required';
+  options?: Array<{ key: string; label: string }>;
 };
 
 /** 校验 SemanticFrame 输出并复制成稳定对象。 */
@@ -249,8 +258,21 @@ function validateCompactionResult(raw: unknown): ModelOutputValidation<Compactio
 /** 校验 ResponseGenerator 输出。 @param raw - provider 原始输出 @returns 响应验证结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function validateGeneratedResponse(raw: unknown): ModelOutputValidation<GeneratedResponse> {
   // Response 只返回文本/引用，不能借额外字段携带工具命令。
-  if (!isRecord(raw) || !hasOnlyKeys(raw, ['schemaVersion', 'text', 'citations']) || raw.schemaVersion !== 'iar.response/v1' || !isNonEmptyString(raw.text) || (raw.citations !== undefined && (!Array.isArray(raw.citations) || !raw.citations.every(isNonEmptyString)))) return { ok: false, message: 'Response Schema 无效' };
+  if (!isRecord(raw) || !hasOnlyKeys(raw, ['schemaVersion', 'text', 'citations', 'clarification']) || raw.schemaVersion !== 'iar.response/v1' || !isNonEmptyString(raw.text) || (raw.citations !== undefined && (!Array.isArray(raw.citations) || !raw.citations.every(isNonEmptyString))) || (raw.clarification !== undefined && !isClarificationMetadata(raw.clarification))) return { ok: false, message: 'Response Schema 无效' };
   return { ok: true, value: structuredClone(raw) as GeneratedResponse };
+}
+
+/** 校验澄清元数据的数量、长度和选项唯一性。 */
+function isClarificationMetadata(value: unknown): value is ClarificationMetadata {
+  if (!isRecord(value) || !['slot', 'selection', 'input'].includes(String(value.kind)) || value.status !== 'required') return false;
+  if (value.options === undefined) return true;
+  if (!Array.isArray(value.options) || value.options.length === 0 || value.options.length > 12) return false;
+  const keys = new Set<string>();
+  return value.options.every((option) => {
+    if (!isRecord(option) || !isNonEmptyString(option.key) || option.key.length > 60 || !isNonEmptyString(option.label) || option.label.length > 200 || keys.has(option.key)) return false;
+    keys.add(option.key);
+    return true;
+  });
 }
 
 /** 校验 SemanticFrame 的 subject 片段。 */

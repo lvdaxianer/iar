@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import { createHash } from 'node:crypto';
-import { ERROR_CODES, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_FIELDS, validateContract, type BehaviorContext, type ContractErrorResult, type EventEnvelope, type TrustedFact, type TrustedFactValue } from '@iar/contracts';
+import { ERROR_CODES, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, validateContract, type BehaviorContext, type ContractErrorResult, type EventEnvelope, type TrustedFact, type TrustedFactValue } from '@iar/contracts';
 
 /** 关键字段哈希固定使用 SHA-256，避免实现更换导致快照不可恢复。 */
 const HASH_ALGORITHM = 'sha256';
@@ -173,6 +173,9 @@ export class BehaviorContextProjector {
       this.applyCompactedState(payload);
       return;
     }
+    if (event.eventName === 'context.clarification.updated' && !isPendingInput(payload.pending)) {
+      throw new Error('澄清 pending 状态无效');
+    }
     // workflow.started 固定主语、意图和运行状态。
     if (event.eventName === 'workflow.started') this.applyWorkflowStarted(payload, event.eventId);
     // decision.created 固定当前 Function 和 Plugin 路由。
@@ -279,9 +282,9 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
-/** 判断字段是否在通用事实白名单中。 */
+/** 判断字段是否满足通用事实键边界。 */
 function isTrustedFactField(value: string): boolean {
-  return (TRUSTED_FACT_FIELDS as readonly string[]).includes(value);
+  return value.length <= MAX_TRUSTED_FACT_KEY_LENGTH && new RegExp(TRUSTED_FACT_KEY_PATTERN).test(value);
 }
 
 /** 事实值只允许小型 JSON 原子值，避免把日志或任意对象带入上下文。 */
@@ -308,9 +311,15 @@ function isSlotMap(value: unknown): value is BehaviorContext['slots'] {
 
 /** 判断等待输入状态是否完整。 */
 function isPendingInput(value: unknown): value is BehaviorContext['pending'] {
-  return isRecord(value)
-    && PENDING_KINDS.has(String(value.kind))
-    && PENDING_STATUSES.has(String(value.status));
+  if (!isRecord(value) || !PENDING_KINDS.has(String(value.kind)) || !PENDING_STATUSES.has(String(value.status))) return false;
+  if (value.options === undefined) return true;
+  if (!Array.isArray(value.options) || value.options.length > 12) return false;
+  const keys = new Set<string>();
+  return value.options.every((option) => {
+    if (!isRecord(option) || typeof option.key !== 'string' || option.key.length === 0 || option.key.length > 60 || typeof option.label !== 'string' || option.label.length === 0 || option.label.length > 200 || keys.has(option.key)) return false;
+    keys.add(option.key);
+    return true;
+  });
 }
 
 /** 判断确认状态是否完整。 */

@@ -76,7 +76,7 @@ export const humanTransferHandler: PluginHandler = async (input) => {
     queue: 'human.support',
     reason: reason.slice(0, 240),
     summary: `已为你转接人工客服（${summary.slice(0, 60)}），当前排队第 3 位`
-  });
+  }, { receipt: 'handoff-20261018-001', handoffId: 'handoff-20261018-001', queue: 'human.support', queuePosition: 3 });
 };
 
 /** 可直接交给 PluginHost.install 的 human.transfer 注册对象。 */

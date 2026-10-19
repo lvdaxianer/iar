@@ -159,9 +159,9 @@ export const dipManageHandler: PluginHandler = async (input) => {
     return succeed('detail', { task, summary: `任务「${name}」当前状态 ${String(task.status ?? 'unknown')}，调度周期 ${String(task.schedule ?? '未知')}` }, { status: task.status ?? 'unknown' });
   }
   if (operation === 'rerun') {
-    return succeed('rerun', { receipt: `dip-rerun-${taskId}`, taskId, status: 'rerunning', summary: `已受理重跑任务「${name}」，新实例排队中` });
+    return succeed('rerun', { receipt: `dip-rerun-${taskId}`, taskId, status: 'rerunning', summary: `已受理重跑任务「${name}」，新实例排队中` }, { receipt: `dip-rerun-${taskId}`, taskId, status: 'rerunning' });
   }
-  return succeed('stop', { receipt: `dip-stop-${taskId}`, taskId, status: 'stopping', summary: `已受理停止任务「${name}」，当前实例将被中断` });
+  return succeed('stop', { receipt: `dip-stop-${taskId}`, taskId, status: 'stopping', summary: `已受理停止任务「${name}」，当前实例将被中断` }, { receipt: `dip-stop-${taskId}`, taskId, status: 'stopping' });
 };
 
 /** 可直接交给 PluginHost.install 的 dip.manage 注册对象。 */

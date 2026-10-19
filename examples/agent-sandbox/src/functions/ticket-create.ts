@@ -116,7 +116,7 @@ export const ticketCreateHandler: PluginHandler = async (input) => {
     const ticketId = parsed.params.ticketId ?? (/20261017/.test(parsed.query) ? 'ticket-20261017-006' : DEFAULT_TICKET_ID);
     const ticket = TICKET_PROGRESS[ticketId];
     if (!ticket) return fail('ticket.not_found');
-    return succeed('progress', { ticket, summary: `工单 ${ticketId} 当前节点「${String(ticket.status)}」，共 ${String((ticket.timeline as unknown[]).length)} 条流转记录` });
+    return succeed('progress', { ticket, summary: `工单 ${ticketId} 当前节点「${String(ticket.status)}」，共 ${String((ticket.timeline as unknown[]).length)} 条流转记录` }, { ticketId, status: String(ticket.status ?? 'unknown') });
   }
   const title = parsed.params.title ?? parsed.query.slice(0, 30);
   const description = parsed.query.trim().length > 0 ? parsed.query : title;
@@ -132,7 +132,7 @@ export const ticketCreateHandler: PluginHandler = async (input) => {
     priority,
     status: 'created',
     summary: `工单已创建并进入分诊队列，标题「${title.slice(0, 30)}」，优先级 ${priority}`
-  });
+  }, { receipt: ticketId, ticketId, priority, status: 'created' });
 };
 
 /** 可直接交给 PluginHost.install 的 ticket.create 注册对象。 */

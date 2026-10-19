@@ -108,7 +108,7 @@ export const reportCenterHandler: PluginHandler = async (input) => {
     reportId,
     format,
     summary: `已受理导出「${name}」（${format}），生成完成后可在下载中心获取`
-  });
+  }, { receipt: `export-${reportId}`, reportId, format });
 };
 
 /** 可直接交给 PluginHost.install 的 report.center 注册对象。 */

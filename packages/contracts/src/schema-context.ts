@@ -6,7 +6,7 @@
  */
 import { Type } from '@sinclair/typebox';
 import { JsonValueSchema } from './schema-primitives.js';
-import { MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_FIELDS } from './types-base.js';
+import { MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN } from './types-base.js';
 import { SCHEMA_VERSIONS } from './versions.js';
 
 /** BehaviorContext 摘要文本的统一长度边界。 */
@@ -89,7 +89,12 @@ export const PendingInputSchema = Type.Object({
     Type.Literal('input')
   ]),
   // status 记录输入是否已收到。
-  status: Type.Union([Type.Literal('required'), Type.Literal('received'), Type.Literal('none')])
+  status: Type.Union([Type.Literal('required'), Type.Literal('received'), Type.Literal('none')]),
+  // options 只保存有限的展示键和值，不包含可执行动作。
+  options: Type.Optional(Type.Array(Type.Object({
+    key: Type.String({ minLength: 1, maxLength: 60 }),
+    label: Type.String({ minLength: 1, maxLength: 200 })
+  }, { additionalProperties: false }), { maxItems: 12, uniqueItems: true }))
 }, { additionalProperties: false });
 
 /** BehaviorContext 的确认状态和绑定范围。 */
@@ -124,7 +129,7 @@ export const TrustedFactSchema = Type.Object({
   // pluginId 绑定具体实现版本。
   pluginId: Type.String({ minLength: 1, maxLength: MAX_TRUSTED_FACT_STRING_LENGTH }),
   // field 绑定公开输出字段。
-  field: Type.Union(TRUSTED_FACT_FIELDS.map((field) => Type.Literal(field)))
+  field: Type.String({ minLength: 1, maxLength: MAX_TRUSTED_FACT_KEY_LENGTH, pattern: TRUSTED_FACT_KEY_PATTERN })
 }, { additionalProperties: false });
 
 /** 已通过压缩契约校验、可随会话恢复的摘要。 */
@@ -173,7 +178,7 @@ export const BehaviorContextSchema = Type.Object({
   // confirmation 记录确认范围和状态。
   confirmation: ConfirmationStateSchema,
   // facts 只保存成功输出中的有限、可追溯事实。
-  facts: Type.Optional(Type.Record(Type.String({ minLength: 1, maxLength: MAX_TRUSTED_FACT_KEY_LENGTH }), TrustedFactSchema, { maxProperties: MAX_TRUSTED_FACTS })),
+  facts: Type.Optional(Type.Record(Type.String({ minLength: 1, maxLength: MAX_TRUSTED_FACT_KEY_LENGTH, pattern: TRUSTED_FACT_KEY_PATTERN }), TrustedFactSchema, { maxProperties: MAX_TRUSTED_FACTS })),
   // summary 是已校验的辅助视图，不进入关键执行字段哈希。
   summary: Type.Optional(ContextSummarySchema),
   // 幂等键贯穿一次 Action 提交和重试。

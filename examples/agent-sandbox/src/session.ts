@@ -65,6 +65,7 @@ export class IarSandboxSession extends SandboxSessionCore {
       get eventStore() { return session.eventStore; },
       get projector() { return session.projector; },
       queueSnapshot: (eventId) => session.queueSnapshotAfterCompaction(eventId),
+      updateClarification: (pending) => session.updateClarification(pending),
       get recentMessages() { return session.recentMessages; },
       get compactCount() { return session.compactCount; },
       set compactCount(value) { session.compactCount = value; }
