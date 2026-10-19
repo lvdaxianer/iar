@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmdirSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -84,6 +85,33 @@ test('启动失败只输出安全固定分类', () => {
   assert.equal(child.stdout, '');
   assert.doesNotMatch(child.stderr, /RangeError|ERR_SOCKET_BAD_PORT|private-startup-key-sentinel/);
   assert.deepEqual(JSON.parse(child.stderr), { level: 'warn', event: 'sandbox.start_failed', outcome: 'startup_failed' });
+});
+
+/**
+ * 端口占用必须输出可操作的固定提示，而不是只返回无法定位的通用失败。
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-19
+ */
+test('端口占用输出 port_in_use 及恢复提示', async () => {
+  const blocker = createServer();
+  await new Promise<void>((resolve, reject) => {
+    blocker.once('error', reject);
+    blocker.listen(0, '127.0.0.1', () => resolve());
+  });
+  const address = blocker.address();
+  assert.ok(address && typeof address !== 'string');
+  try {
+    const env = { ...process.env, IAR_SANDBOX_PORT: String(address.port), IAR_LLM_API_KEY: 'CHANGE_ME', IAR_MODEL_API_KEY: 'CHANGE_ME' };
+    const child = spawnSync(process.execPath, ['scripts/run-agent-sandbox.mjs', '--brain', 'scripted'], { encoding: 'utf8', env, timeout: 2000 });
+    assert.equal(child.status, 1);
+    const logLine = child.stderr.split('\n').find((line) => line.startsWith('{'));
+    assert.ok(logLine);
+    assert.deepEqual(JSON.parse(logLine), { level: 'warn', event: 'sandbox.start_failed', outcome: 'port_in_use' });
+    assert.match(child.stderr, /端口.*占用|IAR_SANDBOX_PORT/);
+    assert.doesNotMatch(child.stderr, /EADDRINUSE|private|Error:/);
+  } finally {
+    await new Promise<void>((resolve, reject) => blocker.close((error) => error ? reject(error) : resolve()));
+  }
 });
 
 /**
