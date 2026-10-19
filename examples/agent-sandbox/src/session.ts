@@ -64,6 +64,8 @@ export class IarSandboxSession extends SandboxSessionCore {
       get gateway() { return session.gateway; },
       get eventStore() { return session.eventStore; },
       get projector() { return session.projector; },
+      recordMessage: (message) => session.recordMessage(message),
+      publishEvent: (event) => session.publishPersistenceEvent(event),
       queueSnapshot: (eventId) => session.queueSnapshotAfterCompaction(eventId),
       updateClarification: (pending) => session.updateClarification(pending),
       get recentMessages() { return session.recentMessages; },
@@ -77,7 +79,7 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-19
    */
-  public compact(): Promise<CompactResult> { return this.replies.compact(); }
+  public compact(): Promise<CompactResult> { return this.whenReady().then(() => this.replies.compact()); }
 
   /** 将会话方法绑定给流式编排，避免另一份事件与历史状态。
    * @returns 使用当前会话能力的流式组件
@@ -106,7 +108,7 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @date 2026-10-19
    */
   public turnStreamed(text: string, emit: (event: StreamEvent) => void): Promise<TurnResult> {
-    return this.streaming.turnStreamed(text, emit);
+    return this.whenReady().then(() => this.streaming.turnStreamed(text, emit));
   }
   /**
    * 执行一轮对话：抽取 → 路由 → 策略/确认 → 执行 → 回复生成。
@@ -117,6 +119,7 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @date 2026-10-18
    */
   public async turn(text: string): Promise<TurnResult> {
+    await this.whenReady();
     const userText = text.trim();
     // 新一轮输入会结束上一轮未处理的确认，避免旧动作占用当前语义上下文。
     // 本方法只编排当前轮次，事件投影和回复组件负责各自的状态边界。
@@ -230,6 +233,7 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @date 2026-10-17
    */
   public async confirm(accepted: boolean): Promise<ConfirmResult> {
+    await this.whenReady();
     // 确认入口只消费当前会话的 pending，不接受客户端重新构造的动作对象。
     if (!this.pending) return { status: 'failed', reply: '当前没有待确认的操作。', reasonCode: 'no_pending_confirmation' };
     const { action } = this.pending;

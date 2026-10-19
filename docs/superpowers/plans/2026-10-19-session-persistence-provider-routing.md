@@ -49,12 +49,16 @@
 - Create: `packages/persistence-runtime/src/subscriber.ts`
 - Modify: `packages/runtime/src/context-projector.ts`
 - Modify: `examples/agent-sandbox/src/session-core.ts`
+- Modify: `examples/agent-sandbox/src/session-replies.ts`
+- Modify: `examples/agent-sandbox/src/session-compaction.ts`
+- Modify: `examples/agent-sandbox/src/session.ts`
 - Modify: `examples/agent-sandbox/src/session-types.ts`
 - Test: `tests/contract/persistence-subscription.test.ts`
+- Test: `tests/integration/agent-sandbox/session-persistence-hooks.test.ts`
 
 - [x] **Step 1: Write the failing tests** — 覆盖 `message.received`、`message.sent`、`context.updated`、`session.restored` 的异步订阅、幂等、重试和队列边界。
 - [x] **Step 2: Implement the bridge** — 让事件携带统一 SessionIdentity，由 Provider 订阅桥保存消息和快照，不直接依赖 SQLite。
-- [x] **Step 3: Verify** — 新增订阅契约、旧订阅回归和 Provider 恢复测试通过；Sandbox 全链路接入留在 Task 5。
+- [x] **Step 3: Verify** — 新增订阅契约、旧订阅回归、Sandbox 消息/快照恢复和压缩事件测试通过；默认 Provider 配置与 HTTP 入口贯通留在 Task 5。
 
 ### Task 4: Plugin 优先和 actionType 范围路由
 
