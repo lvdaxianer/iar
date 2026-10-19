@@ -26,10 +26,10 @@
 
 ## 5. HTTP session recovery and documentation
 
-- [ ] 5.1 让 HTTP 新建/恢复会话、普通消息、流式消息和确认请求贯穿同一个 `sessionId`，验证重启后恢复上下文再调用模型。
-- [ ] 5.2 将 Provider 配置接入 Sandbox，默认使用内置 SQLite，验证外部 Provider 可以通过配置替换而不修改 Runtime。
-- [ ] 5.3 更新根目录 `README.md`、`docs/README.md` 和 Provider 接入文档，验证命令、接口、事件和恢复示例与实现一致。
-- [ ] 5.4 运行聚焦测试、全量 `npm test`、`npm run build` 和 `openspec validate session-persistence-provider-routing --strict`，完成代码审查、最终审计并归档 OpenSpec。
+- [x] 5.1 让 HTTP 新建/恢复会话、普通消息、流式消息和确认请求贯穿同一个 `sessionId`，验证重启后恢复上下文再调用模型。
+- [x] 5.2 将 Provider 配置接入 Sandbox，默认使用内置 SQLite，验证外部 Provider 可以通过配置替换而不修改 Runtime。
+- [x] 5.3 更新根目录 `README.md`、`docs/README.md` 和 Provider 接入文档，验证命令、接口、事件和恢复示例与实现一致。
+- [x] 5.4 运行聚焦测试、全量 `npm test`、`npm run build` 和 `openspec validate session-persistence-provider-routing --strict`，完成代码审查、最终审计并归档 OpenSpec。
 
 ## Workflow follow-up
 

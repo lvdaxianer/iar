@@ -15,7 +15,9 @@ import { IarSandboxSession, type SandboxMode } from './session.js';
 import { registerSandboxRoutes } from './http-transport.js';
 import { SandboxSessionManager, type SandboxSessionLimits } from './session-manager.js';
 import { loadSandboxPage } from './page-template.js';
-import { AsyncSqliteSnapshotStore, type SnapshotStore } from '../../../packages/storage/src/index.js';
+import type { SnapshotStore } from '../../../packages/storage/src/index.js';
+import type { SessionPersistenceProvider } from '@iar/persistence-spi';
+import { loadSandboxPersistenceProvider } from './persistence-provider.js';
 
 /** sandbox 服务的启动配置。 */
 export type SandboxServerOptions = {
@@ -25,12 +27,22 @@ export type SandboxServerOptions = {
   port?: number;
   /** 独立会话与请求的资源上限。 */
   sessionLimits?: SandboxSessionLimits;
-  /** SQLite 文件路径；未配置时使用进程内 SQLite，生产重启恢复应显式配置。 */
+  /** SQLite 文件路径；未注入旧 SnapshotStore 时作为内置 Provider 的路径配置。 */
   snapshotPath?: string;
   /** 测试或宿主注入的快照存储。 */
   snapshotStore?: SnapshotStore;
+  /** 可替换的会话持久化 Provider；未提供时加载内置或环境配置 Provider。 */
+  persistenceProvider?: SessionPersistenceProvider;
 };
 type ClosableSnapshotStore = SnapshotStore & { close?: () => Promise<void> };
+type ClosablePersistenceProvider = SessionPersistenceProvider;
+type SandboxStartupResources = {
+  snapshotStore?: ClosableSnapshotStore;
+  persistenceProvider?: ClosablePersistenceProvider;
+  persistenceProviderOpened?: boolean;
+  session: IarSandboxSession;
+  manager: SandboxSessionManager;
+};
 
 /** 已启动的 sandbox 服务句柄。 */
 export type SandboxServerHandle = {
@@ -42,12 +54,14 @@ export type SandboxServerHandle = {
   port: number;
   /** 启动模式。 */
   mode: SandboxMode;
+  /** 实际使用的会话持久化 Provider。 */
+  persistenceProvider?: SessionPersistenceProvider;
   /** 关闭服务并释放会话资源。 */
   close: () => Promise<void>;
 };
 
 /** 关闭一旦开始，入口始终拒绝新请求，直到监听器释放。 */
-type SandboxLifecycle = { isClosing: boolean };
+type SandboxLifecycle = { isClosing: boolean; managedClose: boolean };
 /** 不暴露内部故障的统一关闭响应。 */
 const CLOSING_STATUS = 503;
 
@@ -61,21 +75,36 @@ const CLOSING_STATUS = 503;
  * @date 2026-10-17
  */
 export async function startSandboxServer(options: SandboxServerOptions): Promise<SandboxServerHandle> {
-  // 先补齐 .env 中的环境变量，再初始化会话，保证 provider 能读到密钥。
   loadDotEnv();
-  const snapshotStore: ClosableSnapshotStore = options.snapshotStore ?? new AsyncSqliteSnapshotStore({ filename: options.snapshotPath ?? process.env.IAR_SANDBOX_SQLITE_PATH ?? ':memory:' });
-  const session = new IarSandboxSession({ mode: options.mode, sessionId: 'legacy', snapshotStore });
-  let manager: SandboxSessionManager | undefined, app: FastifyInstance | undefined;
+  let resources: SandboxStartupResources | undefined;
+  let app: FastifyInstance | undefined;
   try {
-    manager = new SandboxSessionManager(options.mode, session, options.sessionLimits, snapshotStore);
+    resources = await createSandboxStartupResources(options);
     const indexHtml = loadSandboxPage();
     app = Fastify({ logger: false });
-    const lifecycle: SandboxLifecycle = { isClosing: false };
-    configureSandboxApp(app, { manager, indexHtml, lifecycle, snapshotStore });
-    return await listenSandbox(app, { manager, session, lifecycle, snapshotStore, options });
+    const lifecycle: SandboxLifecycle = { isClosing: false, managedClose: false };
+    configureSandboxApp(app, { indexHtml, lifecycle, ...resources });
+    return await listenSandbox(app, { ...resources, lifecycle, options });
   } catch (error) {
     // 保留启动异常，同时尽力释放已经分配的监听器及工作线程。
-    await cleanupFailedStartup({ app, manager, session, snapshotStore });
+    await cleanupFailedStartup({ app, manager: resources?.manager, session: resources?.session, ...(resources?.snapshotStore ? { snapshotStore: resources.snapshotStore } : {}), ...(resources?.persistenceProvider ? { persistenceProvider: resources.persistenceProvider } : {}) });
+    throw error;
+  }
+}
+
+/** 初始化服务共享的 Provider、会话和管理器。 */
+async function createSandboxStartupResources(options: SandboxServerOptions): Promise<SandboxStartupResources> {
+  const snapshotStore: ClosableSnapshotStore | undefined = options.snapshotStore;
+  const persistenceProvider = options.persistenceProvider ?? (!snapshotStore
+    ? await loadSandboxPersistenceProvider(options.snapshotPath === undefined ? undefined : { sqlitePath: options.snapshotPath })
+    : undefined);
+  try {
+    if (options.persistenceProvider) await persistenceProvider?.open(undefined);
+    const persistenceProviderOpened = persistenceProvider !== undefined;
+    const session = new IarSandboxSession({ mode: options.mode, sessionId: 'legacy', ...(snapshotStore ? { snapshotStore } : {}), ...(persistenceProvider ? { persistenceProvider, persistenceProviderOpened: true } : {}) });
+    return { session, manager: new SandboxSessionManager(options.mode, session, options.sessionLimits, snapshotStore, persistenceProvider, persistenceProviderOpened), ...(snapshotStore ? { snapshotStore } : {}), ...(persistenceProvider ? { persistenceProvider, persistenceProviderOpened: true } : {}) };
+  } catch (error) {
+    try { await persistenceProvider?.close(); } catch { /* 保留原始启动故障。 */ }
     throw error;
   }
 }
@@ -87,13 +116,13 @@ export async function startSandboxServer(options: SandboxServerOptions): Promise
  * @author lvdaxianer@yeah.net
  * @date 2026-10-19
  */
-async function listenSandbox(app: FastifyInstance, context: { manager: SandboxSessionManager; session: IarSandboxSession; lifecycle: SandboxLifecycle; snapshotStore: ClosableSnapshotStore; options: SandboxServerOptions }): Promise<SandboxServerHandle> {
-  const { manager, session, lifecycle, snapshotStore, options } = context;
+async function listenSandbox(app: FastifyInstance, context: { manager: SandboxSessionManager; session: IarSandboxSession; lifecycle: SandboxLifecycle; snapshotStore?: ClosableSnapshotStore; persistenceProvider?: ClosablePersistenceProvider; options: SandboxServerOptions }): Promise<SandboxServerHandle> {
+  const { manager, session, lifecycle, snapshotStore, persistenceProvider, options } = context;
   const requestedPort = options.port ?? Number(process.env.IAR_SANDBOX_PORT ?? 8787);
   const port = Number.isInteger(requestedPort) && requestedPort > 0 ? requestedPort : 8787;
   await app.listen({ port, host: '127.0.0.1' });
   const releaseSignal = registerDebugSignal();
-  return { app, session, port, mode: options.mode, close: createSandboxClose(app, manager, snapshotStore, { releaseSignal, lifecycle }) };
+  return { app, session, port, mode: options.mode, ...(persistenceProvider ? { persistenceProvider } : {}), close: createSandboxClose(app, manager, snapshotStore, persistenceProvider, { releaseSignal, lifecycle }) };
 }
 
 /**
@@ -104,11 +133,16 @@ async function listenSandbox(app: FastifyInstance, context: { manager: SandboxSe
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-function configureSandboxApp(app: FastifyInstance, options: { manager: SandboxSessionManager; indexHtml: string; lifecycle: SandboxLifecycle; snapshotStore: ClosableSnapshotStore }): void {
+function configureSandboxApp(app: FastifyInstance, options: { manager: SandboxSessionManager; indexHtml: string; lifecycle: SandboxLifecycle; snapshotStore?: ClosableSnapshotStore; persistenceProvider?: ClosablePersistenceProvider }): void {
   registerRequestAudit(app);
   registerClosingGuard(app, options.lifecycle);
   registerSandboxRoutes(app, options.manager, options.indexHtml);
-  app.addHook('onClose', async () => { await options.snapshotStore.close?.(); });
+  app.addHook('onClose', async () => {
+    // server.close() 会在 HTTP 排空后按顺序关闭；外部直接关闭 Fastify 时仍需释放底层 Worker。
+    if (options.lifecycle.managedClose) return;
+    await options.snapshotStore?.close?.();
+    if (options.persistenceProvider !== options.snapshotStore) await options.persistenceProvider?.close();
+  });
 }
 
 /**
@@ -118,10 +152,11 @@ function configureSandboxApp(app: FastifyInstance, options: { manager: SandboxSe
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-async function cleanupFailedStartup(resources: { app: FastifyInstance | undefined; manager: SandboxSessionManager | undefined; session: IarSandboxSession; snapshotStore: ClosableSnapshotStore }): Promise<void> {
+async function cleanupFailedStartup(resources: { app: FastifyInstance | undefined; manager: SandboxSessionManager | undefined; session: IarSandboxSession | undefined; snapshotStore?: ClosableSnapshotStore; persistenceProvider?: ClosablePersistenceProvider }): Promise<void> {
   try { await resources.app?.close(); } catch { /* 保留原启动故障。 */ }
-  try { if (resources.manager) resources.manager.dispose(); else resources.session.dispose(); } catch { /* 保留原启动故障。 */ }
-  try { await resources.snapshotStore.close?.(); } catch { /* 保留原启动故障。 */ }
+  try { if (resources.manager) resources.manager.dispose(); else resources.session?.dispose(); } catch { /* 保留原启动故障。 */ }
+  try { await resources.snapshotStore?.close?.(); } catch { /* 保留原启动故障。 */ }
+  try { if (resources.persistenceProvider !== resources.snapshotStore) await resources.persistenceProvider?.close(); } catch { /* 保留原启动故障。 */ }
 }
 
 /**
@@ -149,7 +184,7 @@ function registerClosingGuard(app: FastifyInstance, lifecycle: SandboxLifecycle)
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-function createSandboxClose(app: FastifyInstance, manager: SandboxSessionManager, snapshotStore: ClosableSnapshotStore, options: { releaseSignal: () => void; lifecycle: SandboxLifecycle }): () => Promise<void> {
+function createSandboxClose(app: FastifyInstance, manager: SandboxSessionManager, snapshotStore: ClosableSnapshotStore | undefined, persistenceProvider: ClosablePersistenceProvider | undefined, options: { releaseSignal: () => void; lifecycle: SandboxLifecycle }): () => Promise<void> {
   let pending: Promise<void> | undefined;
   let isClosed = false;
   const cleanup = createSandboxCleanup(manager);
@@ -157,10 +192,15 @@ function createSandboxClose(app: FastifyInstance, manager: SandboxSessionManager
     // 同步关闭入口，再开始可能失败的异步监听器关闭。
     options.lifecycle.isClosing = true;
     // 信号引用在任何关闭结果下都释放；失败时会话留给在途请求。
-    try { await app.close(); isClosed = true; } finally { options.releaseSignal(); }
+    options.lifecycle.managedClose = true;
+    try { await app.close(); isClosed = true; } finally { options.lifecycle.managedClose = false; options.releaseSignal(); }
     await manager.drain();
-    cleanup();
-    await snapshotStore.close?.();
+    let failure: unknown;
+    try { await manager.flushPersistence(); } catch (error) { failure = error; }
+    try { cleanup(); } catch (error) { failure ??= error; }
+    try { await snapshotStore?.close?.(); } catch (error) { failure ??= error; }
+    try { if (persistenceProvider !== snapshotStore) await persistenceProvider?.close(); } catch (error) { failure ??= error; }
+    if (failure !== undefined) throw failure;
   };
   return () => pending ??= attempt().catch((error: unknown) => {
     // 只有底层关闭未完成时才允许重新尝试。

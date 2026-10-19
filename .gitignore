@@ -17,3 +17,6 @@ dist/
 *.key
 .Codex/worktrees/
 # <<< project-hygiene (managed) <<<
+
+# 本地 sandbox 默认 SQLite 数据目录。
+data/

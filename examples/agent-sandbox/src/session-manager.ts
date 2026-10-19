@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { AsyncResource } from 'node:async_hooks';
 import { IarSandboxSession, type SandboxMode } from './session.js';
 import type { SnapshotStore } from '../../../packages/storage/src/index.js';
+import type { SessionPersistenceProvider } from '@iar/persistence-spi';
 
 /** 会话管理可配置上限；包含正在执行的请求。 */
 /** 每个节点单独记录开始和取消状态，避免重复释放容量。 */
@@ -47,7 +48,7 @@ export class SandboxSessionManager {
    * @param mode - 会话运行模式 @param session - 兼容会话 @param limits - 资源上限
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  public constructor(private readonly mode: SandboxMode, session: IarSandboxSession, limits: SandboxSessionLimits = {}, private readonly snapshotStore?: SnapshotStore) {
+  public constructor(private readonly mode: SandboxMode, session: IarSandboxSession, limits: SandboxSessionLimits = {}, private readonly snapshotStore?: SnapshotStore, private readonly persistenceProvider?: SessionPersistenceProvider, private readonly persistenceProviderOpened = false) {
     this.limits = { ...DEFAULT_LIMITS, ...limits };
     if (Object.values(this.limits).some((value) => !Number.isSafeInteger(value) || value <= 0)) throw new Error('Invalid session limits');
     this.legacy = this.createEntry(session);
@@ -62,7 +63,7 @@ export class SandboxSessionManager {
     this.sweep();
     if (this.entries.size >= this.limits.maxSessions) throw new SessionError(503, 'session_capacity');
     const id = randomBytes(ID_BYTES).toString('base64url');
-    const sessionOptions = this.snapshotStore ? { mode: this.mode, sessionId: id, snapshotStore: this.snapshotStore } : { mode: this.mode, sessionId: id };
+    const sessionOptions = this.sessionOptions(id);
     this.entries.set(id, this.createEntry(new IarSandboxSession(sessionOptions)));
     return id;
   }
@@ -71,7 +72,7 @@ export class SandboxSessionManager {
   public async restore(id: string): Promise<void> {
     if (!/^[A-Za-z0-9_-]{32}$/.test(id)) throw new SessionError(400, 'invalid_session_id');
     if (this.entries.has(id)) return;
-    if (!this.snapshotStore) throw new SessionError(404, 'session_not_found');
+    if (!this.snapshotStore && !this.persistenceProvider) throw new SessionError(404, 'session_not_found');
     const existing = this.restoring.get(id);
     if (existing) return existing;
     const operation = this.restoreEntry(id);
@@ -81,11 +82,11 @@ export class SandboxSessionManager {
 
   /** 读取快照并等待新会话完成恢复，失败时不把半初始化条目放入索引。 */
   private async restoreEntry(id: string): Promise<void> {
-    const snapshot = await this.snapshotStore!.get(id);
+    const snapshot = await this.persistenceProvider?.loadSnapshot(id) ?? (await this.snapshotStore?.get(id));
     if (!snapshot) throw new SessionError(404, 'session_not_found');
     this.sweep();
     if (this.entries.size >= this.limits.maxSessions) throw new SessionError(503, 'session_capacity');
-    const sessionOptions = this.snapshotStore ? { mode: this.mode, sessionId: id, snapshotStore: this.snapshotStore } : { mode: this.mode, sessionId: id };
+    const sessionOptions = this.sessionOptions(id);
     const session = new IarSandboxSession(sessionOptions);
     const entry = this.createEntry(session);
     try { if (entry.ready) await entry.ready; } catch { session.dispose(); throw new SessionError(503, 'session_restore_failed'); }
@@ -229,6 +230,12 @@ export class SandboxSessionManager {
     await Promise.all([...queued, ...this.restoring.values()].map((operation) => operation.catch(() => undefined)));
   }
 
+  /** HTTP 队列排空后继续等待每个会话的异步 Hook 和 Provider 写入完成。 */
+  public async flushPersistence(): Promise<void> {
+    const entries = [this.legacy, ...this.entries.values(), ...this.retired];
+    await Promise.all(entries.map((entry) => entry.session.flushPersistence()));
+  }
+
   /** 关闭定时器并释放所有会话；仅在 HTTP 排空后调用。
    * @returns 无返回值 @author lvdaxianer@yeah.net @date 2026-10-18
    */
@@ -309,6 +316,17 @@ export class SandboxSessionManager {
   private createEntry(session: IarSandboxSession): Entry {
     const ready = typeof session.whenReady === 'function' ? session.whenReady() : undefined;
     return { session, ready, queue: [], active: undefined, pending: 0, operations: 0, confirmations: new Set(), lastUsed: Date.now(), closing: false };
+  }
+
+  /** 为所有独立会话注入同一套可替换持久化依赖，同时保持旧快照接口兼容。 */
+  private sessionOptions(id: string): { mode: SandboxMode; sessionId: string; snapshotStore?: SnapshotStore; persistenceProvider?: SessionPersistenceProvider; persistenceProviderOpened?: boolean } {
+    return {
+      mode: this.mode,
+      sessionId: id,
+      ...(this.snapshotStore ? { snapshotStore: this.snapshotStore } : {}),
+      ...(this.persistenceProvider ? { persistenceProvider: this.persistenceProvider } : {}),
+      ...(this.persistenceProviderOpened ? { persistenceProviderOpened: true } : {})
+    };
   }
 
   /** 只回收没有在途或排队操作的过期会话。

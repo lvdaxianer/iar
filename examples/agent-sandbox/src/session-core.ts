@@ -128,7 +128,7 @@ export class SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public constructor(options: { mode: SandboxMode; decisionBackend?: SandboxDecisionBackend; sessionId?: string; snapshotStore?: SnapshotStore; persistenceProvider?: SessionPersistenceProvider }) {
+  public constructor(options: { mode: SandboxMode; decisionBackend?: SandboxDecisionBackend; sessionId?: string; snapshotStore?: SnapshotStore; persistenceProvider?: SessionPersistenceProvider; persistenceProviderOpened?: boolean }) {
     try {
       this.mode = options.mode; this.sessionId = options.sessionId ?? SESSION_RUN_ID;
       this.snapshotStore = options.snapshotStore; this.persistenceProvider = options.persistenceProvider;
@@ -138,7 +138,7 @@ export class SandboxSessionCore {
       this.brainProvider = models.brain; this.registry = models.registry; this.gateway = models.gateway;
       this.functionDecisionAdapter = models.functionAdapter; this.pluginDecisionAdapter = models.pluginAdapter;
       this.workflow = this.createWorkflow();
-      this.restoration = this.initializePersistence();
+      this.restoration = this.initializePersistence(options.persistenceProviderOpened === true);
     } catch (error) {
       // 任一依赖失败时必须释放已启动的执行线程。
       this.bridge.dispose();
@@ -273,8 +273,8 @@ export class SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-19
    */
-  private async initializePersistence(): Promise<void> {
-    await this.persistenceProvider?.open(undefined);
+  private async initializePersistence(persistenceProviderOpened: boolean): Promise<void> {
+    if (!persistenceProviderOpened) await this.persistenceProvider?.open(undefined);
     await this.restoreSnapshot();
   }
 

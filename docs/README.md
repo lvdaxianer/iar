@@ -831,7 +831,15 @@ tests/
 
 回复生成超限时 `reasonCode` 为 `model_response_too_large`：未执行动作时状态为 `failed`；动作已执行时保持 `executed` 并返回动作结果，回复明确标识不完整，禁止因回复失败自动重试动作。SSE 已发送的增量不能撤回，客户端必须依据最终 `done` 的原因码标记不完整，不得将截断内容当作完整回复；截断内容不会写入会话最近消息。
 
-会话不存在、已删除或已过期返回 404 `session_not_found`，优先于聊天消息内容校验；会话容量满返回 503 `session_capacity`；单会话队列满返回 503 `session_busy`；状态操作预算耗尽返回 429 `session_limit`，可读取状态后重置；消息过长返回 413 `message_too_long`。这些错误使用 `{"status":"failed","reasonCode":"..."}`，不包含会话 ID。每次结构化行为上下文更新都会异步排入 SQLite 快照队列；设置 `IAR_SANDBOX_SQLITE_PATH=/path/to/iar-sandbox.sqlite` 后，服务重启可通过 `POST /api/sessions/{sessionId}/resume` 恢复最近成功写入的有效版本，再处理新的聊天或确认请求。未设置路径时使用进程内 SQLite，适合测试和单进程运行；正常关闭会等待已接受写入排空，突然终止可能丢失尚未提交的更新。快照仅恢复结构化上下文，不伪造内存事件历史；损坏或不兼容快照被安全忽略，不作为可信事实使用。
+会话不存在、已删除或已过期返回 404 `session_not_found`，优先于聊天消息内容校验；会话容量满返回 503 `session_capacity`；单会话队列满返回 503 `session_busy`；状态操作预算耗尽返回 429 `session_limit`，可读取状态后重置；消息过长返回 413 `message_too_long`。这些错误使用 `{"status":"failed","reasonCode":"..."}`，不包含会话 ID。每次结构化行为上下文更新都会通过 `SessionPersistenceProvider` 异步排队；默认使用内置 SQLite，路径为 `IAR_SANDBOX_SQLITE_PATH` 或 `./data/iar-sandbox.sqlite`，也可以设置 `IAR_PERSISTENCE_PROVIDER`、`IAR_PERSISTENCE_MODULE` 和 `IAR_PERSISTENCE_OPTIONS_JSON` 接入外部 SPI Provider。服务重启可通过 `POST /api/sessions/{sessionId}/resume` 恢复最近成功写入的有效版本，再处理新的聊天或确认请求。正常关闭会等待已接受写入排空，突然终止可能丢失尚未提交的更新。快照仅恢复结构化上下文，不伪造内存事件历史；损坏或不兼容快照被安全忽略，不作为可信事实使用。
+
+### 12.2.2 会话持久化 Provider 接入规范
+
+运行时只依赖 `@iar/persistence-spi` 的 `SessionPersistenceProvider`，不扫描、不注入具体数据库实现。Provider 必须声明 `iar.persistence/v1` Manifest，并实现 `open`、消息/事件追加、快照读写、`flush` 和 `close`；每次调用都接收 canonical `sessionId`，不能从用户文本或模型输出推导。
+
+沙箱默认通过 `PersistenceProviderLoader` 加载内置 `sqlite` Provider。`IAR_PERSISTENCE_PROVIDER` 指定 `providerId`，`IAR_PERSISTENCE_MODULE` 指定外部模块入口，`IAR_PERSISTENCE_OPTIONS_JSON` 传递 JSON 对象；模块需导出 `{ manifest, createProvider }`，Manifest 的 `providerId` 必须与配置一致。外部 Provider 在启动时完成 SPI 校验和 `open`，不符合版本或接口要求时服务拒绝启动，不静默切换到其他存储。
+
+Provider 由宿主负责生命周期：会话事件通过异步 Hook 订阅桥写入，正常关闭先排空 HTTP 会话和 Provider 队列，再调用 `close`。恢复入口 `POST /api/sessions/{sessionId}/resume` 只按 `sessionId` 读取最新有效快照；恢复完成后才允许下一次模型决策，因此模型看到的是当前结构化上下文，而不是未经校验的会话原文。
 
 随机 ID 只用于状态隔离，不能代替身份认证和租户授权；获取 ID 即可读取状态和确认操作。默认只监听 `127.0.0.1`，仍须信任所有可访问本机端口的进程；生产接入需要认证、按用户和租户逐会话授权、TLS、跨站请求防护及访问控制。ID 可能出现在代理访问日志、浏览器历史或其他 URL 记录中，须按敏感凭据保护；沙箱自身的请求审计不记录 ID。事件、投影、已接受的结构化快照和待确认动作属于独立会话；快照写入使用独立 SQLite 工作线程、有界队列、版本门禁和有限重试，工作线程故障只返回稳定持久化错误并记录固定安全事件，不暴露数据库路径、SQL 或原始异常。
 

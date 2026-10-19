@@ -75,14 +75,20 @@ if (testFiles.length === 0) {
   console.error('未找到与筛选条件匹配的测试文件。');
   process.exitCode = 1;
 } else {
-  // 使用当前 Node 进程运行筛选后的测试，并透传退出码，保持 npm test 的失败语义。
-  const result = spawnSync(process.execPath, ['--test', ...testFiles], { stdio: 'inherit' });
-  // 启动失败没有 status，必须显式输出底层错误，便于定位 Node 或权限问题。
-  if (result.error) {
-    console.error(`测试进程启动失败：${result.error.message}`);
-    process.exitCode = 1;
-  } else {
-    // Node 测试进程的退出码直接反映断言结果，未提供状态时按失败处理。
-    process.exitCode = result.status ?? 1;
+  // 测试未显式提供 snapshotPath 时使用独立内存 SQLite，避免多个用例共享开发机默认文件；恢复回归会显式传入临时文件。
+  // 每个文件使用独立 Node 进程串行运行，隔离环境变量、临时端口和 Worker SQLite。
+  for (const testFile of testFiles) {
+    const result = spawnSync(process.execPath, ['--test', testFile], { stdio: 'inherit', env: { ...process.env, IAR_SANDBOX_SQLITE_PATH: ':memory:' } });
+    // 启动失败没有 status，必须显式输出底层错误，便于定位 Node 或权限问题。
+    if (result.error) {
+      console.error(`测试进程启动失败：${result.error.message}`);
+      process.exitCode = 1;
+      break;
+    }
+    if ((result.status ?? 1) !== 0) {
+      process.exitCode = result.status ?? 1;
+      break;
+    }
+    process.exitCode = 0;
   }
 }
