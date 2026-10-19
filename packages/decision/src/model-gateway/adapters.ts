@@ -188,7 +188,7 @@ export class ContextCompactorAdapter {
    * @date 2026-10-17
    */
   public compact(invocation: ContextCompactInvocation): Promise<ModelGatewayResult<CompactionResult>> {
-    return this.gateway.invoke('context.compact', invocation, validateCompactionResult);
+    return this.gateway.invoke('context.compact', { ...invocation, input: sanitizeCompactionInput(invocation.input) }, validateCompactionResult);
   }
 }
 
@@ -299,6 +299,22 @@ function isJsonValue(value: unknown, seen = new Set<object>()): value is JsonVal
 /** 判断普通对象。 @param value - 未知值 @returns 是否为普通对象 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * 只把结构化上下文和不可变事件交给压缩模型，拒绝最近消息原文。
+ *
+ * @param input - 调用方提供的压缩输入
+ * @returns 仅包含压缩模型允许读取字段的 JSON 输入
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-19
+ */
+function sanitizeCompactionInput(input: JsonValue): JsonValue {
+  if (!isRecord(input)) return input;
+  return {
+    ...(input.behaviorContext === undefined ? {} : { behaviorContext: input.behaviorContext as JsonValue }),
+    ...(input.eventsToCompact === undefined ? {} : { eventsToCompact: input.eventsToCompact as JsonValue })
+  };
 }
 
 /** 构造不含原始输入的 JEV invalid_request。 @param message - 稳定错误摘要 @returns JEV 失败结果 @author lvdaxianer@yeah.net @date 2026-10-17 */

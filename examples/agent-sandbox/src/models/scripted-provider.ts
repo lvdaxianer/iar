@@ -16,9 +16,6 @@ import { REQUIRED_PRESERVED_FACTS } from '@iar/contracts';
 import type { ModelProvider, ModelProviderRequest } from '@iar/decision';
 import { sandboxFunctionCatalog } from '../functions/index.js';
 
-/** 会话消息的最小形状。 */
-type SandboxMessage = { role: string; text: string };
-
 /** 压缩 state 片段允许保留的白名单字段。 */
 const STATE_FIELD_WHITELIST = ['subject', 'intent', 'action', 'route', 'slots', 'workflow', 'pending', 'confirmation'] as const;
 
@@ -110,7 +107,7 @@ export class ScriptedModelProvider implements ModelProvider {
   /**
    * 生成基于输入事件的确定性压缩结果。
    *
-   * @param input - behaviorContext、eventsToCompact 和 recentMessages
+   * @param input - behaviorContext 和 eventsToCompact
    * @returns iar.compaction-result/v1 结构，state 按白名单保留
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
@@ -118,17 +115,13 @@ export class ScriptedModelProvider implements ModelProvider {
   private compact(input: Record<string, unknown>): unknown {
     const context = asRecord(input.behaviorContext);
     const events = Array.isArray(input.eventsToCompact) ? input.eventsToCompact : [];
-    const messages: SandboxMessage[] = (Array.isArray(input.recentMessages) ? input.recentMessages : [])
-      .filter(isRecord)
-      .map((message) => ({ role: String(message.role ?? 'unknown'), text: String(message.text ?? '') }));
-    const recentTexts = messages.slice(-3).map((message) => `${message.role}: ${message.text}`).join('；');
     const state: Record<string, unknown> = {};
     for (const field of STATE_FIELD_WHITELIST) {
       if (context[field] !== undefined) state[field] = context[field];
     }
     return {
       schemaVersion: 'iar.compaction-result/v1',
-      summary: `会话已产生 ${String(events.length)} 条事件、${String(messages.length)} 条消息。最近对话：${recentTexts || '无'}。`,
+      summary: `会话已产生 ${String(events.length)} 条结构化事件，可信事实及其来源由运行时保留。`,
       state,
       references: [],
       preservedFacts: [...REQUIRED_PRESERVED_FACTS],

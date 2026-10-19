@@ -115,3 +115,19 @@ test('损坏快照不会污染后续有效恢复', async () => {
     await reopened.close();
   } finally { temporary.cleanup(); }
 });
+
+test('已校验的压缩摘要随 SQLite 快照写入并在重启后恢复', async () => {
+  const temporary = temporaryDatabase();
+  try {
+    const first = new AsyncSqliteSnapshotStore({ filename: temporary.path });
+    const record = snapshot('session-summary', 1, 'evt-compacted');
+    record.context.summary = { text: '工单已创建，编号为 ticket-001。', version: 'summary-v1', eventId: 'evt-compacted' };
+    await first.save(record);
+    await first.close();
+    const second = new AsyncSqliteSnapshotStore({ filename: temporary.path });
+    assert.deepEqual((await second.get('session-summary'))?.context.summary, {
+      text: '工单已创建，编号为 ticket-001。', version: 'summary-v1', eventId: 'evt-compacted'
+    });
+    await second.close();
+  } finally { temporary.cleanup(); }
+});

@@ -9,6 +9,9 @@ import { JsonValueSchema } from './schema-primitives.js';
 import { MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_FIELDS } from './types-base.js';
 import { SCHEMA_VERSIONS } from './versions.js';
 
+/** BehaviorContext 摘要文本的统一长度边界。 */
+export const MAX_CONTEXT_SUMMARY_LENGTH = 1200;
+
 /** BehaviorContext 的主语及其不可变来源。 */
 export const SubjectReferenceSchema = Type.Object({
   // type 描述主语的领域类型。
@@ -124,6 +127,16 @@ export const TrustedFactSchema = Type.Object({
   field: Type.Union(TRUSTED_FACT_FIELDS.map((field) => Type.Literal(field)))
 }, { additionalProperties: false });
 
+/** 已通过压缩契约校验、可随会话恢复的摘要。 */
+export const ContextSummarySchema = Type.Object({
+  // text 只承载已校验的辅助摘要，不授予执行权限。
+  text: Type.String({ minLength: 1, maxLength: MAX_CONTEXT_SUMMARY_LENGTH }),
+  // version 标识摘要解释方式。
+  version: Type.String({ minLength: 1, maxLength: 100 }),
+  // eventId 指向生成摘要的不可变压缩事件。
+  eventId: Type.String({ minLength: 1, maxLength: 200 })
+}, { additionalProperties: false });
+
 /** 不可变事实投影出的当前 BehaviorContext。 */
 export const BehaviorContextSchema = Type.Object({
   // BehaviorContext 版本决定投影和重放方式。
@@ -161,6 +174,8 @@ export const BehaviorContextSchema = Type.Object({
   confirmation: ConfirmationStateSchema,
   // facts 只保存成功输出中的有限、可追溯事实。
   facts: Type.Optional(Type.Record(Type.String({ minLength: 1, maxLength: MAX_TRUSTED_FACT_KEY_LENGTH }), TrustedFactSchema, { maxProperties: MAX_TRUSTED_FACTS })),
+  // summary 是已校验的辅助视图，不进入关键执行字段哈希。
+  summary: Type.Optional(ContextSummarySchema),
   // 幂等键贯穿一次 Action 提交和重试。
   idempotencyKey: Type.String({ minLength: 1 }),
   // integrity 绑定关键字段哈希和最后事实事件。

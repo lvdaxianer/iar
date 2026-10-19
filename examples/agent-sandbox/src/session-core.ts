@@ -251,6 +251,11 @@ export class SandboxSessionCore {
     });
   }
 
+  /** 在压缩事件投影后异步保存包含摘要的当前结构化上下文。 */
+  protected queueSnapshotAfterCompaction(eventId: string): void {
+    this.queueSnapshot(eventId);
+  }
+
 
   /**
    * 构造把插件 Handler 包成 ActionResult 的同步 executor。

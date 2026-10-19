@@ -5,14 +5,16 @@
  * @date 2026-10-17
  */
 import { Type } from '@sinclair/typebox';
-import { BehaviorContextSchema } from './schema-context.js';
+import { BehaviorContextSchema, MAX_CONTEXT_SUMMARY_LENGTH } from './schema-context.js';
 import { JsonValueSchema } from './schema-primitives.js';
 import { SCHEMA_VERSIONS } from './versions.js';
 
 /** 摘要和压缩事件的长度边界。 */
 export const COMPACTION_LIMITS = {
+  // 单次压缩最多接收一个有界事件窗口，超出时必须失败而不是跳过事件。
+  maxEvents: 128,
   // 摘要不能成为新的无限上下文。
-  maxSummaryLength: 1200,
+  maxSummaryLength: MAX_CONTEXT_SUMMARY_LENGTH,
   // 引用数量限制避免模型输出放大。
   maxReferences: 128,
   // 保留事实必须是有限声明集合。
@@ -44,7 +46,9 @@ export const REQUIRED_PRESERVED_FACTS = [
   // 意图用于恢复后续理解边界。
   'intent',
   // 幂等键用于防止重复副作用。
-  'idempotencyKey'
+  'idempotencyKey',
+  // 可信事实及来源必须从旧视图完整保留。
+  'facts'
 ] as const;
 // 该清单同时服务于模型提示、运行时校验和审计报告。
 

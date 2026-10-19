@@ -22,10 +22,12 @@ export type CompactionContext = {
   projector: BehaviorContextProjector;
   /** 会话持有的模型网关。 */
   gateway: ModelGateway;
-  /** 提供压缩模型所需的最近对话。 */
+  /** 回复模型使用的有限消息缓存；压缩模型不会读取或传输它。 */
   recentMessages: Array<{ role: string; text: string }>;
   /** 访问宿主序号，避免组件保留重置前的副本。 */
   compactCount: number;
+  /** 压缩事件投影后异步保存完整结构化快照。 */
+  queueSnapshot: (eventId: string) => void;
 };
 
 /** 会话上下文压缩和失败事件记录。
@@ -61,7 +63,7 @@ export class SandboxSessionCompaction {
     const compacted = await new ContextCompactorAdapter(this.context.gateway).compact({
       traceId: resolveSandboxTraceId(`trace-compact-${String(compactSeq)}`),
       runId: SESSION_RUN_ID,
-      input: { behaviorContext: current, eventsToCompact: events.slice(0, -1), recentMessages: this.context.recentMessages }
+      input: { behaviorContext: current, eventsToCompact: events.slice(0, -1) }
     });
     return this.finishCompaction({ events, current, hashBefore, compactSeq, occurredAt, compacted });
   }
@@ -80,6 +82,7 @@ export class SandboxSessionCompaction {
       const failureEvent = this.buildCompactionFailureEvent({ compactSeq, occurredAt, reasonCode: compacted.error.code, message: compacted.error.message, hashBefore });
       await this.context.eventStore.append(failureEvent);
       this.context.projector.apply(failureEvent);
+      this.context.queueSnapshot(failureEvent.eventId);
       return { ok: false, reasonCode: compacted.error.code, error: compacted.error.message, hashBefore, hashAfter: this.context.projector.current().integrity.criticalFieldHash, eventId: failureEvent.eventId };
     }
     const outcome = new ContextCompactionService().compact(this.buildCompactionRequest({ compactSeq, occurredAt, events, current, compacted: compacted.value }));
@@ -87,10 +90,12 @@ export class SandboxSessionCompaction {
     if (outcome.ok) {
       await this.context.eventStore.append(outcome.event);
       this.context.projector.apply(outcome.event);
+      this.context.queueSnapshot(outcome.event.eventId);
       return { ok: true, summary: compacted.value.summary, hashBefore, hashAfter: outcome.context.integrity.criticalFieldHash, eventId: outcome.event.eventId };
     }
     await this.context.eventStore.append(outcome.failureEvent);
     this.context.projector.apply(outcome.failureEvent);
+    this.context.queueSnapshot(outcome.failureEvent.eventId);
     return { ok: false, reasonCode: outcome.error.code, error: outcome.error.message, hashBefore, hashAfter: this.context.projector.current().integrity.criticalFieldHash, eventId: outcome.failureEvent.eventId };
   }
 

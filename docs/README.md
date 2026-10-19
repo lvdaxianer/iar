@@ -537,7 +537,7 @@ StateEvent
 2. **BehaviorContext**：由事件投影得到的当前行为状态，是运行时决策输入；
 3. **ContextView**：针对某次模型调用生成的受限视图，包含必要摘要和最近事件。
 
-压缩只压缩对话文本和非关键历史，不压缩行为状态。任何摘要都不能替代 `subject`、`action`、`functionId`、`pluginId`、`slots`、`workflow.currentStep`、`pending` 和 `confirmation`。
+压缩只整理结构化状态和不可变事件，不把最近聊天原文传给压缩模型，也不压缩行为状态。任何摘要都不能替代 `subject`、`action`、`functionId`、`pluginId`、`slots`、`workflow.currentStep`、`pending`、`confirmation` 和可信 `facts`。
 
 ### 7.2 必须保留的字段
 
@@ -592,19 +592,23 @@ StateEvent
 3. 当前 Workflow 步骤、幂等键和待确认状态不变；
 4. 摘要中的实体引用能映射回事件或快照；
 5. 校验失败时保留旧视图，不替换可恢复状态。
+6. `facts` 及其 `sourceEventId`、Function、Plugin 和字段来源保持不变；模型不能新增或覆盖事实。
+7. 摘要最多 1200 个字符，单次压缩最多接收 128 条事件；超限、截断或无效输出都拒绝并保留旧视图，不跳过未压缩事件。
+
+成功压缩后，运行时把 `summary`、`summaryVersion` 和压缩事件编号写入 `BehaviorContext.summary`，再随本轮结构化上下文异步保存到 SQLite；服务重启恢复的摘要仍来自已校验的压缩事件，不来自最近聊天原文。
 
 完整状态样例见 [`references/行为上下文示例.json`](./references/行为上下文示例.json)。
 
 ### 7.4 上下文压缩模型的 Prompt 与返回格式
 
-上下文压缩使用通用模型的 `contextCompactor` 角色，不使用 JEV。压缩模型只负责把旧消息整理成结构化摘要，不能重新选择 Function、Plugin，不能改变确认状态，也不能执行动作。
+上下文压缩使用通用模型的 `contextCompactor` 角色，不使用 JEV。压缩模型只负责把结构化状态和不可变事件整理成摘要，不能接收最近消息原文，不能重新选择 Function、Plugin，不能改变确认状态或可信事实，也不能执行动作。
 
 压缩模型的输入由运行时拼装，至少包括：
 
 ```text
 <behavior_context> 当前 BehaviorContext JSON </behavior_context>
 <events_to_compact> 待压缩的不可变事件 JSON 数组 </events_to_compact>
-<recent_messages> 必须保留的最近消息 JSON 数组 </recent_messages>
+<!-- 不提供 recent_messages；压缩模型不得接收会话原文 -->
 <compression_policy> 必须保留字段、事件边界和长度限制 </compression_policy>
 ```
 
@@ -632,7 +636,7 @@ StateEvent
   "references": [
     {"text": "第一个服务", "resolvedTo": "test1", "sourceEventId": "evt_service_list_001"}
   ],
-  "preservedFacts": ["subject", "action", "functionId", "pluginId", "workflow.currentStep", "confirmation"],
+  "preservedFacts": ["subject", "action", "functionId", "pluginId", "workflow.currentStep", "confirmation", "facts"],
   "warnings": []
 }
 ```

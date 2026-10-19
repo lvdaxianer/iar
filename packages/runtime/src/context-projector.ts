@@ -169,6 +169,10 @@ export class BehaviorContextProjector {
   private applyPayload(event: EventEnvelope): void {
     const payload = event.payload;
     if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return;
+    if (event.eventName === 'context.compacted') {
+      this.applyCompactedState(payload);
+      return;
+    }
     // workflow.started 固定主语、意图和运行状态。
     if (event.eventName === 'workflow.started') this.applyWorkflowStarted(payload, event.eventId);
     // decision.created 固定当前 Function 和 Plugin 路由。
@@ -182,6 +186,16 @@ export class BehaviorContextProjector {
     if (event.eventName === 'action.completed') this.state.action.status = 'executed';
     if (event.eventName === 'action.failed') this.state.action.status = 'failed';
     if (event.eventName === 'action.completed') this.applyTrustedFacts(payload, event.eventId);
+  }
+
+  /** 从已校验的压缩事件恢复完整状态和摘要，拒绝伪造的快照。 */
+  private applyCompactedState(payload: Record<string, unknown>): void {
+    const state = payload.state;
+    const hash = payload.criticalFieldHash;
+    if (!isRecord(state) || typeof hash !== 'string' || !validateContract('behaviorContext', state).ok) throw new Error('压缩事件状态无效');
+    const context = structuredClone(state) as BehaviorContext;
+    if (criticalFieldHash(context) !== hash) throw new Error('压缩事件关键字段哈希不匹配');
+    this.state = context;
   }
 
   /** 投影开始事件中的主语和意图。 */

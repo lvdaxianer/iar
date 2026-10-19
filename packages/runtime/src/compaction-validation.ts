@@ -5,6 +5,7 @@
  * @date 2026-10-17
  */
 import {
+  COMPACTION_LIMITS,
   REQUIRED_PRESERVED_FACTS,
   validateContract,
   type BehaviorContext,
@@ -117,6 +118,9 @@ function validateEventSet(request: CompactionRequest): ContractIssue[] {
   if (!Array.isArray(request.events) || request.events.length === 0) {
     // 空事件集无法验证任何 reference。
     return [issue('/events', 'minItems', '压缩输入事件不能为空')];
+  }
+  if (request.events.length > COMPACTION_LIMITS.maxEvents) {
+    return [issue('/events', 'maxItems', '压缩输入事件超过容量上限')];
   }
   // 事件数组的顺序就是压缩边界的语义顺序。
   // 每条事件都经过契约、归属、时间和唯一性校验。
