@@ -20,10 +20,27 @@
 ## 运行
 
 ```bash
+npm install
 npm run demo:sandbox
 ```
 
 启动后访问终端打印的地址（默认 `http://localhost:8787`）。
+
+也可以使用 pnpm。pnpm workspace 已配置为链接仓库内的私有 `@iar/*` 包，运行脚本不会隐式联网安装；首次使用或依赖变更后先显式执行安装：
+
+```bash
+pnpm install
+pnpm run demo:sandbox
+```
+
+如果出现“端口已被占用”，先确认监听进程，再结束自己启动的旧 sandbox；也可以直接换端口：
+
+```bash
+lsof -nP -iTCP:8787 -sTCP:LISTEN
+IAR_SANDBOX_PORT=8788 npm run demo:sandbox
+```
+
+启动器会将端口冲突记录为 `port_in_use`，不会输出原始异常或敏感配置。
 
 ## 大脑模式
 

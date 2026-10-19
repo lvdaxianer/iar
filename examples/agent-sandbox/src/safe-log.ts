@@ -26,7 +26,7 @@ const MAX_LOG_WRITE_MS = 1000;
 /** 日志中允许出现的枚举字符串。 */
 const SAFE_VALUES: Readonly<Record<string, readonly string[]>> = {
   level: ['info', 'warn', 'debug'], event: ['http.request.start', 'http.request.end', 'http.stream', 'model.http', 'sandbox.start', 'sandbox.start_failed', 'sandbox.shutdown_failed', 'sandbox.snapshot'],
-  outcome: ['network_error', 'http_error', 'invalid_response', 'timeout', 'aborted', 'slow', 'success', 'stream_failed', 'stream_write_failed', 'startup_failed', 'shutdown_failed', 'invalid_mode', 'missing_api_key', 'snapshot_failed'],
+  outcome: ['network_error', 'http_error', 'invalid_response', 'timeout', 'aborted', 'slow', 'success', 'stream_failed', 'stream_write_failed', 'startup_failed', 'port_in_use', 'shutdown_failed', 'invalid_mode', 'missing_api_key', 'snapshot_failed'],
   target: ['model.chat.completions'], method: ['GET', 'POST', 'HEAD', 'OPTIONS', 'PUT', 'PATCH', 'DELETE', 'OTHER'],
   path: ['/', '/api/chat', '/api/confirm', '/api/compact', '/api/state', '/api/reset', 'unknown',
     '/api/sessions', '/api/sessions/:sessionId', '/api/sessions/:sessionId/chat', '/api/sessions/:sessionId/confirm',

@@ -33,6 +33,26 @@ npm test
 npm run demo:fake-plugin
 ```
 
+运行 Agent Sandbox：
+
+```bash
+npm run demo:sandbox
+```
+
+也支持 pnpm，但必须先显式安装依赖；`pnpm run` 不会因为启动脚本而自动访问 registry：
+
+```bash
+pnpm install
+pnpm run demo:sandbox
+```
+
+如果默认端口 `8787` 已被已有 sandbox 进程占用，可先确认并结束该进程，或改用其他本地端口：
+
+```bash
+lsof -nP -iTCP:8787 -sTCP:LISTEN
+IAR_SANDBOX_PORT=8788 npm run demo:sandbox
+```
+
 常用命令：
 
 | 命令 | 作用 |
@@ -41,6 +61,7 @@ npm run demo:fake-plugin
 | `npm run build` | 编译全部 workspace 包 |
 | `npm test` | 编译并运行完整测试套件 |
 | `npm run demo:fake-plugin` | 运行 fake plugin 生命周期与 replay 示例 |
+| `npm run demo:sandbox` | 启动 Agent Sandbox 交互演示 |
 
 ## 项目结构
 

@@ -25,7 +25,22 @@ const STARTUP_LOG_GRACE_MS = 100;
  */
 function reportStartupFailure(outcome = 'startup_failed') {
   writeSafeLog({ level: 'warn', event: 'sandbox.start_failed', outcome });
+  if (outcome === 'port_in_use') {
+    process.stderr.write('IAR agent sandbox 启动失败：端口已被占用。请结束已有 sandbox 进程，或设置 IAR_SANDBOX_PORT 使用其他端口。\n');
+  }
   process.exitCode = 1;
+}
+
+/**
+ * 将启动异常收敛为安全的固定分类。
+ * @param {unknown} error - 启动异常
+ * @returns {'port_in_use'|'startup_failed'} 安全失败分类
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-19
+ */
+function classifyStartupFailure(error) {
+  if (error && typeof error === 'object' && error.code === 'EADDRINUSE') return 'port_in_use';
+  return 'startup_failed';
 }
 
 /**
@@ -66,9 +81,9 @@ if (mode === 'real' && !hasApiKey) {
   // 缺少凭据时只输出固定分类。
   await exitStartupFailure('missing_api_key');
 }
-const serverStarting = startSandboxServer({ mode: mode === 'real' ? 'brain' : 'scripted' }).catch(() => {
+const serverStarting = startSandboxServer({ mode: mode === 'real' ? 'brain' : 'scripted' }).catch((error) => {
   // 启动异常可能包含私有路径和配置，只输出固定分类。
-  reportStartupFailure();
+  reportStartupFailure(classifyStartupFailure(error));
   // 给异步日志有限的输出机会，避免未完成资源让启动失败进程永久存活。
   setTimeout(() => process.exit(1), STARTUP_LOG_GRACE_MS);
   return undefined;
