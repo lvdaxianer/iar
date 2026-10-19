@@ -2,7 +2,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { ActionDefinition, ActionResult, JsonValue } from '@iar/contracts';
+import type { ActionDefinition, ActionResult, BehaviorContext, JsonValue } from '@iar/contracts';
 import { ResponseGeneratorAdapter, type ModelGateway, type ModelProfileRegistry } from '@iar/decision';
 import { sandboxFunctionIds } from './functions/index.js';
 import { OpenAICompatibleModelProvider, type BrainModelProvider } from './models/llm-provider.js';
@@ -16,7 +16,7 @@ import { streamModelReply } from './session-model-stream.js';
  * traceId 与 runId 继承当前轮次，不创建新的会话身份。
  * 所有回复路径共享同一个输入形状，避免普通和流式入口漂移。
  */
-type ReplyContext = { traceId: string; runId: string; userText: string };
+type ReplyContext = { traceId: string; runId: string; userText: string; behaviorContext: BehaviorContext };
 type FallbackContext = ReplyContext & { reasonCode: string };
 type ActionReplyContext = ReplyContext & { action: ActionDefinition; actionResult: ActionResult };
 
@@ -60,14 +60,14 @@ export class SandboxSessionReplies {
    * @date 2026-10-18
    */
   public async fallbackReply(context: FallbackContext): Promise<string> {
-    const { traceId, runId, userText, reasonCode } = context;
+    const { traceId, runId, userText, behaviorContext, reasonCode } = context;
     if (this.context.mode === 'brain') {
       const generated = await new ResponseGeneratorAdapter(this.context.gateway).generate({
         traceId,
         runId,
         input: {
           userMessage: userText,
-          recentMessages: this.context.recentMessages.slice(-6),
+          behaviorContext,
           availableFunctions: [...sandboxFunctionIds],
           reasonCode
         }
@@ -76,7 +76,7 @@ export class SandboxSessionReplies {
       if (generated.ok) return generated.value.text;
       return FALLBACK_REPLY_TEXT;
     }
-    return this.scriptedFallbackReply(userText) ?? FALLBACK_REPLY_TEXT;
+    return this.scriptedFallbackReply(userText, behaviorContext) ?? FALLBACK_REPLY_TEXT;
   }
 
 
@@ -90,7 +90,7 @@ export class SandboxSessionReplies {
    * @date 2026-10-18
    */
   public async fallbackReplyStreamed(context: FallbackContext, onDelta: (delta: string) => void): Promise<string> {
-    const { traceId, runId, userText, reasonCode } = context;
+    const { traceId, runId, userText, behaviorContext, reasonCode } = context;
     if (this.context.mode !== 'brain' || !(this.context.brainProvider instanceof OpenAICompatibleModelProvider)) {
       const reply = await this.fallbackReply(context);
       onDelta(reply);
@@ -98,7 +98,7 @@ export class SandboxSessionReplies {
     }
     const input: JsonValue = {
       userMessage: userText,
-      recentMessages: this.context.recentMessages.slice(-6),
+      behaviorContext,
       availableFunctions: [...sandboxFunctionIds],
       reasonCode
     };
@@ -115,12 +115,12 @@ export class SandboxSessionReplies {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected scriptedFallbackReply(userText: string): string | undefined {
+  protected scriptedFallbackReply(userText: string, behaviorContext: BehaviorContext): string | undefined {
     const text = userText.trim();
     if (/(刚才|之前|上次|前面)/.test(text)) {
-      const lastUser = [...this.context.recentMessages].reverse().find((message) => message.role === 'user');
-      if (lastUser) return `你刚才让我「${lastUser.text.slice(0, 60)}」，这就是你之前交代的事。`;
-      return '这是我们对话的开始，你还没有让我做过任何事。';
+      const facts = Object.values(behaviorContext.facts ?? {}).filter((fact) => fact.status === 'verified');
+      if (facts.length > 0) return `根据当前会话已确认的信息：${facts.map((fact) => `${fact.field}=${String(fact.value ?? '空')}`).join('、')}。`;
+      return '当前会话没有足够的已确认事实。请说明你想查询的对象或需要补充的信息。';
     }
     if (/(你是谁|你叫什么|自我介绍|你是什么)/.test(text)) {
       return '我是 IAR Agent Sandbox，一个可交互的 IAR 插件沙盒。当前模拟的企业数据平台包含 10 个子系统：平台通用知识、数据集成管理（DIP）、任务调度监控、API 网关管理、数据资产目录、报表中心、系统状态与告警、账户与权限、工单支持和人工服务。你输入一句话，我会走完语义抽取、两阶段路由（Function → Plugin）、策略确认和插件执行，并在右侧展示完整的路由证据和事件流。';
@@ -145,7 +145,7 @@ export class SandboxSessionReplies {
    * @date 2026-10-18
    */
   public async generateReplyStreamed(context: ActionReplyContext, onDelta: (delta: string) => void): Promise<string> {
-    const { traceId, runId, userText, action, actionResult } = context;
+    const { traceId, runId, userText, behaviorContext, action, actionResult } = context;
     if (this.context.mode !== 'brain' || !(this.context.brainProvider instanceof OpenAICompatibleModelProvider)) {
       const reply = await this.generateReply(context);
       onDelta(reply);
@@ -156,7 +156,8 @@ export class SandboxSessionReplies {
       functionId: action.functionId,
       pluginId: action.pluginId,
       actionStatus: actionResult.status,
-      actionOutput: actionResult.output ?? null
+      actionOutput: actionResult.output ?? null,
+      behaviorContext
     };
     return streamModelReply({ provider: this.context.brainProvider, profile: this.context.registry.forRole('response.generate'), traceId, runId, input, onDelta,
       onInvalid: async () => `动作已执行（${action.functionId}），但回复生成失败（model.schema_invalid）。`, onFailure: () => this.generateReply(context) });
@@ -174,7 +175,7 @@ export class SandboxSessionReplies {
    * @date 2026-10-17
    */
   public async generateReply(context: ActionReplyContext): Promise<string> {
-    const { traceId, runId, userText, action, actionResult } = context;
+    const { traceId, runId, userText, behaviorContext, action, actionResult } = context;
     const generated = await new ResponseGeneratorAdapter(this.context.gateway).generate({
       traceId,
       runId,
@@ -183,7 +184,8 @@ export class SandboxSessionReplies {
         functionId: action.functionId,
         pluginId: action.pluginId,
         actionStatus: actionResult.status,
-        actionOutput: actionResult.output ?? null
+        actionOutput: actionResult.output ?? null,
+        behaviorContext
       }
     });
     if (!generated.ok) return `动作已执行（${action.functionId}），但回复生成失败（${generated.error.code}）。`;

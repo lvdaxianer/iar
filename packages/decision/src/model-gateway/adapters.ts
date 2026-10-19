@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { validateContract, type CompactionResult, type DecisionResult, type JsonValue } from '@iar/contracts';
+import { validateContract, type BehaviorContext, type CompactionResult, type DecisionResult, type JsonValue } from '@iar/contracts';
 import { validateDecisionOutput } from '../validation.js';
 import type { DecisionRequest } from '../types.js';
 import { MODEL_NO_PROFILE_MESSAGE, type ModelGatewayInvocationOptions, type ModelGatewayResult, type ModelInvocation, type ModelOutputValidation } from './types.js';
@@ -34,7 +34,7 @@ export type SemanticFrame = {
 export type SemanticExtractInvocation = ModelInvocation;
 
 /** JEV Decision 的调用输入。 */
-export type JevDecisionInvocation = Omit<ModelInvocation, 'input'> & { request: DecisionRequest };
+export type JevDecisionInvocation = Omit<ModelInvocation, 'input'> & { request: DecisionRequest; currentMessage?: string; behaviorContext?: BehaviorContext };
 
 /**
  * Intent Model Decision 与 JEV 共用同一受限请求输入。
@@ -89,8 +89,8 @@ export class JevDecisionAdapter {
     // 先建立唯一请求快照，避免 role、gateway input 和 validator 分别读取可变输入。
     const snapshot = createDecisionInvocationSnapshot(invocation, this.role);
     if (!snapshot) return Promise.resolve(invalidJevResult('JEV decision 输入无效'));
-    const crossBackendInput = options?.crossBackendFallback === true ? buildIntentDecisionInput(snapshot.request) : undefined;
-    return this.gateway.invoke(this.role, { traceId: snapshot.traceId, runId: snapshot.runId, input: snapshot.request as unknown as JsonValue }, (raw) => validateDecisionResult(snapshot.request, raw), decisionOptions('jev', profileId, options, crossBackendInput));
+    const crossBackendInput = options?.crossBackendFallback === true ? buildIntentDecisionInput(snapshot.request, snapshot.currentMessage, snapshot.behaviorContext) : undefined;
+    return this.gateway.invoke(this.role, { traceId: snapshot.traceId, runId: snapshot.runId, input: decisionModelInput(snapshot.request, snapshot.currentMessage, snapshot.behaviorContext) }, (raw) => validateDecisionResult(snapshot.request, raw), decisionOptions('jev', profileId, options, crossBackendInput));
   }
 }
 
@@ -123,12 +123,12 @@ export class IntentModelDecisionAdapter {
     if (!snapshot) return Promise.resolve(invalidDecisionResult('Intent Model decision request 无效'));
     let input: JsonValue;
     try {
-      input = buildIntentDecisionInput(snapshot.request);
+      input = buildIntentDecisionInput(snapshot.request, snapshot.currentMessage, snapshot.behaviorContext);
     } catch {
       // Prompt builder 的底层异常统一收敛为稳定 invalid_request。
       return Promise.resolve(invalidDecisionResult('Intent Model decision request 无效'));
     }
-    const crossBackendInput = options?.crossBackendFallback === true ? snapshot.request as unknown as JsonValue : undefined;
+    const crossBackendInput = options?.crossBackendFallback === true ? decisionModelInput(snapshot.request, snapshot.currentMessage, snapshot.behaviorContext) : undefined;
     return this.gateway.invoke(this.role, { traceId: snapshot.traceId, runId: snapshot.runId, input }, (raw) => validateDecisionResult(snapshot.request, raw), decisionOptions('intent-model', profileId, options, crossBackendInput));
   }
 }
@@ -315,9 +315,35 @@ function createDecisionInvocationSnapshot(invocation: unknown, role?: 'function.
     if (!isNonEmptyString(traceId) || !isNonEmptyString(runId)) return undefined;
     const request = canonicalizeDecisionRequest(invocation.request);
     if (role !== undefined && request.decisionType !== role) return undefined;
-    return { traceId, runId, request };
+    const currentMessage = invocation.currentMessage === undefined ? undefined : snapshotMessage(invocation.currentMessage);
+    if (invocation.currentMessage !== undefined && currentMessage === undefined) return undefined;
+    const behaviorContext = invocation.behaviorContext === undefined ? undefined : snapshotBehaviorContext(invocation.behaviorContext);
+    if (invocation.behaviorContext !== undefined && behaviorContext === undefined) return undefined;
+    return { traceId, runId, request, ...(currentMessage === undefined ? {} : { currentMessage }), ...(behaviorContext === undefined ? {} : { behaviorContext }) };
   } catch {
     // Proxy、getter、循环引用和不可复制值都不能进入异步 provider 生命周期。
+    return undefined;
+  }
+}
+
+/** 构造两个决策 backend 共用的上下文输入，保持 DecisionResult 契约不变。 */
+function decisionModelInput(request: DecisionRequest, currentMessage: string | undefined, behaviorContext: BehaviorContext | undefined): JsonValue {
+  if (currentMessage === undefined && behaviorContext === undefined) return request as unknown as JsonValue;
+  return { ...request, ...(currentMessage === undefined ? {} : { currentMessage }), ...(behaviorContext === undefined ? {} : { behaviorContext }) } as unknown as JsonValue;
+}
+
+/** 限制送入决策模型的当前问题长度，并隔离调用方可变字符串。 */
+function snapshotMessage(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length <= 4000 ? `${value}` : undefined;
+}
+
+/** 只允许经过 BehaviorContext Schema 的结构化快照进入模型调用。 */
+function snapshotBehaviorContext(value: unknown): BehaviorContext | undefined {
+  try {
+    const snapshot = structuredClone(value);
+    const validation = validateContract('behaviorContext', snapshot);
+    return validation.ok ? structuredClone(validation.value) as BehaviorContext : undefined;
+  } catch {
     return undefined;
   }
 }

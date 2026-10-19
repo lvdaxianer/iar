@@ -39,7 +39,7 @@ export class ScriptedModelProvider implements ModelProvider {
    */
   public async complete(request: ModelProviderRequest): Promise<unknown> {
     const input = asRecord(request.input);
-    if (request.profile.role === 'semantic.extract') return this.extract(readString(input, 'text') ?? '');
+    if (request.profile.role === 'semantic.extract') return this.extract(readString(input, 'text') ?? '', asRecord(input.behaviorContext));
     if (request.profile.role === 'context.compact') return this.compact(input);
     return this.generate(input);
   }
@@ -56,9 +56,11 @@ export class ScriptedModelProvider implements ModelProvider {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  private extract(text: string): unknown {
+  private extract(text: string, behaviorContext: Record<string, unknown>): unknown {
     const trimmed = text.trim();
     if (trimmed.length === 0) return frame('unknown', {}, 0.1);
+    // 已有可信事实的追问优先交给通用回复模型，不能因业务名词重复触发默认动作。
+    if (hasVerifiedFacts(behaviorContext) && isFactFollowUp(trimmed) && !isExplicitNewOperation(trimmed)) return frame('unknown', {}, 0.95);
     // howTo 用于区分「如何/怎么/怎样」类咨询与真正的动作请求。
     const howTo = /(如何|怎么|怎样)/.test(trimmed);
     // 人工优先于工单和查询，避免“转人工查问题”被误判。
@@ -173,6 +175,22 @@ export class ScriptedModelProvider implements ModelProvider {
     }
     return { schemaVersion: 'iar.response/v1', text };
   }
+}
+
+/** 判断结构化上下文中是否存在可供追问使用的 verified 事实。 */
+function hasVerifiedFacts(context: Record<string, unknown>): boolean {
+  const facts = context.facts;
+  return typeof facts === 'object' && facts !== null && !Array.isArray(facts) && Object.values(facts).some((fact) => isRecord(fact) && fact.status === 'verified');
+}
+
+/** 判断用户是否在追问已有结果，而非表达新副作用。 */
+function isFactFollowUp(text: string): boolean {
+  return /刚才|之前|上次|前面|这个|该|那条|编号|单号|结果|进度|状态|多少|哪个/.test(text);
+}
+
+/** 判断当前句子是否明确要求重新执行一个新操作。 */
+function isExplicitNewOperation(text: string): boolean {
+  return /帮我|请帮|我要|我想|请你|执行|重新|再次|再来|重新创建|重新提交/.test(text);
 }
 
 /**
