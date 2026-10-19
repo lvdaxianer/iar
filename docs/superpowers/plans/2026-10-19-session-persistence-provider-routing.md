@@ -27,17 +27,16 @@
 
 **Files:**
 - Create: `packages/persistence-sqlite/src/provider.ts`
+- Create: `packages/persistence-sqlite/src/worker.ts`
 - Create: `packages/persistence-sqlite/src/index.ts`
 - Create: `packages/persistence-sqlite/package.json`
 - Create: `packages/persistence-runtime/src/registry.ts`
 - Create: `packages/persistence-runtime/src/loader.ts`
-- Modify: `packages/storage/src/sqlite-stores.ts`
-- Modify: `packages/storage/src/async-sqlite-snapshot-store.ts`
-- Test: `tests/integration/persistence/sqlite-provider.test.ts`
+- Test: `tests/integration/persistence-provider.test.ts`
 
-- [ ] **Step 1: Write the failing tests** — 覆盖内置 SQLite 默认 Provider、消息保存、事件幂等、快照 revision、动态 Provider 加载和错误配置。
-- [ ] **Step 2: Implement the adapters** — 用现有 SQLite Event/Snapshot 能力实现 Provider，并增加消息表、Registry 和动态 import 校验。
-- [ ] **Step 3: Verify** — 聚焦 Provider 测试、`npm run build` 和 SQLite 恢复测试通过。
+- [x] **Step 1: Write the failing tests** — 覆盖内置 SQLite 默认 Provider、消息保存、事件幂等、快照 revision、动态 Provider 加载和错误配置。
+- [x] **Step 2: Implement the adapters** — 通过独立 SQLite Worker 实现 Provider，增加消息/事件/快照表、Registry 和动态 import 校验。
+- [x] **Step 3: Verify** — 聚焦 Provider 测试和 SQLite 重启恢复测试通过；全仓构建的既有 worktree 重复类型问题单独记录，合并到主分支后复核。
 
 ### Task 3: Hook 事件和持久化订阅桥
 
