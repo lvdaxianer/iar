@@ -6,10 +6,10 @@ logs/
 coverage/
 *.lcov
 node_modules/
-dist/
 *.tsbuildinfo
 .env
 .env.*
+dist
 !.env.example
 !.env.sample
 !.env.template

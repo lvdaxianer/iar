@@ -118,7 +118,7 @@ The system SHALL provide pending clarification state and relevant verified facts
 
 ### Requirement: Models can answer from verified facts without repeating actions
 
-The system SHALL enable model-based assessment of whether a request can be answered from same-session verified facts, needs clarification, or requires a new action. The fallback prompt SHALL instruct the model to answer from supported facts, clarify absent or ambiguous facts, and not invent results. The system SHALL NOT use business-specific follow-up keyword rules or automatically execute a side-effecting action merely because a request mentions a business entity.
+The system SHALL separate semantic intent from a fixed action type and let the semantic model choose only among finite, runtime-filtered Plugin/Function candidates using the current message and structured context. The fixed action type SHALL be one of `query`, `create`, `update`, `delete`, `transfer`, `execute` or `unknown`; it SHALL NOT be a business-specific operation name. When no suitable Function is selected, the response model SHALL decide whether to answer from verified facts or ask a bounded clarification. The response model SHALL NOT select or execute a Function, and the runtime SHALL NOT infer or execute a side-effecting action merely because a request mentions a business entity or historical result.
 
 #### Scenario: Ask for the previous ticket number
 
@@ -129,6 +129,21 @@ The system SHALL enable model-based assessment of whether a request can be answe
 
 - **WHEN** a user asks about a prior successful result in another supported subsystem
 - **THEN** the same generic fact and decision mechanism supports answering without a subsystem-specific rule
+
+#### Scenario: A query action is separated from semantic intent
+
+- **WHEN** the user asks for a fact, result, status, progress, count, position or identifier, including a reference to a verified prior result
+- **THEN** semantic extraction uses `action=query` or `action=unknown` and does not authorize a side-effecting operation from the historical reference
+
+#### Scenario: Candidate capabilities are filtered before model selection
+
+- **WHEN** a semantic action is available for the current message
+- **THEN** the runtime filters candidates by session scope, lifecycle, authorization and declared action types before giving bounded Plugin/Function descriptions to the decision model
+
+#### Scenario: No suitable Function is available
+
+- **WHEN** candidates are absent, incompatible, uncertain or rejected
+- **THEN** the runtime skips action preparation and execution and gives the current question, structured context, verified facts and pending state to the response model, which either answers or asks for clarification
 
 #### Scenario: Insufficient or ambiguous evidence
 

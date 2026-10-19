@@ -44,6 +44,9 @@ const DEFAULT_TICKET_ID = 'ticket-20261018-001';
 /** 新建工单的确定性编号（模拟单次会话内的递增）。 */
 let ticketSeq = 7;
 
+/** 本会话内已创建工单的内存登记，progress 优先查这里再回退静态 fixture。 */
+const createdTickets = new Map<string, Record<string, JsonValue>>();
+
 /** ticket.create 的显式操作目录。 */
 export const ticketCreateOperations: readonly SandboxOperation[] = [
   { name: 'search', kind: 'read', description: '检索工单支持知识库，返回相关度最高的 3 条说明' },
@@ -115,6 +118,8 @@ export const ticketCreateHandler: PluginHandler = async (input) => {
   }
   if (operation === 'progress') {
     const ticketId = parsed.params.ticketId ?? (/20261017/.test(parsed.query) ? 'ticket-20261017-006' : DEFAULT_TICKET_ID);
+    const created = createdTickets.get(ticketId);
+    if (created) return succeed('progress', { ticket: created, summary: `工单 ${ticketId} 当前节点「${String(created.status)}」，共 ${String((created.timeline as unknown[]).length)} 条流转记录` }, { ticketId, status: String(created.status ?? 'unknown') });
     const ticket = TICKET_PROGRESS[ticketId];
     if (!ticket) return fail('ticket.not_found');
     return succeed('progress', { ticket, summary: `工单 ${ticketId} 当前节点「${String(ticket.status)}」，共 ${String((ticket.timeline as unknown[]).length)} 条流转记录` }, { ticketId, status: String(ticket.status ?? 'unknown') });
@@ -125,10 +130,17 @@ export const ticketCreateHandler: PluginHandler = async (input) => {
   const priority = priorityRaw === 'low' || priorityRaw === 'medium' || priorityRaw === 'high' ? priorityRaw : 'medium';
   ticketSeq += 1;
   const ticketId = `ticket-20261018-${String(ticketSeq).padStart(3, '0')}`;
+  const ticket: Record<string, JsonValue> = {
+    ticketId,
+    title: title.slice(0, 120),
+    status: 'created',
+    timeline: [{ time: '2026-10-18 10:30:00', node: '已创建', note: '用户提交工单，已进入分诊队列' }]
+  };
+  createdTickets.set(ticketId, ticket);
   return succeed('create', {
     receipt: ticketId,
     ticketId,
-    title: title.slice(0, 120),
+    title: ticket.title as string,
     description: description.slice(0, 2000),
     priority,
     status: 'created',

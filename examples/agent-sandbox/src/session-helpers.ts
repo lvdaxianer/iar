@@ -2,7 +2,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { ActionDefinition, JsonValue, SlotValue } from '@iar/contracts';
+import type { ActionDefinition, BehaviorContext, JsonValue, SlotValue } from '@iar/contracts';
 import type { SemanticActionType, SemanticFrame } from '@iar/decision';
 import type { RouteResult } from '@iar/runtime';
 import type { RuleEvaluationFacts } from '@iar/rule-engine';
@@ -76,11 +76,12 @@ export function buildEvidence(route: RouteResult, frame: SemanticFrame): RouteEv
  * @param functionId - 目标 Function
  * @param slots - 抽取到的槽位
  * @param userText - 用户原始输入
+ * @param behaviorContext - 当前结构化上下文，action 类操作的缺省槽位从 verified 事实继承
  * @returns 插件输入或缺失槽位列表
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function buildActionInput(functionId: string, slots: Record<string, JsonValue>, userText: string, actionType: SemanticActionType = 'unknown'): { input: JsonValue } | { missing: string[] } {
+export function buildActionInput(functionId: string, slots: Record<string, JsonValue>, userText: string, actionType: SemanticActionType = 'unknown', behaviorContext?: BehaviorContext): { input: JsonValue } | { missing: string[] } {
   const descriptor = sandboxFunctionCatalog[functionId];
   if (!descriptor) return { missing: [`未知 Function: ${functionId}`] };
   if (actionType === 'unknown') return { missing: ['actionType'] };
@@ -88,7 +89,7 @@ export function buildActionInput(functionId: string, slots: Record<string, JsonV
   const query = stringSlot(slots, 'query') ?? (userText.length > 0 ? userText : undefined);
   const expectedKind = actionType === 'query' ? 'read' : 'action';
   const operation = chooseCompatibleOperation(descriptor, rawOperation, expectedKind);
-  const params = paramsSlot(slots);
+  const params = inheritFactParams(functionId, operation ?? descriptor.defaultOperation, paramsSlot(slots), behaviorContext);
   if (!operation) return { missing: ['operation'] };
   if (operation === 'search' && !query) return { missing: ['query'] };
   const input: Record<string, JsonValue> = {};
@@ -107,6 +108,35 @@ function chooseCompatibleOperation(descriptor: { operations: ReadonlyArray<{ nam
   }
   if (expectedKind === 'action') return undefined;
   return descriptor.operations.find((item) => item.kind === expectedKind)?.name;
+}
+
+/**
+ * 从结构化上下文的 verified 事实为 action 类操作继承缺省槽位。
+ *
+ * 用户在多轮对话中用「改成/那个」指代上一轮对象时，语义层可能漏抽 params；
+ * 此处按 functionId + operation 做确定性回填（如 api.gateway limit 的 target、
+ * ticket.create progress 的 ticketId），只读操作不做继承，避免事实污染查询。
+ *
+ * @param functionId - 目标 Function
+ * @param operation - 生效操作名
+ * @param params - 语义层给出的槽位（可能为 undefined）
+ * @param behaviorContext - 当前结构化上下文
+ * @returns 继承后的槽位（无事实可继承时原样返回）
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-19
+ */
+function inheritFactParams(functionId: string, operation: string, params: Record<string, string> | undefined, behaviorContext: BehaviorContext | undefined): Record<string, string> | undefined {
+  const facts = behaviorContext?.facts;
+  if (!facts) return params;
+  const inherited = { ...(params ?? {}) };
+  const fill = (field: string, param: string) => {
+    if (inherited[param]) return;
+    const hit = Object.values(facts).find((fact) => fact.status === 'verified' && fact.functionId === functionId && fact.field === field);
+    if (hit && typeof hit.value === 'string' && hit.value.length > 0) inherited[param] = hit.value;
+  };
+  if (functionId === 'api.gateway' && operation === 'limit') fill('target', 'target');
+  if (functionId === 'ticket.create' && operation === 'progress') fill('ticketId', 'ticketId');
+  return Object.keys(inherited).length > 0 ? inherited : undefined;
 }
 
 /**

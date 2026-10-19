@@ -153,7 +153,7 @@ export class IarSandboxSession extends SandboxSessionCore {
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
       return this.finishNormalFallback({ userText, traceId, behaviorContext, evidence });
     }
-    const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame: extracted.frame, route });
+    const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame: extracted.frame, route, behaviorContext });
     return this.finishNormalOutcome({ userText, traceId, evidence, outcome });
   }
 

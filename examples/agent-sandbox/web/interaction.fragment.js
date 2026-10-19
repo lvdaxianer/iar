@@ -96,6 +96,7 @@
     inputEl.disabled = disabled;
     document.getElementById('compactBtn').disabled = disabled;
     document.getElementById('resetBtn').disabled = disabled;
+    document.getElementById('newSessionBtn').disabled = disabled;
     document.querySelectorAll('.confirm-box button').forEach(function (button) { button.disabled = disabled; });
   }
 

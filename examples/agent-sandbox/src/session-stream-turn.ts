@@ -15,7 +15,7 @@ export type StreamTurnContext = {
   /** 与普通入口共用语义抽取及路由，确保相同的策略边界。 */
   extractFrame: (traceId: string, runId: string, text: string, behaviorContext: BehaviorContext) => Promise<ExtractFrameOutcome>;
   routeFrame: (traceId: string, runId: string, frame: SemanticFrame, behaviorContext: BehaviorContext, currentMessage: string) => Promise<RouteResult>;
-  prepareAndExecute: (context: { runId: string; userText: string; frame: SemanticFrame; route: RouteResult }) => Promise<ExecuteTurnOutcome>;
+  prepareAndExecute: (context: { runId: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext }) => Promise<ExecuteTurnOutcome>;
   /** 兜底与执行后回复分别保留增量回调和超限错误。 */
   fallbackReplyStreamed: (context: { traceId: string; runId: string; userText: string; reasonCode: string; behaviorContext: BehaviorContext }, onDelta: (delta: string) => void) => Promise<string>;
   generateReplyStreamed: (context: { traceId: string; runId: string; userText: string; action: ActionDefinition; actionResult: ActionResult; behaviorContext: BehaviorContext }, onDelta: (delta: string) => void) => Promise<string>;
@@ -99,7 +99,7 @@ export class SandboxSessionStreamTurn {
       return this.finishStreamFallback({ userText, traceId, emit, behaviorContext, evidence });
     }
     emit({ type: 'stage', stage: 'action' });
-    const outcome = await this.context.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame, route });
+    const outcome = await this.context.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame, route, behaviorContext });
     return this.finishStreamOutcome({ userText, traceId, emit, evidence, outcome });
   }
 

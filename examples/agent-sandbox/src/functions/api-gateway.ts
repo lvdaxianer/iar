@@ -102,7 +102,8 @@ export const apiGatewayHandler: PluginHandler = async (input) => {
     return succeed('stats', { stats: GATEWAY_STATS, summary: `网关近 5 分钟 QPS ${String(GATEWAY_STATS.qps)}，成功率 ${String(GATEWAY_STATS.successRate)}，P99 ${String(GATEWAY_STATS.p99Latency)}` });
   }
   const target = parsed.params.target ?? (/订单/.test(parsed.query) ? 'order-center' : 'user-portal');
-  const rate = parsed.params.rate ?? '300/s';
+  const rateMatch = parsed.query.match(/(\d+)\s*(?:次|\/\s*s|\/\s*秒|qps)/i) ?? parsed.query.match(/(\d+)/);
+  const rate = parsed.params.rate ?? (rateMatch ? `${rateMatch[1]}/s` : '300/s');
   return succeed('limit', {
     receipt: `gateway-limit-${target}`,
     target,

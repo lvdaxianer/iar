@@ -118,6 +118,42 @@
       .finally(function () { setBusy(false); });
   };
 
+  /** 经用户确认后新建独立会话并清空本地画面。
+   * 旧服务端会话尽力删除，失败不阻塞新会话建立。
+   * 先清本地恢复凭据，复用初始化逻辑走新建路径。
+   * 旧锁在新会话建立后释放，避免窗口期无锁可恢复。
+   * 新会话就绪后才重建欢迎消息并同步状态面板。
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-19
+   */
+  document.getElementById('newSessionBtn').onclick = function () {
+    if (!sessionReady || sessionBusy || sessionExpired) return;
+    if (!confirm('新建会话将结束当前会话并开启全新对话，确定继续吗？')) return;
+    setBusy(true);
+    sessionReady = false;
+    var oldId = sessionId;
+    var oldLease = sessionLease;
+    sessionId = null;
+    sessionLease = null;
+    try { sessionStorage.removeItem(SESSION_KEY); sessionStorage.removeItem(RELOAD_KEY); sessionStorage.removeItem(TAB_KEY); } catch (err) { /* 尽力清理，失败时初始化仍会新建。 */ }
+    var deleteOld = fetch('/api/sessions/' + encodeURIComponent(oldId), { method: 'DELETE' }).catch(function () {});
+    Promise.resolve().then(initializeSession).then(function () {
+      sessionReady = true;
+      return deleteOld;
+    }).then(function () {
+      if (oldLease) oldLease.release();
+      messagesEl.innerHTML = '';
+      pendingRunId = null;
+      document.getElementById('compactResult').className = '';
+      appendMsg('bot', '新会话已建立，开始新的对话吧。');
+      return refreshState();
+    }).then(function () { setBusy(false); }).catch(function () {
+      setBusy(false);
+      if (!sessionExpired) appendMsg('bot', '新建会话失败，请刷新页面重试。', '失败');
+    });
+  };
+
   /** 拉取当前会话快照并同步调试面板及待确认动作。
    * 周期刷新失败不重复弹错；会话失效由响应检查统一处理。
    * 初始化前和会话失效后不发送状态请求。
