@@ -13,6 +13,8 @@ export type WorkflowEventLogOptions = {
   clock?: () => string;
   /** 绑定同一运行链路的 correlationId。 */
   correlationId?: string;
+  /** 事件编号前缀；服务重启或会话隔离时必须使用唯一前缀。 */
+  eventIdPrefix?: string;
 };
 
 /**
@@ -27,6 +29,7 @@ export class WorkflowEventLog {
   private readonly records: EventEnvelope[] = [];
   private readonly clock: () => string;
   private readonly correlationId: string;
+  private readonly eventIdPrefix: string;
   private nextId = 1;
 
   /**
@@ -38,6 +41,7 @@ export class WorkflowEventLog {
   public constructor(options: WorkflowEventLogOptions = {}) {
     this.clock = options.clock ?? (() => new Date().toISOString());
     this.correlationId = options.correlationId ?? 'workflow-local';
+    this.eventIdPrefix = options.eventIdPrefix ?? 'workflow-event';
   }
 
   /**
@@ -130,7 +134,7 @@ export class WorkflowEventLog {
    * @date 2026-10-17
    */
   private append(eventName: EventEnvelope['eventName'], runId: string, payload: Record<string, JsonValue>): void {
-    const event: EventEnvelope = { schemaVersion: SCHEMA_VERSIONS.event, eventId: `workflow-event-${this.nextId++}`, eventName, occurredAt: this.clock(), runId, correlationId: this.correlationId, payload };
+    const event: EventEnvelope = { schemaVersion: SCHEMA_VERSIONS.event, eventId: `${this.eventIdPrefix}-${this.nextId++}`, eventName, occurredAt: this.clock(), runId, correlationId: this.correlationId, payload };
     if (!validateContract('event', event).ok) throw new Error(`Workflow 事件无效: ${event.eventId}`);
     this.records.push(structuredClone(event));
   }

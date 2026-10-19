@@ -21,6 +21,10 @@ The system SHALL maintain separate structured state for each session and update 
 - **WHEN** an action fails or has not yet been confirmed and executed
 - **THEN** it is not recorded as a successful outcome
 
+#### Scenario: Fact provenance and output bounds are preserved
+- **WHEN** a successful action exposes a permitted primitive result field
+- **THEN** the fact records its verified status, source event, Function and Plugin, while only fields explicitly present in the bounded `facts` output envelope are accepted and unpermitted, unbounded, object, array or sensitive output is excluded
+
 ### Requirement: Structured session state is asynchronously persisted and recoverable
 The system SHALL enqueue every structured context update as an immutable, versioned session snapshot for asynchronous SQLite persistence without blocking the request event loop. Snapshots SHALL include the bounded verified facts and provenance, behavior state and validated summary needed to continue decisions. Writes SHALL preserve session order and prevent older versions replacing newer ones; errors, retries, and queue capacity SHALL be handled explicitly.
 

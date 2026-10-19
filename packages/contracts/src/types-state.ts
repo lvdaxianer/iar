@@ -126,6 +126,25 @@ export type ConfirmationState = {
   confirmedAt?: string;
 };
 
+/** 可信事实允许保存的有界 JSON 原子值。 */
+export type TrustedFactValue = string | number | boolean | null;
+
+/** 成功输出中可供后续模型读取的可信事实。 */
+export type TrustedFact = {
+  /** 事实值，必须来自公开输出字段。 */
+  value: TrustedFactValue;
+  /** 固定为 verified，避免把推测或失败结果当成事实。 */
+  status: 'verified';
+  /** 产生事实的不可变事件。 */
+  sourceEventId: string;
+  /** 事实所属 Function。 */
+  functionId: string;
+  /** 事实所属 Plugin。 */
+  pluginId: string;
+  /** 输出契约中公开的字段名。 */
+  field: string;
+};
+
 /** 不可变事实投影出的当前 BehaviorContext。 */
 export type BehaviorContext = {
   // BehaviorContext 版本决定投影和重放方式。
@@ -146,6 +165,8 @@ export type BehaviorContext = {
   pending: PendingInput;
   // confirmation 记录确认范围和状态。
   confirmation: ConfirmationState;
+  // facts 只保存成功输出中的有限、可追溯事实。
+  facts?: Record<string, TrustedFact>;
   // 幂等键贯穿一次 Action 提交和重试。
   idempotencyKey: string;
   // 关键字段哈希绑定最后事实事件。

@@ -6,6 +6,7 @@
  */
 import { Type } from '@sinclair/typebox';
 import { JsonValueSchema } from './schema-primitives.js';
+import { MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_FIELDS } from './types-base.js';
 import { SCHEMA_VERSIONS } from './versions.js';
 
 /** BehaviorContext 的主语及其不可变来源。 */
@@ -107,6 +108,22 @@ export const ConfirmationStateSchema = Type.Object({
   confirmedAt: Type.Optional(Type.String({ minLength: 1 }))
 }, { additionalProperties: false });
 
+/** 成功输出中可供后续模型读取的可信事实。 */
+export const TrustedFactSchema = Type.Object({
+  // value 只能来自已经通过输出契约的公开字段。
+  value: Type.Union([Type.String({ maxLength: MAX_TRUSTED_FACT_STRING_LENGTH }), Type.Number(), Type.Boolean(), Type.Null()]),
+  // 只有 verified 才能进入模型上下文。
+  status: Type.Literal('verified'),
+  // sourceEventId 绑定不可变成功事件。
+  sourceEventId: Type.String({ minLength: 1, maxLength: MAX_TRUSTED_FACT_STRING_LENGTH }),
+  // functionId 和 pluginId 绑定事实归属。
+  functionId: Type.String({ minLength: 1, maxLength: MAX_TRUSTED_FACT_STRING_LENGTH }),
+  // pluginId 绑定具体实现版本。
+  pluginId: Type.String({ minLength: 1, maxLength: MAX_TRUSTED_FACT_STRING_LENGTH }),
+  // field 绑定公开输出字段。
+  field: Type.Union(TRUSTED_FACT_FIELDS.map((field) => Type.Literal(field)))
+}, { additionalProperties: false });
+
 /** 不可变事实投影出的当前 BehaviorContext。 */
 export const BehaviorContextSchema = Type.Object({
   // BehaviorContext 版本决定投影和重放方式。
@@ -142,6 +159,8 @@ export const BehaviorContextSchema = Type.Object({
   pending: PendingInputSchema,
   // confirmation 记录确认范围和状态。
   confirmation: ConfirmationStateSchema,
+  // facts 只保存成功输出中的有限、可追溯事实。
+  facts: Type.Optional(Type.Record(Type.String({ minLength: 1, maxLength: MAX_TRUSTED_FACT_KEY_LENGTH }), TrustedFactSchema, { maxProperties: MAX_TRUSTED_FACTS })),
   // 幂等键贯穿一次 Action 提交和重试。
   idempotencyKey: Type.String({ minLength: 1 }),
   // integrity 绑定关键字段哈希和最后事实事件。

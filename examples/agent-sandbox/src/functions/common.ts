@@ -8,7 +8,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { JsonValue } from '@iar/contracts';
+import { MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_FIELDS, type JsonValue } from '@iar/contracts';
 import type { PluginHandlerResult } from '@iar/plugin-sdk';
 
 /** Function 操作类型：read 免确认直接执行，action 需走确认流。 */
@@ -106,8 +106,19 @@ export function findSandboxOperation(operations: readonly SandboxOperation[], na
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function succeed(operation: string, payload: Record<string, JsonValue>): PluginHandlerResult {
-  return { status: 'succeeded', output: { accepted: true, operation, ...payload } };
+export function succeed(operation: string, payload: Record<string, JsonValue>, declaredFacts: Record<string, JsonValue> = {}): PluginHandlerResult {
+  const facts = selectTrustedFacts({ ...payload, ...declaredFacts });
+  return { status: 'succeeded', output: { accepted: true, operation, ...payload, facts } };
+}
+
+/** 只把短小 JSON 原子字段复制到通用事实信封。 */
+function isBoundedFactValue(value: JsonValue): boolean {
+  return (typeof value === 'string' && Array.from(value).length <= MAX_TRUSTED_FACT_STRING_LENGTH) || typeof value === 'number' || typeof value === 'boolean' || value === null;
+}
+
+/** 仅复制 Handler 明确公开的有限字段，避免把完整业务对象带入上下文。 */
+function selectTrustedFacts(values: Record<string, JsonValue>): Record<string, JsonValue> {
+  return Object.fromEntries(Object.entries(values).filter(([field, value]) => TRUSTED_FACT_FIELDS.includes(field as typeof TRUSTED_FACT_FIELDS[number]) && isBoundedFactValue(value)));
 }
 
 /**
@@ -153,12 +164,14 @@ export function sandboxInputSchema(): Record<string, unknown> {
  * @date 2026-10-18
  */
 export function sandboxOutputSchema(): Record<string, unknown> {
+  const factValue = { anyOf: [{ type: 'string', maxLength: MAX_TRUSTED_FACT_STRING_LENGTH }, { type: 'number' }, { type: 'boolean' }, { type: 'null' }] };
+  const facts = { type: 'object', maxProperties: MAX_TRUSTED_FACTS, propertyNames: { enum: [...TRUSTED_FACT_FIELDS] }, additionalProperties: factValue };
   return {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     oneOf: [
       {
         type: 'object',
-        properties: { accepted: { const: true }, operation: { type: 'string', minLength: 1 } },
+        properties: { accepted: { const: true }, operation: { type: 'string', minLength: 1 }, facts },
         required: ['accepted', 'operation'],
         additionalProperties: true
       },

@@ -2,12 +2,13 @@
 
 IAR（Intent Action Runtime）是一个面向可恢复行为执行的 TypeScript 运行时。它把用户意图、Function/Plugin 决策、策略确认、Workflow 执行和事件重放组织在同一套可审计的运行时契约中。
 
-> 当前状态：Phase 1～5 MVP 已实现，并通过全量验证。
+> 当前状态：Phase 1～2 已实现；Phase 3 的可信事实投影已实现，模型上下文、结构化压缩和端到端验收仍在推进。
 
 ## 核心能力
 
 - 版本化 ABI、Manifest、Function/Plugin 契约与 Schema 校验
 - 基于 EventLog 的 BehaviorContext 投影、重放、压缩校验和幂等执行
+- 将成功动作的有界公开结果投影为带来源事件、Function、Plugin 元数据的可信事实，并随 SQLite 快照恢复
 - Function → Plugin 两阶段路由，以及可解释的复合规则和类型化决策
 - JEV 优先、Intent Model 可替代的统一决策后端；两者都返回同一 `iar.decision/v1`
 - Policy Gate、确认范围、权限校验和本地 Workflow 状态机
