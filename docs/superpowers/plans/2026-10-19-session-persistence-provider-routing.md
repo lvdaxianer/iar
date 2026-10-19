@@ -88,9 +88,9 @@
 - Modify: `docs/README.md`
 - Test: `tests/integration/agent-sandbox/session-resume-provider.test.ts`
 
-- [ ] **Step 1: Write the failing tests** — 覆盖新建/恢复会话、跨会话隔离、模型决策前恢复上下文和默认 SQLite Provider。
-- [ ] **Step 2: Implement session wiring** — 让 HTTP、Runtime、Hook 和 Provider 贯穿同一 `sessionId`，默认加载内置 SQLite，支持外部 Provider 配置。
-- [ ] **Step 3: Verify and document** — 更新根 README、技术方案和接入示例；运行 `npm test`、`npm run build` 和 `openspec validate session-persistence-provider-routing --strict`。
+- [x] **Step 1: Write the failing tests** — 覆盖新建/恢复会话、跨会话隔离、模型决策前恢复上下文和默认 SQLite Provider。
+- [x] **Step 2: Implement session wiring** — 让 HTTP、Runtime、Hook 和 Provider 贯穿同一 `sessionId`，默认加载内置 SQLite，支持外部 Provider 配置。
+- [x] **Step 3: Verify and document** — 更新根 README、技术方案和接入示例；运行 `npm test`、`npm run build` 和 `openspec validate session-persistence-provider-routing --strict`。
 
 ## Workflow follow-up
 
