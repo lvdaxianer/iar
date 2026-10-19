@@ -51,7 +51,7 @@ The system SHALL represent model-generated clarification requests as bounded str
 
 ### Requirement: Structured session state is asynchronously persisted and recoverable
 
-The system SHALL enqueue every accepted message and structured context update through the configured Persistence Provider, using `sessionId` as the stable association key and preserving bounded verified facts, routing scope, pending clarification, behavior state, and validated summary. The default SQLite Provider SHALL be replaceable without changing model-call code. Persistence SHALL remain asynchronous and non-blocking; writes SHALL preserve session order and prevent older versions replacing newer ones, while errors, retries, and queue capacity SHALL be handled explicitly.
+The system SHALL persist each accepted message and structured context update through the configured Persistence Provider using `sessionId` as the stable key. Snapshots SHALL preserve bounded verified facts, routing scope, pending clarification, behavior state and validated summary. The default SQLite Provider SHALL be replaceable without changing model-call code; persistence SHALL be asynchronous, ordered, bounded and revision-safe, with explicit error and retry handling.
 
 #### Scenario: Continue after restart
 
