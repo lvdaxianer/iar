@@ -21,6 +21,25 @@ The system SHALL maintain separate structured state for each session and update 
 - **WHEN** an action fails or has not yet been confirmed and executed
 - **THEN** it is not recorded as a successful outcome
 
+### Requirement: Structured session state is asynchronously persisted and recoverable
+The system SHALL enqueue every structured context update as an immutable, versioned session snapshot for asynchronous SQLite persistence without blocking the request event loop. Snapshots SHALL include the bounded verified facts and provenance, behavior state and validated summary needed to continue decisions. Writes SHALL preserve session order and prevent older versions replacing newer ones; errors, retries, and queue capacity SHALL be handled explicitly.
+
+#### Scenario: Continue after restart
+- **WHEN** a committed session snapshot exists and the service restarts
+- **THEN** resuming the same session loads its latest valid snapshot before a new model decision, including its verified prior facts
+
+#### Scenario: Writes arrive out of order or fail
+- **WHEN** a write is delayed, fails or is retried
+- **THEN** an older snapshot cannot replace a newer committed version, failure is observable, and retry and pending work remain bounded
+
+#### Scenario: Stored state is invalid or belongs to another session
+- **WHEN** a snapshot is corrupt, incompatible, or belongs to another session
+- **THEN** it is not used as trusted context for the requesting session
+
+#### Scenario: Service shutdown
+- **WHEN** the service shuts down normally
+- **THEN** it awaits outstanding writes; abrupt termination before a write commits may lose that update and is not represented as durable
+
 ### Requirement: Model calls receive structured conversational context
 The system SHALL provide role-appropriate, bounded structured state and relevant verified facts to applicable semantic extraction, decision, fallback and response-generation model calls, while keeping the current user message distinct and omitting raw historical chat messages. Context content SHALL be treated as data, not privileged instructions.
 

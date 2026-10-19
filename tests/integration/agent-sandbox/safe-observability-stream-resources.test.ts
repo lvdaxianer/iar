@@ -135,3 +135,33 @@ async function checkBodyFailures(fixture: ObservabilityFixture): Promise<void> {
 }
 
 test('普通响应区分网络读取失败、非法 JSON 和主动取消', () => withObservabilityFixture(checkBodyFailures));
+
+test('普通超大模型响应在读取中拒绝并取消和释放流', () => withObservabilityFixture(async (fixture) => {
+  let cancelled = false;
+  const content = JSON.stringify({ choices: [{ message: { content: JSON.stringify({ text: 'private' + 'x'.repeat(400_000) }) } }] });
+  const bytes = new TextEncoder().encode(content);
+  let offset = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull: (controller) => { if (offset >= bytes.length) controller.close(); else { controller.enqueue(bytes.slice(offset, offset + 4096)); offset += 4096; } },
+    cancel: () => { cancelled = true; }
+  });
+  globalThis.fetch = async () => new Response(body);
+  await assert.rejects(createTestProvider().complete(createStreamRequest()), isProviderFailure);
+  assert.equal(cancelled, true); assert.equal(body.locked, false);
+  await flushObservabilityLogs();
+  assert.doesNotMatch(fixture.lines.join('\n'), /private|x{20}/);
+}));
+
+test('超大 SSE 响应限制累计字节并取消流且不泄露正文', () => withObservabilityFixture(async (fixture) => {
+  let cancelled = false; let count = 0;
+  const chunk = new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: { content: 'private' + 'x'.repeat(4096) } }] })}\n\n`);
+  const body = new ReadableStream<Uint8Array>({
+    pull: (controller) => { if (count++ < 100) controller.enqueue(chunk); else controller.close(); },
+    cancel: () => { cancelled = true; }
+  });
+  globalThis.fetch = async () => new Response(body);
+  await assert.rejects(createTestProvider().completeStreamed(createStreamRequest(), () => {}), isProviderFailure);
+  assert.equal(cancelled, true); assert.equal(body.locked, false);
+  await flushObservabilityLogs();
+  assert.doesNotMatch(fixture.lines.join('\n'), /private|x{20}/);
+}));

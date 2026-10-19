@@ -12,6 +12,8 @@ import { auditStreamWriteFailure } from './request-audit.js';
 
 /** 单个响应的有界终态，重复或迟到错误不会重复审计。 */
 type StreamState = { isFailed: boolean; isDisconnected: boolean; isFinished: boolean };
+/** 响应结束迟迟未完成时主动断开，避免慢客户端无限持有会话。 */
+const STREAM_END_TIMEOUT_MS = 10_000;
 
 /**
  * 执行流式对话并保持已有 SSE 事件契约。
@@ -35,7 +37,27 @@ export async function streamTurn(session: IarSandboxSession, message: string, re
     logStreamFailure();
     emitEvent(reply, { type: 'error', reasonCode: 'stream_failed', message: '流式处理失败，请重试。' }, state);
   }
+  const finished = waitForStreamEnd(reply);
   finishStream(reply, state);
+  await finished;
+}
+
+/** 响应结束或断开后释放队列；慢客户端不能无限持有会话。
+ * 定时断开及正常结束都移除监听器并清除定时器。
+ * @param reply - 当前 SSE 响应
+ * @returns 响应结束、断开或超时后完成
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-19
+ */
+function waitForStreamEnd(reply: FastifyReply): Promise<void> {
+  const raw = reply.raw;
+  if (raw.destroyed || raw.writableFinished) return Promise.resolve();
+  return new Promise((resolve) => {
+    const complete = () => { clearTimeout(timer); raw.off('finish', complete); raw.off('close', complete); resolve(); };
+    const timer = setTimeout(() => { raw.destroy(); complete(); }, STREAM_END_TIMEOUT_MS);
+    timer.unref();
+    raw.once('finish', complete); raw.once('close', complete);
+  });
 }
 
 /**
@@ -111,5 +133,6 @@ function finishStream(reply: FastifyReply, state: StreamState): void {
   } catch {
     // 客户端断开由入口审计；其他失败以固定分类记录。
     failStream(reply, state);
+    reply.raw.destroy();
   }
 }

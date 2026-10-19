@@ -5,6 +5,7 @@
  * @date 2026-10-18
  */
 import { ModelProviderError } from '@iar/decision';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { logModelHttpFailure, logModelInvalidResponse, logModelNetworkFailure, logModelSuccess } from '../safe-log.js';
 
 /** 请求所需连接配置与提示词。 */
@@ -18,6 +19,47 @@ export type ModelTransportRequest = {
 type CompletionResponse = { choices?: Array<{ message?: { content?: unknown } }> };
 /** 温度与已有模型配置保持一致。 */
 const TEMPERATURE = 0.2;
+/** 模型 HTTP 响应的累计原始字节上限，包括 SSE 帧。 */
+export const MAX_MODEL_RESPONSE_BYTES = 256 * 1024;
+/** 用固定类型区分超限和网络异常，不保存上游内容。 */
+export class ModelResponseLimitError extends ModelProviderError {
+  /** 固定错误码兼容现有模型提供者错误。
+   * @author lvdaxianer@yeah.net @date 2026-10-18
+   */
+  public constructor() { super('provider_failed'); }
+}
+const limitContext = new AsyncLocalStorage<{ isExceeded: boolean }>();
+
+/** 跟踪网关内部捕获的超限异常，避免回退误报成功。
+ * @param action - 本次回复生成操作
+ * @returns 完整回复，超限时抛出固定错误
+ * @author lvdaxianer@yeah.net @date 2026-10-18
+ */
+export async function trackModelResponseLimit<T>(action: () => Promise<T>): Promise<T> {
+  const state = { isExceeded: false };
+  const result = await limitContext.run(state, action);
+  if (state.isExceeded) throw new ModelResponseLimitError();
+  return result;
+}
+
+/**
+ * 限制累计读取的原始字节数。
+ * @param current - 已读取字节数
+ * @param chunk - 新读取数据
+ * @returns 更新后的字节数
+ * @throws ModelResponseLimitError 超出固定边界时拒绝
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-18
+ */
+export function countModelBytes(current: number, chunk: Uint8Array): number {
+  const total = current + chunk.byteLength;
+  if (total > MAX_MODEL_RESPONSE_BYTES) {
+    const state = limitContext.getStore();
+    if (state) state.isExceeded = true;
+    throw new ModelResponseLimitError();
+  }
+  return total;
+}
 
 /**
  * 发起请求并将网络和 HTTP 错误转换为稳定错误。
@@ -141,10 +183,43 @@ async function readModelContent(response: Response, timing: { startTime: number;
  */
 async function readModelBody(response: Response, timing: { startTime: number; signal: AbortSignal }): Promise<string> {
   try {
-    return await response.text();
-  } catch {
+    return await readBoundedBody(response);
+  } catch (error) {
+    // 超限视为无效响应，错误和日志均不包含原文。
+    if (error instanceof ModelResponseLimitError) {
+      logModelInvalidResponse(timing.startTime, response.status);
+      throw error;
+    }
     // 正文读取失败是网络或取消问题，不混同格式错误。
     logModelNetworkFailure(timing.startTime, timing.signal);
     throw new ModelProviderError('provider_failed');
   }
+}
+
+/**
+ * 按块读取并在超限或读取故障时取消响应。
+ * @param response - 上游响应
+ * @returns 有界 UTF-8 正文
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-18
+ */
+async function readBoundedBody(response: Response): Promise<string> {
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const item = await reader.read();
+      if (item.done) break;
+      size = countModelBytes(size, item.value);
+      chunks.push(decoder.decode(item.value, { stream: true }));
+    }
+    chunks.push(decoder.decode());
+    return chunks.join('');
+  } catch (error) {
+    cancelModelBody(() => reader.cancel());
+    throw error;
+  } finally { reader.releaseLock(); }
 }

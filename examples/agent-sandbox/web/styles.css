@@ -1,0 +1,191 @@
+
+  /* 主题令牌沿用原页面，消息、状态与操作控件共享同一套颜色。
+   * 操作状态也有文字说明，不要求用户只凭颜色区分成功和失败。
+   * 等宽字体用于事件和上下文，避免 JSON 字段难以对齐。
+   * 这些令牌只控制视觉呈现，不携带会话或授权状态。
+   */
+  :root {
+    --bg: #f4f6fa;
+    --panel: #ffffff;
+    --border: #e3e8f0;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --accent-soft: #dbeafe;
+    --user-bg: #2563eb;
+    --bot-bg: #ffffff;
+    --ok: #059669;
+    --warn: #d97706;
+    --err: #dc2626;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  /* 统一盒模型使两栏布局的边框和内边距不额外扩大容器。
+   * 页面高度由视口约束，具体滚动区域由聊天和调试面板承担。
+   * 这保持输入栏在长对话期间可见，避免整页随消息增长。
+   */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  /* 标题和模式徽标始终位于聊天区上方。
+   * 徽标在状态请求完成前显示加载文字；颜色不替代模式名称。
+   * 弹性间隔让说明文字与标题分离，不改变实际阅读顺序。
+   */
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 16px; font-weight: 600; }
+  .badge {
+    font-size: 12px; padding: 2px 10px; border-radius: 999px;
+    background: var(--accent-soft); color: var(--accent); font-weight: 500;
+  }
+  /* 离线 scripted 与真实模型模式使用不同背景。 */
+  .badge.scripted { background: #fef3c7; color: var(--warn); }
+  /* 标记与标题共享一行，模式名仍作为可选择的文本存在。
+   * 颜色仅辅助区分，不能作为检测真实模型是否可用的依据。
+   * 内容取自当前会话的状态响应，而不是样式自动推断。
+   */
+  /* 保持聊天和调试区的原有双栏宽度与滚动边界。
+   * 聊天栏至少 360px，调试栏固定 400px，窄视口可能横向溢出。
+   * 这是原页面布局约束；这里不悄悄改变移动端交互契约。
+   * min-height: 0 允许网格子项收缩并在各自内部滚动。
+   */
+  main {
+    flex: 1; display: grid; grid-template-columns: minmax(360px, 1fr) 400px;
+    gap: 16px; padding: 16px 20px; min-height: 0;
+  }
+  .chat {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  }
+  /* 消息区域独立滚动，输入栏不会随长对话移出视口。
+   * 气泡限制宽度并允许单词换行，避免长输入撑开两栏。
+   * 用户和助手采用左右对齐，同时保留消息文本的换行。
+   */
+  .messages { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 78%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  /* 用户与助手消息分别靠两侧，便于辨认对话来源。 */
+  .msg.user { align-self: flex-end; background: var(--user-bg); color: #fff; border-bottom-right-radius: 4px; }
+  .msg.bot { align-self: flex-start; background: var(--bot-bg); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+  .msg .meta { display: block; margin-top: 6px; font-size: 11px; color: var(--muted); }
+  /* 次要元信息独占一行，避免与用户输入或助手正文混读。
+   * pre-wrap 保留换行；word-break 处理没有自然断点的长内容。
+   * 排版不为流式增量指定固定高度，以免截断后续文本。
+   */
+  /* Markdown 样式只作用于脚本生成的安全子集。
+   * 代码块保留等宽字体，行内代码不改变普通消息的排版。
+   * 脚本负责转义内容；CSS 本身不是 HTML 注入防护。
+   */
+  .md-body { display: block; }
+  .md-body p { margin: 4px 0; }
+  .md-body ul, .md-body ol { margin: 4px 0; padding-left: 18px; }
+  .md-body li { margin: 2px 0; }
+  .md-body code { background: rgba(0,0,0,.06); padding: 1px 4px; border-radius: 4px; font-family: var(--mono); font-size: 12px; }
+  /* 长代码块水平滚动，不撑开聊天气泡。 */
+  .md-body pre { background: #f6f8fa; border: 1px solid var(--border); border-radius: 6px; padding: 8px; overflow-x: auto; margin: 6px 0; }
+  .md-body pre code { background: none; padding: 0; }
+  .md-body h3, .md-body h4, .md-body h5 { margin: 8px 0 4px; font-size: 13px; }
+  .md-body strong { font-weight: 600; }
+
+  /* 待确认动作与普通回复区分；按钮禁用由会话状态控制。
+   * 同一行显示执行和取消操作，按钮仍保留各自的文字标签。
+   * 动作标识绑定和排队校验由脚本及服务端负责，而非颜色。
+   */
+  .confirm-box {
+    align-self: flex-start; background: #fffbeb; border: 1px solid #fde68a;
+    border-radius: 12px; padding: 12px 14px; font-size: 13px; max-width: 78%;
+  }
+  .confirm-box .actions { margin-top: 10px; display: flex; gap: 8px; }
+  /* 输入区固定在聊天容器底部，提交时统一禁用输入和按钮。
+   * 输入框占用剩余宽度，焦点边框提示当前键盘输入位置。
+   * 禁用态仅提供视觉反馈；请求期间的互斥还由脚本检查。
+   */
+  .input-bar {
+    display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--border); background: #fafbfd;
+  }
+  .input-bar input {
+    flex: 1; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px;
+    font-size: 14px; outline: none;
+  }
+  .input-bar input:focus { border-color: var(--accent); }
+  /* 焦点通过边框颜色提示；当前实现移除了默认 outline。
+   * 这不是完整的键盘无障碍保证，颜色与对比度仍需单独评估。
+   * 表单禁用状态由脚本设定，样式不改变请求与确认逻辑。
+   */
+  button {
+    cursor: pointer; border: none; border-radius: 8px; padding: 9px 16px;
+    font-size: 13px; font-weight: 500; background: var(--accent); color: #fff;
+  }
+  /* 禁用态同时提供视觉反馈，不仅依赖点击处理器的保护。 */
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.ghost { background: #eef2f7; color: var(--text); }
+  button.danger { background: var(--err); }
+  button.ok { background: var(--ok); }
+  /* 调试面板单独滚动，长事件或上下文不会遮挡消息输入。
+   * 路由、事件和上下文按页面顺序排列，便于追踪一轮处理。
+   * 面板内容来自状态快照，并非浏览器侧的授权证明。
+   */
+  aside {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px;
+  }
+  aside h2 { font-size: 13px; color: var(--muted); font-weight: 600; letter-spacing: .04em; }
+  /* 状态键和值对齐；长标识在值列内换行。 */
+  .kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; font-size: 13px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { font-family: var(--mono); font-size: 12px; word-break: break-all; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; background: var(--accent-soft); color: var(--accent); }
+  .pill.high { background: #fee2e2; color: var(--err); }
+  /* 高风险标识配合服务端返回的风险文字使用。
+   * 路由详情在描述列表中呈现，键与值保持语义关联。
+   * 长标识在值列换行，避免覆盖相邻的标签或控件。
+   */
+  /* 事件按顺序排列，标识与名称分列显示。
+   * 名称列可使用剩余宽度，时间或类型列不因挤压而消失。
+   * 上下文折叠区保持原生 details 行为，可通过键盘展开。
+   */
+  .events { list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+  .events li {
+    font-family: var(--mono); padding: 5px 8px; background: #f8fafc; border: 1px solid var(--border);
+    border-radius: 6px; display: flex; justify-content: space-between; gap: 8px;
+  }
+  .events li .t { color: var(--muted); flex-shrink: 0; }
+  details { border: 1px solid var(--border); border-radius: 8px; }
+  details summary {
+    cursor: pointer; padding: 8px 10px; font-size: 12px; color: var(--muted); user-select: none;
+  }
+  /* 使用原生 summary 交互，样式不移除浏览器的键盘行为。
+   * 详情关闭时隐藏 JSON，展开后可分别滚动两个方向。
+   * 页面仍需由调用方避免将敏感内容放入状态快照。
+   */
+  /* 上下文详情限制高度并允许滚动，避免占满侧栏。
+   * JSON 使用等宽字体；水平和垂直方向都能查看溢出内容。
+   * 摘要、状态和事件仍可在折叠区外独立访问。
+   */
+  details pre {
+    max-height: 320px; overflow: auto; padding: 10px; font-size: 11px; font-family: var(--mono);
+    border-top: 1px solid var(--border); background: #f8fafc; border-radius: 0 0 8px 8px;
+  }
+  .toolbar { display: flex; gap: 8px; }
+  .toolbar button { flex: 1; }
+  /* 工具栏中的重置是有副作用的操作，实际确认由脚本提供。
+   * 按钮布局不能代替后端串行化或失效会话的拒绝处理。
+   * 压缩结果区与按钮相邻，方便将结果关联到触发操作。
+   */
+  /* 压缩结果默认隐藏，成功和失败状态分别用颜色及文字表达。
+   * 结果由脚本更新；请求期间原有结果可能仍然可见。
+   * 两个工具按钮等宽，且均为普通按钮而非表单提交按钮。
+   */
+  #compactResult { font-size: 12px; line-height: 1.6; padding: 8px 10px; border-radius: 8px; display: none; }
+  #compactResult.show { display: block; }
+  #compactResult.ok { background: #ecfdf5; color: var(--ok); border: 1px solid #a7f3d0; }
+  #compactResult.fail { background: #fef2f2; color: var(--err); border: 1px solid #fecaca; }
+  .hint { font-size: 12px; color: var(--muted); line-height: 1.7; }

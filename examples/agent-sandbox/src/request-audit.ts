@@ -12,7 +12,9 @@ import { runWithLogContext, writeSafeLog } from './safe-log.js';
 /** 请求生命周期内使用的审计元数据。 */
 type AuditContext = { requestId: string; traceId: string; startTime: number; isEnded: boolean };
 /** 固定路由集合避免未知路径携带自由文本进入日志。 */
-const SAFE_PATHS = new Set(['/', '/api/chat', '/api/confirm', '/api/compact', '/api/state', '/api/reset']);
+const SAFE_PATHS = new Set(['/', '/api/chat', '/api/confirm', '/api/compact', '/api/state', '/api/reset',
+  '/api/sessions', '/api/sessions/:sessionId', '/api/sessions/:sessionId/chat', '/api/sessions/:sessionId/confirm',
+  '/api/sessions/:sessionId/compact', '/api/sessions/:sessionId/state', '/api/sessions/:sessionId/reset']);
 /** 仅允许输出标准方法名称。 */
 const SAFE_METHODS = new Set(['GET', 'POST', 'HEAD', 'OPTIONS', 'PUT', 'PATCH', 'DELETE']);
 /** 客户端断开时的审计状态，表示未完成的响应。 */
