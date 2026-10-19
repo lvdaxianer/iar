@@ -10,7 +10,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { ERROR_CODES, MAX_ROUTING_SCOPE_PLUGINS, type BehaviorContext, type DecisionResult, type RoutingScope } from '@iar/contracts';
+import { ACTION_TYPES, ERROR_CODES, MAX_ROUTING_SCOPE_PLUGINS, type ActionType, type BehaviorContext, type DecisionResult, type RoutingScope } from '@iar/contracts';
 import { providerFailureResult, type DecisionCandidate, type DecisionProvider, type DecisionRequest, type ModelGatewayResult } from '@iar/decision';
 import type { FunctionRule, PluginCandidate, PluginRule, RuleEvaluationFacts, RuleEvaluationResult } from '@iar/rule-engine';
 import { RuleEngine } from '@iar/rule-engine';
@@ -208,7 +208,7 @@ export class PluginFirstRouter {
 
   /** 执行 Plugin-first → Function-secondary 的异步路由。 */
   public async routeAsync(request: AsyncRouteRequest): Promise<RouteResult> {
-    const records = request.pluginHost.businessCandidates();
+    const records = filterRecordsByActionType(request.pluginHost.businessCandidates(), request.facts);
     const authorized = authorizeCandidates(request, records);
     const pluginEvaluation = evaluatePluginScope(this.engine, request.facts, authorized, request.pluginRules);
     if (pluginEvaluation.status === 'no_match' || pluginEvaluation.candidates.length === 0) {
@@ -246,6 +246,22 @@ export class PluginFirstRouter {
     const routingScope = buildRoutingScope(pluginEvaluation, selected, request.behaviorContext);
     return finalizePluginRoute({ request, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision, routingScope });
   }
+}
+
+/**
+ * 只按稳定的语义动作类型过滤插件能力；不解析业务关键词或历史原文。
+ * 缺失/unknown 动作不会进入业务候选，交由上层回答模型处理。
+ */
+function filterRecordsByActionType(records: readonly PluginRecord[], facts: RuleEvaluationFacts): PluginRecord[] {
+  const semantic = facts.semantic;
+  const action = typeof semantic === 'object' && semantic !== null && !Array.isArray(semantic) ? (semantic as Record<string, unknown>).action : undefined;
+  if (!isActionType(action)) return [];
+  return records.filter((record) => record.manifest.pluginKind === 'function' && record.manifest.actionTypes.includes(action));
+}
+
+/** 判断事实中的动作是否属于运行时固定协议。 */
+function isActionType(value: unknown): value is ActionType {
+  return ACTION_TYPES.includes(value as ActionType);
 }
 
 /**

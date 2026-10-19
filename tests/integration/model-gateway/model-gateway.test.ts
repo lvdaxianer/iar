@@ -138,7 +138,7 @@ function registry(): ModelProfileRegistry {
 
 /** 创建最小合法 SemanticFrame provider 输出。 @returns JSON-safe SemanticFrame @author lvdaxianer@yeah.net @date 2026-10-17 */
 function semanticFrame(): JsonValue {
-  return { schemaVersion: 'iar.semantic-frame/v1', intent: 'service.stop', action: 'stop', confidence: 0.95, slots: { serviceId: 'test1' }, references: [] };
+  return { schemaVersion: 'iar.semantic-frame/v1', intent: 'service.stop', action: 'execute', confidence: 0.95, slots: { serviceId: 'test1' }, references: [] };
 }
 
 /** 创建最小合法 DecisionResult provider 输出。 @param decisionType - JEV role @param score - 模型分数 @returns DecisionResult fixture @author lvdaxianer@yeah.net @date 2026-10-17 */
@@ -196,6 +196,24 @@ test('routes all model roles through the gateway and records redacted audit even
   assert.deepEqual(calls, ['semantic.extract', 'function.select', 'plugin.select', 'context.compact', 'response.generate']);
   assert.equal(JSON.stringify(response.events).includes('respond'), false);
   assert.equal(JSON.stringify(response.events).includes('api-key'), false);
+});
+
+test('semantic action is normalized to unknown when omitted and rejects dynamic action names', async () => {
+  let dynamic = false;
+  const provider: ModelProvider = { complete: async (request) => {
+    if (request.profile.role !== 'semantic.extract') return semanticFrame();
+    return dynamic ? { ...semanticFrame() as Record<string, JsonValue>, action: 'rank' } : (() => {
+      const { action: _action, ...legacy } = semanticFrame() as Record<string, JsonValue>;
+      return legacy;
+    })();
+  } };
+  const gateway = new ModelGateway({ registry: registry(), providers: { mock: provider } });
+  const missing = await new SemanticExtractorAdapter(gateway).extract({ traceId: 'trace-semantic-action', runId: 'run-semantic-action', input: { text: 'previous result' } });
+  assert.equal(missing.ok, true);
+  if (missing.ok) assert.equal(missing.value.action, 'unknown');
+  dynamic = true;
+  const invalid = await new SemanticExtractorAdapter(gateway).extract({ traceId: 'trace-semantic-action-invalid', runId: 'run-semantic-action-invalid', input: { text: 'rank' } });
+  assert.equal(invalid.ok, false);
 });
 
 /* timeout、schema invalid 和 provider failure 必须走 retry/fallback 的稳定路径。 */

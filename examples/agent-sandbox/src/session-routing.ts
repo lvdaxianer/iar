@@ -141,7 +141,7 @@ export class SandboxSessionRouting {
     if (!route.functionId || !route.pluginId) return { status: 'failed', reply: '路由结果缺少 Function 或 Plugin。', reasonCode: 'route_incomplete' };
     const resolved = this.context.pluginHost.resolveCandidate(route.functionId, route.pluginId);
     if (!resolved.ok) return { status: 'failed', reply: `路由选中的插件不可用（${resolved.error.code}）。`, reasonCode: resolved.error.code };
-    const built = buildActionInput(route.functionId, frame.slots, userText);
+    const built = buildActionInput(route.functionId, frame.slots, userText, frame.action);
     if ('missing' in built) return { status: 'clarification', reply: `还缺少必要信息（${built.missing.join('、')}），请补充完整后再试。`, reasonCode: 'slots_missing' };
     const action = this.createAction({ runId, functionId: route.functionId, pluginId: route.pluginId, input: built.input, policy: resolved.value.manifest.policy });
     await this.appendDecisionEvent({ runId, frame, route, input: built.input });

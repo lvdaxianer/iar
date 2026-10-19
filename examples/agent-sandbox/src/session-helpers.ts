@@ -3,7 +3,7 @@
  * @date 2026-10-18
  */
 import type { ActionDefinition, JsonValue, SlotValue } from '@iar/contracts';
-import type { SemanticFrame } from '@iar/decision';
+import type { SemanticActionType, SemanticFrame } from '@iar/decision';
 import type { RouteResult } from '@iar/runtime';
 import type { RuleEvaluationFacts } from '@iar/rule-engine';
 import { sandboxFunctionCatalog } from './functions/index.js';
@@ -80,36 +80,33 @@ export function buildEvidence(route: RouteResult, frame: SemanticFrame): RouteEv
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function buildActionInput(functionId: string, slots: Record<string, JsonValue>, userText: string): { input: JsonValue } | { missing: string[] } {
+export function buildActionInput(functionId: string, slots: Record<string, JsonValue>, userText: string, actionType: SemanticActionType = 'unknown'): { input: JsonValue } | { missing: string[] } {
   const descriptor = sandboxFunctionCatalog[functionId];
   if (!descriptor) return { missing: [`未知 Function: ${functionId}`] };
+  if (actionType === 'unknown') return { missing: ['actionType'] };
   const rawOperation = stringSlot(slots, 'operation');
   const query = stringSlot(slots, 'query') ?? (userText.length > 0 ? userText : undefined);
-  const operation = chooseOperation(descriptor, rawOperation, query);
+  const expectedKind = actionType === 'query' ? 'read' : 'action';
+  const operation = chooseCompatibleOperation(descriptor, rawOperation, expectedKind);
   const params = paramsSlot(slots);
-  const effectiveOperation = operation ?? descriptor.defaultOperation;
-  if (effectiveOperation === 'search' && !query) return { missing: ['query'] };
+  if (!operation) return { missing: ['operation'] };
+  if (operation === 'search' && !query) return { missing: ['query'] };
   const input: Record<string, JsonValue> = {};
-  if (operation) input.operation = operation.slice(0, 60);
+  input.operation = operation.slice(0, 60);
   if (query) input.query = query.slice(0, 500);
   if (params) input.params = params;
   return { input };
 }
 
-/**
- * 丢弃未知操作，并将咨询语气纠偏为知识检索。
- * @param descriptor - 当前功能的操作目录
- * @param rawOperation - 语义抽取的操作
- * @param query - 用户问题
- * @returns 合法操作或未指定
- * @author lvdaxianer@yeah.net
- * @date 2026-10-18
- */
-function chooseOperation(descriptor: { operations: ReadonlyArray<{ name: string; kind: string }> }, rawOperation: string | undefined, query: string | undefined): string | undefined {
-  const operation = rawOperation && descriptor.operations.some((item) => item.name === rawOperation) ? rawOperation : undefined;
-  // 显式动作无动作动词且为咨询时，优先使用知识检索。
-  if (operation && isActionOperation(descriptor, operation) && query && !hasActionVerb(query) && isKnowledgeQuestion(query) && descriptor.operations.some((item) => item.name === 'search')) return 'search';
-  return operation;
+/** 选择与固定语义动作类型兼容的操作目录项。 */
+function chooseCompatibleOperation(descriptor: { operations: ReadonlyArray<{ name: string; kind: string }> }, rawOperation: string | undefined, expectedKind: 'read' | 'action'): string | undefined {
+  if (rawOperation) {
+    const explicit = descriptor.operations.find((item) => item.name === rawOperation);
+    if (explicit?.kind === expectedKind) return explicit.name;
+    return undefined;
+  }
+  if (expectedKind === 'action') return undefined;
+  return descriptor.operations.find((item) => item.kind === expectedKind)?.name;
 }
 
 /**
@@ -129,35 +126,8 @@ export function sandboxOperationKind(functionId: string, input: JsonValue): 'rea
   if (typeof raw === 'string' && raw.length > 0) {
     return descriptor.operations.find((item) => item.name === raw)?.kind ?? 'read';
   }
-  // 未显式指定操作时，知识型问法按检索（read）处理，避免"工单多久有回复"误入动作确认流。
-  const query = typeof record.query === 'string' ? record.query : '';
-  if (descriptor.operations.some((item) => item.name === 'search') && isKnowledgeQuestion(query)) return 'read';
   const name = descriptor.defaultOperation;
   return descriptor.operations.find((item) => item.name === name)?.kind ?? 'read';
-}
-
-/** 知识型问法启发式，用于动作纠偏与默认检索。
- * @param query - 用户问题 @returns 是否为知识问题
- * @author lvdaxianer@yeah.net @date 2026-10-18
- */
-function isKnowledgeQuestion(query: string): boolean {
-  return /有哪些|是什么|什么是|如何|怎么|为什么|多久|多长时间|区别|介绍|说明/.test(query);
-}
-
-/** 动作动词集合：命中时视为动作请求。
- * @param query - 用户问题 @returns 是否包含动作动词
- * @author lvdaxianer@yeah.net @date 2026-10-18
- */
-function hasActionVerb(query: string): boolean {
-  return /重跑|重启|停止|导出|下载|转人工|调整|调到|设为|改成|修改|提高|降低|提额|开通|提权|创建|提交|提个|发起|帮我申请|我要申请|我想申请|申请一下|帮我开通|帮我提权/.test(query);
-}
-
-/** 判断指定 operation 是否为动作类型。
- * @param descriptor - 功能操作目录 @param operation - 操作名
- * @returns 是否为动作 @author lvdaxianer@yeah.net @date 2026-10-18
- */
-function isActionOperation(descriptor: { operations: ReadonlyArray<{ name: string; kind: string }> }, operation: string): boolean {
-  return descriptor.operations.find((item) => item.name === operation)?.kind === 'action';
 }
 
 /**

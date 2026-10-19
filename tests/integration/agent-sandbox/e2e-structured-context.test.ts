@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { startSandboxServer } from '../../../examples/agent-sandbox/src/server.js';
+import { buildActionInput } from '../../../examples/agent-sandbox/src/session-helpers.js';
 
 /** 获取可用本地端口，避免端到端测试争抢固定监听端口。 */
 async function availablePort(): Promise<number> {
@@ -28,6 +29,10 @@ async function requestJson<T>(url: string, init: RequestInit): Promise<{ respons
   const response = await fetch(url, init);
   return { response, body: await response.json() as T };
 }
+
+test('缺少明确 operation 时动作型语义不会默认生成副作用输入', () => {
+  assert.deepEqual(buildActionInput('ticket.create', {}, '', 'create'), { missing: ['operation'] });
+});
 
 test('自由追问可从结构化事实回答并在压缩重启后继续，同时隔离其他会话', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'iar-e2e-context-'));
@@ -105,5 +110,36 @@ test('自由追问可从结构化事实回答并在压缩重启后继续，同�
     await second?.close();
     await first?.close();
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('事实型排队追问不会再次触发人工转接副作用', async () => {
+  const port = await availablePort();
+  const base = `http://127.0.0.1:${port}`;
+  const server = await startSandboxServer({ mode: 'scripted', port });
+  try {
+    const created = await requestJson<{ sessionId: string }>(`${base}/api/sessions`, { method: 'POST' });
+    const sessionId = created.body.sessionId;
+    const pending = await requestJson<{ status: string; pending?: { actionId: string } }>(`${base}/api/sessions/${sessionId}/chat`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: '请帮我转人工' })
+    });
+    assert.equal(pending.body.status, 'awaiting_confirmation');
+    assert.ok(pending.body.pending?.actionId);
+    const confirmed = await requestJson<{ status: string }>(`${base}/api/sessions/${sessionId}/confirm`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ accepted: true, actionId: pending.body.pending!.actionId })
+    });
+    assert.equal(confirmed.body.status, 'executed');
+
+    const followUp = await requestJson<{ status: string; reply: string; route: { functionId?: string; pluginId?: string; reasonCode: string } }>(`${base}/api/sessions/${sessionId}/chat`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: '转人工后的排队第几个' })
+    });
+    assert.equal(followUp.body.status, 'clarification');
+    assert.equal(followUp.body.route.functionId, undefined);
+    assert.equal(followUp.body.route.pluginId, undefined);
+    assert.equal(followUp.body.route.reasonCode, 'plugin_noul');
+    assert.match(followUp.body.reply, /queuePosition=3/);
+  } finally {
+    await server.close();
   }
 });

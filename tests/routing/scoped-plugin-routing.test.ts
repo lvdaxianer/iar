@@ -40,7 +40,7 @@ function manifest(pluginId: string, functionId: string, actionTypes: FunctionPlu
 }
 
 function createHost(): PluginHost {
-  const host = new PluginHost({ functionIds: ['knowledge.query', 'report.center'] });
+  const host = new PluginHost({ functionIds: ['knowledge.query', 'report.center', 'human.transfer'] });
   for (const item of [
     manifest('knowledge-a', 'knowledge.query', ['query']),
     manifest('knowledge-b', 'knowledge.query', ['query']),
@@ -50,6 +50,15 @@ function createHost(): PluginHost {
     assert.equal(host.enable(item.pluginId).ok, true);
   }
   return host;
+}
+
+function transferRule() {
+  return {
+    pluginId: 'human-transfer',
+    functionId: 'human.transfer',
+    rule: { schemaVersion: SCHEMA_VERSIONS.rule, ruleId: 'rule-human-transfer', version: '1.0.0', target: 'plugin' as const, priority: 100, specificity: 1, unknownFieldPolicy: 'match_none' as const, expression },
+    requiredCapabilities: ['knowledge.read']
+  };
 }
 
 function decisionAdapter(calls: DecisionRequest[], choice?: string, status: 'choice' | 'needs_clarification' = 'choice'): AsyncDecisionAdapter {
@@ -119,6 +128,18 @@ test('Plugin-first routing sends bounded Plugin descriptions and only selected P
     actionTypes: ['query'],
     continuation: 'replace'
   });
+});
+
+test('Plugin-first routing excludes Plugins that do not support the semantic action type', async () => {
+  const { routerRequest, pluginCalls } = request();
+  const transfer = manifest('human-transfer', 'human.transfer', ['transfer']);
+  assert.equal(routerRequest.pluginHost.install(transfer).ok, true);
+  assert.equal(routerRequest.pluginHost.enable(transfer.pluginId).ok, true);
+  routerRequest.pluginRules = [...routerRequest.pluginRules, transferRule()];
+  const result = await new PluginFirstRouter().routeAsync(routerRequest);
+
+  assert.equal(result.status, 'matched');
+  assert.deepEqual(pluginCalls[0]?.candidates.map((candidate) => candidate.candidateId), ['knowledge-a', 'knowledge-b']);
 });
 
 test('Plugin-first routing stops before Function when Plugin decision needs clarification', async () => {

@@ -140,6 +140,12 @@ agent-sandbox 默认同时加载 JEV 和 Intent Model，并固定 JEV 优先。�
 
 会话 ID 仅隔离沙箱状态，不是身份认证或租户授权；持有 ID 的客户端可以读取状态并确认操作。沙箱只适合受信任的本机使用，生产接入必须另外实施认证、逐会话授权和传输保护。调用约束及错误码详见[会话接口与安全边界](docs/README.md#1221-沙箱会话接口与安全边界)。
 
+### 通用追问与动作边界
+
+每轮请求都会把当前问题和实时 `BehaviorContext` 一起交给语义模型。模型先输出固定 `action`：`query`、`create`、`update`、`delete`、`transfer`、`execute` 或 `unknown`；运行时只按会话范围、插件状态、权限和 Plugin Manifest 的 `actionTypes` 过滤有限候选，不根据工单、人工服务或其他业务关键词写路由分支。
+
+如果没有合适的 Plugin/Function，运行时不准备也不执行 Action，而是把当前问题、结构化上下文、`verified` facts、`pending` 和未命中原因交给 Response Model。Response Model 自己判断是基于事实直接回答，还是说明缺少信息并反问；它不能创建、确认或执行功能。明确的新动作仍然经过原有权限、策略、确认、幂等和事实投影链路。
+
 ### 沙箱安全日志
 
 沙箱记录 HTTP 请求审计和模型调用的安全元数据，默认不输出正常模型调用的 DEBUG 日志。拥有进程信号权限的本机运维人员可以向沙箱进程发送 `SIGHUP` 切换模型 DEBUG，重复发送恢复关闭；部署环境须限制进程信号权限并确认没有其他 SIGHUP 处理约定。日志不记录模型输入、输出、请求头、凭据、URL 查询或原始异常。详见[安全与观测方案](docs/README.md#123-观测字段)。

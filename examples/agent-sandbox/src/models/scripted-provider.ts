@@ -55,9 +55,9 @@ export class ScriptedModelProvider implements ModelProvider {
    */
   private extract(text: string, behaviorContext: Record<string, unknown>): unknown {
     const trimmed = text.trim();
-    if (trimmed.length === 0) return frame('unknown', {}, 0.1);
+    if (trimmed.length === 0) return frame('unknown', {}, 0.1, 'unknown');
     // 已有可信事实的追问优先交给通用回复模型，不能因业务名词重复触发默认动作。
-    if (hasVerifiedFacts(behaviorContext) && isFactFollowUp(trimmed) && !isExplicitNewOperation(trimmed)) return frame('unknown', {}, 0.95);
+    if (hasVerifiedFacts(behaviorContext) && isFactFollowUp(trimmed) && !isExplicitNewOperation(trimmed)) return frame('unknown', {}, 0.95, 'query');
     // howTo 用于区分「如何/怎么/怎样」类咨询与真正的动作请求。
     const howTo = /(如何|怎么|怎样)/.test(trimmed);
     // 人工优先于工单和查询，避免“转人工查问题”被误判。
@@ -101,7 +101,7 @@ export class ScriptedModelProvider implements ModelProvider {
     if (/(知识|查一下|查下|是什么|什么是|如何|怎么|为什么|政策|规范|资料|帮助|多少)/.test(trimmed)) {
       return frame('knowledge.query', { query: trimmed }, 0.9);
     }
-    return frame('unknown', {}, 0.3);
+    return frame('unknown', {}, 0.3, 'unknown');
   }
 
   /**
@@ -178,7 +178,7 @@ function hasVerifiedFacts(context: Record<string, unknown>): boolean {
 
 /** 判断用户是否在追问已有结果，而非表达新副作用。 */
 function isFactFollowUp(text: string): boolean {
-  return /刚才|之前|上次|前面|这个|该|那条|编号|单号|结果|进度|状态|多少|哪个/.test(text);
+  return /刚才|之前|上次|前面|这个|该|那条|编号|单号|结果|进度|状态|多少|哪个|第几个|第几位|哪一位|什么位置|位次/.test(text);
 }
 
 /** 判断当前句子是否明确要求重新执行一个新操作。 */
@@ -196,8 +196,22 @@ function isExplicitNewOperation(text: string): boolean {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function frame(intent: string, slots: Record<string, JsonValue>, confidence: number): unknown {
-  return { schemaVersion: 'iar.semantic-frame/v1', intent, slots, references: [], confidence };
+type ScriptedAction = 'query' | 'create' | 'update' | 'delete' | 'transfer' | 'execute' | 'unknown';
+
+function frame(intent: string, slots: Record<string, JsonValue>, confidence: number, action?: ScriptedAction): unknown {
+  return { schemaVersion: 'iar.semantic-frame/v1', intent, action: action ?? inferAction(intent, slots), slots, references: [], confidence };
+}
+
+/** 离线 provider 只模拟固定动作协议，不把业务词映射写入运行时路由。 */
+function inferAction(intent: string, slots: Record<string, JsonValue>): ScriptedAction {
+  if (intent === 'unknown') return 'unknown';
+  const operation = typeof slots.operation === 'string' ? slots.operation : undefined;
+  if (!operation) return 'query';
+  if (operation === 'create') return 'create';
+  if (operation === 'transfer') return 'transfer';
+  if (operation === 'grant' || operation === 'limit') return 'update';
+  if (operation === 'rerun' || operation === 'stop' || operation === 'export') return 'execute';
+  return 'query';
 }
 
 /**

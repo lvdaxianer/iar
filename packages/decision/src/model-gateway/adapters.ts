@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { validateContract, type BehaviorContext, type CompactionResult, type DecisionResult, type JsonValue } from '@iar/contracts';
+import { ACTION_TYPES, validateContract, type ActionType, type BehaviorContext, type CompactionResult, type DecisionResult, type JsonValue } from '@iar/contracts';
 import { validateDecisionOutput } from '../validation.js';
 import type { DecisionRequest } from '../types.js';
 import { MODEL_NO_PROFILE_MESSAGE, type ModelGatewayInvocationOptions, type ModelGatewayResult, type ModelInvocation, type ModelOutputValidation } from './types.js';
@@ -20,8 +20,8 @@ export type SemanticFrame = {
   subject?: { type?: string; id?: string; source?: 'input' | 'context' | 'event' | 'plugin' };
   /** 结构化意图。 */
   intent: string;
-  /** 结构化动作。 */
-  action?: string;
+  /** 结构化动作；缺失的旧模型输出会在边界归一化为 unknown。 */
+  action: SemanticActionType;
   /** 只承载 JSON-safe 槽位事实。 */
   slots: Record<string, JsonValue>;
   /** 输入文本中的引用解析。 */
@@ -29,6 +29,9 @@ export type SemanticFrame = {
   /** 0 到 1 的模型置信度。 */
   confidence: number;
 };
+
+/** Semantic Extractor 可以表达的固定动作集合。 */
+export type SemanticActionType = ActionType | 'unknown';
 
 /** Semantic Extractor 的调用输入。 */
 export type SemanticExtractInvocation = ModelInvocation;
@@ -232,8 +235,13 @@ export type ClarificationMetadata = {
 /** 校验 SemanticFrame 输出。 @param raw - provider 原始输出 @returns 结构化验证结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function validateSemanticFrame(raw: unknown): ModelOutputValidation<SemanticFrame> {
   // SemanticFrame 只允许抽取字段，未知字段不能进入规则引擎。
-  if (!isRecord(raw) || !hasOnlyKeys(raw, ['schemaVersion', 'subject', 'intent', 'action', 'slots', 'references', 'confidence']) || raw.schemaVersion !== 'iar.semantic-frame/v1' || !isNonEmptyString(raw.intent) || !isRecord(raw.slots) || !isJsonValue(raw.slots) || !Array.isArray(raw.references) || !raw.references.every(isReference) || typeof raw.confidence !== 'number' || !Number.isFinite(raw.confidence) || raw.confidence < 0 || raw.confidence > 1 || (raw.subject !== undefined && !isSubject(raw.subject)) || (raw.action !== undefined && !isNonEmptyString(raw.action))) return { ok: false, message: 'SemanticFrame Schema 无效' };
-  return { ok: true, value: structuredClone(raw) as SemanticFrame };
+  if (!isRecord(raw) || !hasOnlyKeys(raw, ['schemaVersion', 'subject', 'intent', 'action', 'slots', 'references', 'confidence']) || raw.schemaVersion !== 'iar.semantic-frame/v1' || !isNonEmptyString(raw.intent) || !isRecord(raw.slots) || !isJsonValue(raw.slots) || !Array.isArray(raw.references) || !raw.references.every(isReference) || typeof raw.confidence !== 'number' || !Number.isFinite(raw.confidence) || raw.confidence < 0 || raw.confidence > 1 || (raw.subject !== undefined && !isSubject(raw.subject)) || (raw.action !== undefined && !isSemanticActionType(raw.action))) return { ok: false, message: 'SemanticFrame Schema 无效' };
+  return { ok: true, value: { ...structuredClone(raw) as Omit<SemanticFrame, 'action'> & { action?: SemanticActionType }, action: raw.action ?? 'unknown' } };
+}
+
+/** 只允许固定动作类型进入路由事实，避免模型动态创造动作语义。 */
+function isSemanticActionType(value: unknown): value is SemanticActionType {
+  return value === 'unknown' || ACTION_TYPES.includes(value as ActionType);
 }
 
 /** 校验并归一化 JEV DecisionResult。 */

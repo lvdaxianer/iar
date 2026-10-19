@@ -113,7 +113,7 @@ test('normal and streaming session calls use the live structured context after a
     const semantic = payload.messages?.[0]?.content.includes('Semantic Extractor') === true;
     if (semantic) {
       const frame = userPrompt.includes('帮我创建')
-        ? { schemaVersion: 'iar.semantic-frame/v1', intent: 'ticket.create', slots: { operation: 'create' }, references: [], confidence: 0.99 }
+        ? { schemaVersion: 'iar.semantic-frame/v1', intent: 'ticket.create', action: 'create', slots: { operation: 'create' }, references: [], confidence: 0.99 }
         : { schemaVersion: 'iar.semantic-frame/v1', intent: 'unknown', slots: {}, references: [], confidence: 0.2 };
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(frame) } }] }), { status: 200 });
     }
@@ -228,7 +228,7 @@ test('model clarification options are projected, asynchronously snapshotted and 
     const user = payload.messages?.[1]?.content ?? '';
     prompts.push(user);
     if (system.includes('Semantic Extractor')) {
-      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ schemaVersion: 'iar.semantic-frame/v1', intent: 'unknown', slots: {}, references: [], confidence: 0.2 }) } }] }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ schemaVersion: 'iar.semantic-frame/v1', intent: 'unknown', action: 'unknown', slots: {}, references: [], confidence: 0.2 }) } }] }), { status: 200 });
     }
     responseCount += 1;
     const response = responseCount === 1

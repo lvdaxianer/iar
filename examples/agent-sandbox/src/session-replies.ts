@@ -259,5 +259,5 @@ export class SandboxSessionReplies {
 
 /** 判断用户是否在询问当前会话已经确认的事实，而不是发起新操作。 */
 function isFactFollowUp(text: string): boolean {
-  return /刚才|之前|上次|前面|这个|该|那条|编号|单号|结果|进度|状态|多少|哪个|排名|排队|第几位|位置|位次|顺序/.test(text);
+  return /刚才|之前|上次|前面|这个|该|那条|编号|单号|结果|进度|状态|多少|哪个|第几个|第几位|哪一位|排名|排队|位置|位次|顺序/.test(text);
 }
