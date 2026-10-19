@@ -28,6 +28,8 @@ export type CompactionContext = {
   compactCount: number;
   /** 压缩事件投影后异步保存完整结构化快照。 */
   queueSnapshot: (eventId: string) => void;
+  /** 将已追加的压缩事实发布给订阅桥；旧调用方可以省略。 */
+  publishEvent?: (event: EventEnvelope) => void;
 };
 
 /** 会话上下文压缩和失败事件记录。
@@ -82,6 +84,7 @@ export class SandboxSessionCompaction {
       const failureEvent = this.buildCompactionFailureEvent({ compactSeq, occurredAt, reasonCode: compacted.error.code, message: compacted.error.message, hashBefore });
       await this.context.eventStore.append(failureEvent);
       this.context.projector.apply(failureEvent);
+      this.context.publishEvent?.(failureEvent);
       this.context.queueSnapshot(failureEvent.eventId);
       return { ok: false, reasonCode: compacted.error.code, error: compacted.error.message, hashBefore, hashAfter: this.context.projector.current().integrity.criticalFieldHash, eventId: failureEvent.eventId };
     }
@@ -90,11 +93,13 @@ export class SandboxSessionCompaction {
     if (outcome.ok) {
       await this.context.eventStore.append(outcome.event);
       this.context.projector.apply(outcome.event);
+      this.context.publishEvent?.(outcome.event);
       this.context.queueSnapshot(outcome.event.eventId);
       return { ok: true, summary: compacted.value.summary, hashBefore, hashAfter: outcome.context.integrity.criticalFieldHash, eventId: outcome.event.eventId };
     }
     await this.context.eventStore.append(outcome.failureEvent);
     this.context.projector.apply(outcome.failureEvent);
+    this.context.publishEvent?.(outcome.failureEvent);
     this.context.queueSnapshot(outcome.failureEvent.eventId);
     return { ok: false, reasonCode: outcome.error.code, error: outcome.error.message, hashBefore, hashAfter: this.context.projector.current().integrity.criticalFieldHash, eventId: outcome.failureEvent.eventId };
   }

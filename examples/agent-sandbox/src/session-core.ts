@@ -8,10 +8,13 @@
  * @date 2026-10-18
  */
 import { randomUUID } from 'node:crypto';
-import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type PendingInput, type WorkflowDefinition } from '@iar/contracts';
+import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type EventName, type JsonValue, type PendingInput, type WorkflowDefinition } from '@iar/contracts';
 import { ModelGateway, ModelProfileRegistry } from '@iar/decision';
+import { PersistenceSubscriptionBridge } from '@iar/persistence-runtime';
+import type { SessionMessage, SessionPersistenceProvider } from '@iar/persistence-spi';
 import { PluginHost } from '@iar/plugin-host';
 import { BehaviorContextProjector, type AsyncDecisionAdapter } from '@iar/runtime';
+import { SubscriptionDispatcher, SubscriptionRegistry, type DispatchEvent } from '@iar/subscriptions';
 import { InMemoryEventStore, type SnapshotStore } from '../../../packages/storage/src/index.js';
 import { LocalWorkflow, WorkflowEventLog, type ActionExecutor } from '@iar/workflow';
 import { SyncPluginBridge } from './execution/sync-plugin-bridge.js';
@@ -30,6 +33,22 @@ export const SESSION_CORRELATION_ID = 'sandbox-session';
 
 /** 路由未命中且兜底回复生成失败时的固定话术。 */
 export const FALLBACK_REPLY_TEXT = '我暂时无法确定你的需求。请补充想查询的对象、希望了解的结果，或明确说明是否要执行某个新操作；如果是在追问当前会话的结果，也可以说明想查看哪项信息。';
+
+/** 发送到持久化订阅桥的最小状态事件输入。 */
+type PersistenceEventInput = {
+  /** 受控事件名称。 */
+  eventName: EventName;
+  /** 事件所属的工作流运行。 */
+  runId: string;
+  /** 可重放 JSON 载荷。 */
+  payload: JsonValue;
+  /** 消息事件的可选消息标识。 */
+  messageId?: string;
+  /** 重试幂等使用的事件标识。 */
+  eventId?: string;
+  /** 事实发生时间。 */
+  occurredAt?: string;
+};
 
 /** sandbox 单轮执行状态机定义。 */
 export const TURN_DEFINITION: WorkflowDefinition = {
@@ -57,6 +76,10 @@ export class SandboxSessionCore {
   protected readonly sessionId: string;
   /** 共享的异步快照存储，由服务生命周期统一关闭。 */
   protected readonly snapshotStore: SnapshotStore | undefined;
+  /** 可替换的持久化 Provider；未注入时保持旧的快照兼容模式。 */
+  protected readonly persistenceProvider: SessionPersistenceProvider | undefined;
+  /** Provider 订阅桥的有界异步调度器。 */
+  private readonly persistenceDispatcher: SubscriptionDispatcher | undefined;
   /** 恢复完成前禁止处理该会话的新请求。 */
   private readonly restoration: Promise<void>;
   /** 已排入快照的单调版本。 */
@@ -105,20 +128,17 @@ export class SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public constructor(options: { mode: SandboxMode; decisionBackend?: SandboxDecisionBackend; sessionId?: string; snapshotStore?: SnapshotStore }) {
+  public constructor(options: { mode: SandboxMode; decisionBackend?: SandboxDecisionBackend; sessionId?: string; snapshotStore?: SnapshotStore; persistenceProvider?: SessionPersistenceProvider }) {
     try {
-      this.mode = options.mode;
-      this.sessionId = options.sessionId ?? SESSION_RUN_ID;
-      this.snapshotStore = options.snapshotStore;
+      this.mode = options.mode; this.sessionId = options.sessionId ?? SESSION_RUN_ID;
+      this.snapshotStore = options.snapshotStore; this.persistenceProvider = options.persistenceProvider;
+      this.persistenceDispatcher = this.createPersistenceDispatcher(options.persistenceProvider);
       this.pluginHost = createSandboxPluginHost();
       const models = createSandboxModels(options);
-      this.brainProvider = models.brain;
-      this.registry = models.registry;
-      this.gateway = models.gateway;
-      this.functionDecisionAdapter = models.functionAdapter;
-      this.pluginDecisionAdapter = models.pluginAdapter;
+      this.brainProvider = models.brain; this.registry = models.registry; this.gateway = models.gateway;
+      this.functionDecisionAdapter = models.functionAdapter; this.pluginDecisionAdapter = models.pluginAdapter;
       this.workflow = this.createWorkflow();
-      this.restoration = this.restoreSnapshot();
+      this.restoration = this.initializePersistence();
     } catch (error) {
       // 任一依赖失败时必须释放已启动的执行线程。
       this.bridge.dispose();
@@ -128,6 +148,18 @@ export class SandboxSessionCore {
 
   /** 等待持久化上下文恢复完成，避免新问题读取到半初始化状态。 */
   public whenReady(): Promise<void> { return this.restoration; }
+
+  /**
+   * 等待当前会话的 Hook 事件和 Provider 写入全部排空。
+   * @returns 所有已接受的持久化写入均完成
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-19
+   */
+  public async flushPersistence(): Promise<void> {
+    await this.whenReady();
+    await this.persistenceDispatcher?.drain();
+    await this.persistenceProvider?.flush();
+  }
 
 
   /**
@@ -229,18 +261,38 @@ export class SandboxSessionCore {
       await this.eventStore.append(event);
       this.projector.apply(event);
       this.consumedWorkflowEvents += 1;
+      this.enqueuePersistenceEvent({ eventName: event.eventName, runId: event.runId, payload: event.payload, eventId: event.eventId, occurredAt: event.occurredAt });
       this.queueSnapshot(event.eventId);
     }
   }
 
   /** 从最新有效快照恢复当前投影；无效快照只降级为空上下文。 */
+  /**
+   * 初始化 Provider 并恢复会话快照。
+   * @returns Provider 初始化和快照恢复完成
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-19
+   */
+  private async initializePersistence(): Promise<void> {
+    await this.persistenceProvider?.open(undefined);
+    await this.restoreSnapshot();
+  }
+
+  /**
+   * 从兼容快照或 Provider 快照恢复当前投影。
+   * @returns 恢复成功或安全降级为空上下文
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-19
+   */
   private async restoreSnapshot(): Promise<void> {
-    if (!this.snapshotStore) return;
+    if (!this.snapshotStore && !this.persistenceProvider) return;
     try {
-      const snapshot = await this.snapshotStore.get(this.sessionId);
+      const providerSnapshot = await this.persistenceProvider?.loadSnapshot(this.sessionId);
+      const snapshot = providerSnapshot ?? (await this.snapshotStore?.get(this.sessionId));
       if (!snapshot) return;
       this.projector = new BehaviorContextProjector(snapshot.context);
       this.snapshotRevision = snapshot.revision;
+      this.enqueuePersistenceEvent({ eventName: 'session.restored', runId: SESSION_RUN_ID, payload: { revision: snapshot.revision, eventId: snapshot.eventId } as JsonValue, eventId: `session-restored-${snapshot.eventId}` });
     } catch {
       // 持久化损坏不能阻止会话建立，更不能把不可信内容交给模型。
       writeSafeLog({ level: 'warn', event: 'sandbox.snapshot', outcome: 'snapshot_failed' });
@@ -249,17 +301,82 @@ export class SandboxSessionCore {
 
   /** 将不可变完整上下文异步排入 SQLite，不阻塞当前会话动作。 */
   private queueSnapshot(eventId: string): void {
-    if (!this.snapshotStore) return;
-    const snapshot = { runId: this.sessionId, eventId, revision: ++this.snapshotRevision, context: this.projector.current() };
-    void this.snapshotStore.save(snapshot).catch(() => {
+    if (!this.snapshotStore && !this.persistenceProvider) return;
+    const revision = ++this.snapshotRevision;
+    const context = this.projector.current();
+    const legacySnapshot = { runId: this.sessionId, eventId, revision, context };
+    const providerSnapshot = { sessionId: this.sessionId, runId: SESSION_RUN_ID, eventId, revision, context };
+    void this.snapshotStore?.save(legacySnapshot).catch(() => {
       // 持久化故障不阻塞当前请求，但必须以固定枚举留下可观测信号。
       writeSafeLog({ level: 'warn', event: 'sandbox.snapshot', outcome: 'snapshot_failed' });
     });
+    this.enqueuePersistenceEvent({ eventName: 'context.updated', runId: SESSION_RUN_ID, payload: { snapshot: providerSnapshot } as unknown as JsonValue, eventId: `context-updated-${eventId}` });
   }
 
   /** 在压缩事件投影后异步保存包含摘要的当前结构化上下文。 */
   protected queueSnapshotAfterCompaction(eventId: string): void {
     this.queueSnapshot(eventId);
+  }
+
+  /**
+   * 将会话消息发布为受控异步事件，Provider 不参与消息 ID 生成。
+   * @param message - 已生成并校验的会话消息
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-19
+   */
+  protected recordMessage(message: SessionMessage): void {
+    const eventName = message.role === 'user' ? 'message.received' : 'message.sent';
+    this.enqueuePersistenceEvent({ eventName, runId: SESSION_RUN_ID, payload: { message } as unknown as JsonValue, messageId: message.messageId, eventId: `message-${message.messageId}` });
+  }
+
+  /**
+   * 允许压缩组件发布已追加的事实事件而不依赖订阅实现。
+   * @param event - 已写入本地事实源的事件
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-19
+   */
+  protected publishPersistenceEvent(event: { eventName: EventName; eventId: string; runId: string; occurredAt: string; payload: JsonValue }): void {
+    this.enqueuePersistenceEvent(event);
+  }
+
+  /**
+   * 创建 Provider 专属的异步 Hook 调度器。
+   * @param provider - 可替换的持久化 Provider
+   * @returns 已安装桥接订阅的调度器或 undefined
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-19
+   */
+  private createPersistenceDispatcher(provider: SessionPersistenceProvider | undefined): SubscriptionDispatcher | undefined {
+    if (!provider) return undefined;
+    const registry = new SubscriptionRegistry();
+    const dispatcher = new SubscriptionDispatcher(registry);
+    new PersistenceSubscriptionBridge(provider).install(registry, dispatcher);
+    return dispatcher;
+  }
+
+  /**
+   * 把状态事件送入有界队列；持久化故障不阻断会话主流程。
+   * @param input - 受控持久化事件
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-19
+   */
+  private enqueuePersistenceEvent(input: PersistenceEventInput): void {
+    const dispatcher = this.persistenceDispatcher;
+    if (!dispatcher) return;
+    const event: DispatchEvent = {
+      eventId: input.eventId ?? `sandbox-hook-${randomUUID()}`,
+      eventName: input.eventName,
+      runId: input.runId,
+      sessionId: this.sessionId,
+      correlationId: SESSION_CORRELATION_ID,
+      occurredAt: input.occurredAt ?? new Date().toISOString(),
+      ...(input.messageId === undefined ? {} : { messageId: input.messageId }),
+      payload: input.payload
+    };
+    dispatcher.enqueue(event);
   }
 
 

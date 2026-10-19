@@ -2,8 +2,10 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
+import { randomUUID } from 'node:crypto';
 import type { ActionDefinition, ActionResult, BehaviorContext, JsonValue, PendingInput } from '@iar/contracts';
 import { ResponseGeneratorAdapter, type ClarificationMetadata, type ModelGateway, type ModelProfileRegistry } from '@iar/decision';
+import type { SessionMessage } from '@iar/persistence-spi';
 import { sandboxFunctionIds } from './functions/index.js';
 import { OpenAICompatibleModelProvider, type BrainModelProvider } from './models/llm-provider.js';
 import type { ScriptedModelProvider } from './models/scripted-provider.js';
@@ -27,6 +29,8 @@ export type SessionRepliesContext = CompactionContext & {
   registry: ModelProfileRegistry;
   gateway: ModelGateway;
   updateClarification: (pending: PendingInput) => Promise<void>;
+  /** 将完整消息发布给会话持久化 Hook；未配置 Provider 时为空操作。 */
+  recordMessage?: (message: SessionMessage) => void;
 };
 
 type ScriptedReply = { text: string; clarification?: ClarificationMetadata };
@@ -231,7 +235,9 @@ export class SandboxSessionReplies {
    * @date 2026-10-17
    */
   public pushMessages(userText: string, assistantReply: string): void {
-    this.context.recentMessages.push({ role: 'user', text: userText });
+    const userMessage: SessionMessage = { messageId: `message-${randomUUID()}`, role: 'user', content: userText, occurredAt: new Date().toISOString() };
+    this.context.recentMessages.push({ role: userMessage.role, text: userMessage.content });
+    this.context.recordMessage?.(userMessage);
     this.pushAssistantMessage(assistantReply);
   }
 
@@ -246,6 +252,7 @@ export class SandboxSessionReplies {
    */
   public pushAssistantMessage(assistantReply: string): void {
     this.context.recentMessages.push({ role: 'assistant', text: assistantReply });
+    this.context.recordMessage?.({ messageId: `message-${randomUUID()}`, role: 'assistant', content: assistantReply, occurredAt: new Date().toISOString() });
     if (this.context.recentMessages.length > 20) this.context.recentMessages.splice(0, this.context.recentMessages.length - 20);
   }
 }
