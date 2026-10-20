@@ -19,9 +19,9 @@
 
 ## 4. Integration verification
 
-- [ ] 4.1 Update README with installation, SDK loading, session ownership, dispositions, fail-closed behavior and confirm/cancel commands; verify every documented path matches the exported API and HTTP routes.
-- [ ] 4.2 Run `openspec validate integrate-iar-with-pi --strict`, `npm run lint`, `npm run build`, `npm run verify:packages` and `npm test`; verify all commands exit 0.
-- [ ] 4.3 Review `git diff --check`, changed-file security/reliability rules, and Pi repository status; verify no file under `/Users/lvdaxianer/workspace/my/project/pi` changed and no unresolved task remains.
+- [x] 4.1 Update README with installation, SDK loading, session ownership, dispositions, fail-closed behavior and confirm/cancel commands; verify every documented path matches the exported API and HTTP routes.
+- [x] 4.2 Run `openspec validate integrate-iar-with-pi --strict`, `npm run lint`, `npm run build`, `npm run verify:packages` and `npm test`; verify all commands exit 0.
+- [x] 4.3 Review `git diff --check`, changed-file security/reliability rules, and Pi repository status; verify no file under `/Users/lvdaxianer/workspace/my/project/pi` changed and no unresolved task remains.
 
 ## Workflow follow-up
 
