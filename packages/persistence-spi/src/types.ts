@@ -16,6 +16,14 @@ export const MAX_PERSISTENCE_ID_LENGTH = 256;
 /** 单次最近消息查询允许读取的最大数量。 */
 export const MAX_RECENT_MESSAGE_QUERY_LIMIT = MAX_RECENT_MESSAGE_LIMIT;
 
+/** 单次会话摘要查询的默认和最大数量。 */
+export const DEFAULT_SESSION_LIST_LIMIT = 20;
+export const MAX_SESSION_LIST_LIMIT = 100;
+
+/** 会话摘要和分页游标的边界。 */
+export const MAX_SESSION_SUMMARY_LENGTH = 300;
+export const MAX_SESSION_CURSOR_LENGTH = 512;
+
 /** 会话运行期间跨消息、事件和快照传递的稳定身份。 */
 export type SessionIdentity = {
   /** 跨多个请求保持不变的会话聚合标识。 */
@@ -49,6 +57,24 @@ export type SessionMessage = {
 export type RecentMessageQuery = {
   /** 查询最近消息的数量，零表示返回空窗口。 */
   limit: number;
+};
+
+/** 会话摘要列表查询参数；省略 limit 时使用默认页大小。 */
+export type SessionListQuery = {
+  limit?: number;
+  cursor?: string;
+};
+
+/** 仅用于会话选择和展示的轻量摘要。 */
+export type SessionSummary = {
+  sessionId: string;
+  summary?: string;
+};
+
+/** 会话摘要列表分页结果。 */
+export type SessionListPage = {
+  sessions: SessionSummary[];
+  nextCursor?: string;
 };
 
 /** Provider 宣布的能力和 SPI 版本。 */
@@ -96,6 +122,8 @@ export interface SessionPersistenceProvider {
   listEvents(sessionId: string): Promise<EventEnvelope[]>;
   /** 读取会话消息，结果按消息产生顺序返回。 */
   listMessages(sessionId: string, query?: RecentMessageQuery): Promise<SessionMessage[]>;
+  /** 读取有界、按稳定顺序分页的会话摘要。 */
+  listSessions(query?: SessionListQuery): Promise<SessionListPage>;
   /** 等待已接受的异步写入完成。 */
   flush(): Promise<void>;
   /** 释放 Provider 持有的连接和线程资源。 */
@@ -116,7 +144,7 @@ export type PersistenceProviderModule = {
 /** SPI 输入校验失败时使用的稳定错误。 */
 export class PersistenceValidationError extends Error {
   /** @param code - 稳定错误码 @param message - 不包含密钥的诊断信息 */
-  public constructor(public readonly code: 'session_identity_invalid' | 'provider_manifest_invalid' | 'recent_message_query_invalid', message: string) {
+  public constructor(public readonly code: 'session_identity_invalid' | 'provider_manifest_invalid' | 'recent_message_query_invalid' | 'session_list_query_invalid', message: string) {
     super(message);
     this.name = 'PersistenceValidationError';
   }
@@ -137,6 +165,23 @@ export function validateRecentMessageQuery(input: unknown): RecentMessageQuery {
     throw new PersistenceValidationError('recent_message_query_invalid', '最近消息查询数量无效');
   }
   return { limit };
+}
+
+/**
+ * 校验会话摘要列表分页参数，默认使用有界页大小。
+ *
+ * @param input - 待校验的分页参数
+ * @returns 可安全传给 Provider 的分页参数副本
+ * @throws PersistenceValidationError 当参数不是有限边界内的分页值时
+ */
+export function validateSessionListQuery(input: unknown): Required<Pick<SessionListQuery, 'limit'>> & Pick<SessionListQuery, 'cursor'> {
+  if (input === undefined) return { limit: DEFAULT_SESSION_LIST_LIMIT };
+  if (!isPlainObject(input)) throw new PersistenceValidationError('session_list_query_invalid', '会话摘要查询参数无效');
+  const limit = input.limit === undefined ? DEFAULT_SESSION_LIST_LIMIT : input.limit;
+  const cursor = input.cursor;
+  if (typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit <= 0 || limit > MAX_SESSION_LIST_LIMIT) throw new PersistenceValidationError('session_list_query_invalid', '会话摘要查询数量无效');
+  if (cursor !== undefined && (typeof cursor !== 'string' || cursor.length === 0 || cursor.length > MAX_SESSION_CURSOR_LENGTH)) throw new PersistenceValidationError('session_list_query_invalid', '会话摘要查询游标无效');
+  return { limit, ...(cursor === undefined ? {} : { cursor }) };
 }
 
 /**

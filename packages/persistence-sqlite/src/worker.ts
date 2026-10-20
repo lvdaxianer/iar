@@ -8,7 +8,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { parentPort, workerData } from 'node:worker_threads';
 import type { EventEnvelope } from '@iar/contracts';
-import type { SessionMessage, SessionSnapshotRecord } from '@iar/persistence-spi';
+import { MAX_SESSION_SUMMARY_LENGTH, type SessionMessage, type SessionListPage, type SessionSnapshotRecord } from '@iar/persistence-spi';
 
 type WorkerRequest =
   | { id: number; type: 'ready' }
@@ -17,6 +17,7 @@ type WorkerRequest =
   | { id: number; type: 'save_snapshot'; snapshot: SessionSnapshotRecord }
   | { id: number; type: 'load_snapshot'; sessionId: string }
   | { id: number; type: 'list_messages'; sessionId: string; limit?: number }
+  | { id: number; type: 'list_sessions'; limit: number; cursor?: string }
   | { id: number; type: 'list_events'; sessionId: string }
   | { id: number; type: 'flush' };
 
@@ -63,7 +64,13 @@ function initializeDatabase(database: DatabaseSync): void {
       revision INTEGER NOT NULL,
       context TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS iar_session_index (
+      session_id TEXT PRIMARY KEY,
+      summary TEXT,
+      activity_sequence INTEGER NOT NULL
+    );
   `);
+  backfillSessionIndex(database);
 }
 
 /** 执行单个有序请求；Worker 消息队列保证写入顺序。 */
@@ -75,6 +82,7 @@ function handleRequest(request: WorkerRequest): unknown {
     case 'save_snapshot': return saveSnapshot(request.snapshot);
     case 'load_snapshot': return loadSnapshot(request.sessionId);
     case 'list_messages': return listMessages(request.sessionId, request.limit);
+    case 'list_sessions': return listSessions(request.limit, request.cursor);
     case 'list_events': return listEvents(request.sessionId);
     case 'flush': return true;
   }
@@ -91,6 +99,7 @@ function appendMessage(request: Extract<WorkerRequest, { type: 'append_message' 
     return;
   }
   database.prepare('INSERT INTO iar_session_messages (message_id, session_id, run_id, trace_id, payload) VALUES (?, ?, ?, ?, ?)').run(request.message.messageId, request.sessionId, request.runId, request.traceId ?? null, payload);
+  touchSessionIndex(database, request.sessionId, request.message.role === 'user' ? request.message.content : undefined, false);
 }
 
 /** 追加事件；相同 eventId 和完整内容重复提交时保持幂等。 */
@@ -104,6 +113,7 @@ function appendEvent(request: Extract<WorkerRequest, { type: 'append_event' }>):
     return;
   }
   database.prepare('INSERT INTO iar_session_events (event_id, session_id, run_id, trace_id, payload) VALUES (?, ?, ?, ?, ?)').run(request.event.eventId, request.sessionId, request.runId, request.traceId ?? null, payload);
+  touchSessionIndex(database, request.sessionId, undefined, false);
 }
 
 /** 保存最新快照并阻止旧版本覆盖新版本。 */
@@ -126,6 +136,7 @@ function saveSnapshot(snapshot: SessionSnapshotRecord): void {
       revision = excluded.revision,
       context = excluded.context
   `).run(snapshot.sessionId, snapshot.runId, snapshot.eventId, snapshot.revision, JSON.stringify(snapshot.context));
+  touchSessionIndex(database, snapshot.sessionId, snapshot.context.summary?.text, true);
 }
 
 /** 读取指定会话的最新结构化上下文快照。 */
@@ -146,6 +157,98 @@ function listMessages(sessionId: string, limit?: number): SessionMessage[] {
 /** 按接收顺序读取指定会话事件。 */
 function listEvents(sessionId: string): EventEnvelope[] {
   return database.prepare('SELECT payload FROM iar_session_events WHERE session_id = ? ORDER BY sequence').all(sessionId).map((row) => JSON.parse(String(row.payload)) as EventEnvelope);
+}
+
+/** 按活动序号倒序读取会话摘要页，游标只携带不透明的内部位置。 */
+function listSessions(limit: number, cursor?: string): SessionListPage {
+  const position = cursor === undefined ? undefined : decodeCursor(cursor);
+  const rows = position === undefined
+    ? database.prepare('SELECT session_id, summary, activity_sequence FROM iar_session_index ORDER BY activity_sequence DESC, session_id DESC LIMIT ?').all(limit + 1)
+    : database.prepare('SELECT session_id, summary, activity_sequence FROM iar_session_index WHERE activity_sequence < ? OR (activity_sequence = ? AND session_id < ?) ORDER BY activity_sequence DESC, session_id DESC LIMIT ?').all(position.activitySequence, position.activitySequence, position.sessionId, limit + 1);
+  const page = rows.slice(0, limit);
+  const sessions = page.map((row) => ({ sessionId: String(row.session_id), ...(row.summary === null || row.summary === undefined || String(row.summary).length === 0 ? {} : { summary: String(row.summary) }) }));
+  if (rows.length <= limit || page.length === 0) return { sessions };
+  const last = page.at(-1);
+  if (!last) return { sessions };
+  return { sessions, nextCursor: encodeCursor({ activitySequence: Number(last.activity_sequence), sessionId: String(last.session_id) }) };
+}
+
+/** 启动时为旧数据库补建会话索引，不改写原始消息、事件或快照。 */
+function backfillSessionIndex(database: DatabaseSync): void {
+  const rows = database.prepare(`
+    SELECT session_id FROM iar_session_messages
+    UNION SELECT session_id FROM iar_session_events
+    UNION SELECT session_id FROM iar_session_snapshots
+  `).all();
+  for (const row of rows) {
+    const sessionId = String(row.session_id);
+    const current = database.prepare('SELECT summary FROM iar_session_index WHERE session_id = ?').get(sessionId);
+    const snapshotSummary = readSnapshotSummary(database, sessionId);
+    const fallback = snapshotSummary ?? readFirstUserMessage(database, sessionId);
+    if (!current) touchSessionIndex(database, sessionId, fallback, true);
+    else if ((current.summary === null || current.summary === undefined || String(current.summary).length === 0) && fallback !== undefined) database.prepare('UPDATE iar_session_index SET summary = ? WHERE session_id = ?').run(boundSummary(fallback), sessionId);
+  }
+}
+
+/** 更新会话索引；summary 只用于展示，不进入可信上下文。 */
+function touchSessionIndex(database: DatabaseSync, sessionId: string, candidate: string | undefined, replaceSummary: boolean): void {
+  const current = database.prepare('SELECT summary FROM iar_session_index WHERE session_id = ?').get(sessionId);
+  const normalized = candidate === undefined ? undefined : boundSummary(candidate);
+  const summary = replaceSummary && normalized !== undefined ? normalized : current?.summary ?? normalized ?? null;
+  const activitySequence = nextActivitySequence(database);
+  if (current) database.prepare('UPDATE iar_session_index SET summary = ?, activity_sequence = ? WHERE session_id = ?').run(summary, activitySequence, sessionId);
+  else database.prepare('INSERT INTO iar_session_index (session_id, summary, activity_sequence) VALUES (?, ?, ?)').run(sessionId, summary, activitySequence);
+}
+
+/** 分配稳定的内部活动序号。 */
+function nextActivitySequence(database: DatabaseSync): number {
+  const row = database.prepare('SELECT COALESCE(MAX(activity_sequence), 0) + 1 AS next_sequence FROM iar_session_index').get();
+  return Number(row?.next_sequence ?? 1);
+}
+
+/** 读取已保存快照中的展示摘要。 */
+function readSnapshotSummary(database: DatabaseSync, sessionId: string): string | undefined {
+  const row = database.prepare('SELECT context FROM iar_session_snapshots WHERE session_id = ?').get(sessionId);
+  if (!row) return undefined;
+  try {
+    const context = JSON.parse(String(row.context)) as { summary?: { text?: unknown } };
+    return typeof context.summary?.text === 'string' && context.summary.text.trim().length > 0 ? context.summary.text : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 读取首条用户消息作为摘要回退。 */
+function readFirstUserMessage(database: DatabaseSync, sessionId: string): string | undefined {
+  const rows = database.prepare('SELECT payload FROM iar_session_messages WHERE session_id = ? ORDER BY sequence').all(sessionId);
+  for (const row of rows) {
+    try {
+      const message = JSON.parse(String(row.payload)) as { role?: unknown; content?: unknown };
+      if (message.role === 'user' && typeof message.content === 'string' && message.content.trim().length > 0) return message.content;
+    } catch { /* 忽略损坏消息，保留其他持久化状态。 */ }
+  }
+  return undefined;
+}
+
+/** 限制摘要展示长度。 */
+function boundSummary(value: string): string {
+  return Array.from(value).slice(0, MAX_SESSION_SUMMARY_LENGTH).join('');
+}
+
+type SessionCursor = { activitySequence: number; sessionId: string };
+function encodeCursor(cursor: SessionCursor): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
+}
+
+function decodeCursor(value: string): SessionCursor {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Partial<SessionCursor>;
+    const activitySequence = parsed.activitySequence;
+    if (typeof activitySequence !== 'number' || !Number.isSafeInteger(activitySequence) || activitySequence < 1 || typeof parsed.sessionId !== 'string' || parsed.sessionId.length === 0) throw new Error('cursor_invalid');
+    return { activitySequence, sessionId: parsed.sessionId };
+  } catch {
+    throw workerError('session_list_query_invalid', '会话摘要查询游标无效');
+  }
 }
 
 /** 把 SQLite/校验异常转换成不泄露底层细节的稳定错误。 */

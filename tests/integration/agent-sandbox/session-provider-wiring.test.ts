@@ -12,7 +12,7 @@ import { createServer } from 'node:net';
 import { once } from 'node:events';
 import test from 'node:test';
 import type { EventEnvelope } from '@iar/contracts';
-import type { RecentMessageQuery, SessionIdentity, SessionMessage, SessionPersistenceProvider, SessionSnapshotRecord } from '@iar/persistence-spi';
+import type { RecentMessageQuery, SessionIdentity, SessionListPage, SessionListQuery, SessionMessage, SessionPersistenceProvider, SessionSnapshotRecord } from '@iar/persistence-spi';
 import { startSandboxServer } from '../../../examples/agent-sandbox/src/server.js';
 
 async function availablePort(): Promise<number> {
@@ -38,6 +38,7 @@ class TestPersistenceProvider implements SessionPersistenceProvider {
   public async loadSnapshot(): Promise<SessionSnapshotRecord | undefined> { return undefined; }
   public async listEvents(): Promise<EventEnvelope[]> { return []; }
   public async listMessages(_sessionId: string, _query?: RecentMessageQuery): Promise<SessionMessage[]> { return []; }
+  public async listSessions(_query?: SessionListQuery): Promise<SessionListPage> { return { sessions: [] }; }
   public async flush(): Promise<void> {}
   public async close(): Promise<void> { this.closeCount += 1; }
 }
