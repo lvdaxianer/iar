@@ -13,8 +13,7 @@
   },
   "files": ["dist"],
   "dependencies": {
-    "@iar/abi": "0.1.0",
-    "@iar/plugin-distribution": "0.1.0",
-    "@iar/plugin-host": "0.1.0"
+    "@iar/contracts": "0.1.0",
+    "@iar/plugins": "0.1.0"
   }
 }

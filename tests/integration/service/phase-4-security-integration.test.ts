@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import type { FunctionPluginManifest } from '@iar/contracts';
-import { PluginHost } from '@iar/plugin-host';
+import { PluginHost } from '@iar/plugins';
 import { createWorkerExecutor, type ExecutorRequest } from '@iar/adapters-executors';
 import { createServiceApi, type ServiceApiRequest } from '@iar/adapters-service';
 import { createSidecarTransport } from '@iar/adapters-sidecar';

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SCHEMA_VERSIONS } from '@iar/contracts';
 import { DecisionBackendResolver, IntentModelDecisionAdapter, JevDecisionAdapter, ModelGateway, ModelProfileRegistry, UnifiedDecisionAdapter, loadModelProfiles, type DecisionRequest, type ModelProvider } from '@iar/decision';
-import { PluginHost } from '@iar/plugin-host';
+import { PluginHost } from '@iar/plugins';
 import { allSandboxPlugins, sandboxFunctionIds } from './functions/index.js';
 import { assertSandboxKnowledgeBases } from './knowledge/retrieval.js';
 import { BrainModelProvider, IntentModelProvider } from './models/llm-provider.js';

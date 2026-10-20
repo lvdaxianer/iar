@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { SqlitePersistenceProvider } from '@iar/persistence-sqlite';
+import { SqlitePersistenceProvider } from '@iar/storage';
 import { startSandboxServer } from '../../../examples/agent-sandbox/src/server.js';
 import { ScriptedModelProvider } from '../../../examples/agent-sandbox/src/models/scripted-provider.js';
 import { IarSandboxSession } from '../../../examples/agent-sandbox/src/session.js';

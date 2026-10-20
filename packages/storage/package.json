@@ -13,6 +13,7 @@
   "types": "./dist/index.d.ts",
   "files": ["dist"],
   "dependencies": {
-    "@iar/contracts": "0.1.0"
+    "@iar/contracts": "0.1.0",
+    "@iar/subscriptions": "0.1.0"
   }
 }

@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SCHEMA_VERSIONS } from '@iar/contracts';
-import { checkAbiCompatibility, validateControlPlaneRequest, type ControlPlaneRequest } from '@iar/abi';
+import { checkAbiCompatibility, validateControlPlaneRequest, type ControlPlaneRequest } from '@iar/contracts';
 
 /** 构造租户隔离且可跨语言 JSON 序列化的 control-plane 请求。 */
 function request(overrides: Partial<ControlPlaneRequest> = {}): ControlPlaneRequest {

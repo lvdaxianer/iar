@@ -6,7 +6,7 @@
  */
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { JsonValue } from '@iar/contracts';
-import type { PluginRecord } from '@iar/plugin-host';
+import type { PluginRecord } from '@iar/plugins';
 import type { WorkflowRun } from '@iar/workflow';
 import { FASTIFY_API_VERSION, FASTIFY_RESPONSE_VERSION, type FastifyApiError, type FastifyApiResponse, type FastifyHostApp, type FastifyHostOptions, type PublicPlugin, type PublicWorkflowRun } from './types.js';
 

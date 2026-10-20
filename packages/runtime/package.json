@@ -15,7 +15,7 @@
   "dependencies": {
     "@iar/contracts": "0.1.0",
     "@iar/decision": "0.1.0",
-    "@iar/plugin-host": "0.1.0",
+    "@iar/plugins": "0.1.0",
     "@iar/rule-engine": "0.1.0"
   }
 }

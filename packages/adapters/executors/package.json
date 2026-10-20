@@ -14,7 +14,7 @@
   "files": ["dist"],
   "dependencies": {
     "@iar/contracts": "0.1.0",
-    "@iar/plugin-sdk": "0.1.0",
+    "@iar/plugins": "0.1.0",
     "@iar/subscriptions": "0.1.0"
   }
 }

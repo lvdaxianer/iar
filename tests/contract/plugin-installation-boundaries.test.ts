@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { ERROR_CODES, type FunctionPluginManifest } from '@iar/contracts';
-import { MAX_INSTALL_BATCH_SIZE, PluginHost } from '@iar/plugin-host';
+import { MAX_INSTALL_BATCH_SIZE, PluginHost } from '@iar/plugins';
 
 /*
  * 本文件覆盖安装输入的资源和审计边界。

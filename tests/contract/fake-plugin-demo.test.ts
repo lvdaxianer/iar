@@ -8,8 +8,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import { replayEvents } from '@iar/runtime';
-import { PluginHost, type PluginRecord } from '@iar/plugin-host';
-import { fakeStopPlugin, onDisable, onEnable, onLoad, onUnload } from '../../examples/fake-plugin/src/index.js';
+import { PluginHost, type PluginRecord } from '@iar/plugins';
+import { fakeStopPlugin, onDisable, onEnable, onLoad, onUnload } from '../../examples/plugins/fake-plugin/src/index.js';
 
 /*
  * 该测试只使用内存 Host，不依赖网络或真实 DIP 服务。
@@ -154,7 +154,7 @@ test('fake plugin lifecycle hooks are executable exports', async () => {
   await onDisable();
   await onUnload();
   assert.deepEqual(fakeStopPlugin.manifest.lifecycle, {
-    entrypoint: './dist/examples/fake-plugin/src/index.js',
+    entrypoint: './dist/examples/plugins/fake-plugin/src/index.js',
     onLoad: 'onLoad',
     onEnable: 'onEnable',
     onDisable: 'onDisable',

@@ -1,7 +1,7 @@
 /** 注册页面及独立会话的创建、删除生命周期入口。 */
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { FastifyRequest } from 'fastify';
-import { validateSessionListQuery, type SessionListQuery } from '@iar/persistence-spi';
+import { validateSessionListQuery, type SessionListQuery } from '@iar/storage';
 import { SandboxSessionManager, SessionError } from './session-manager.js';
 import type { RunOperation } from './http-reservation.js';
 import { readSessionId } from './http-reservation.js';

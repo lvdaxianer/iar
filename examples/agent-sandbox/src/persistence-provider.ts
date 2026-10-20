@@ -9,9 +9,9 @@
 import { mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { JsonValue } from '@iar/contracts';
-import type { PersistenceProviderOptions, SessionPersistenceProvider } from '@iar/persistence-spi';
-import { PersistenceProviderLoader, PersistenceProviderRegistry } from '@iar/persistence-runtime';
-import { sqlitePersistenceProviderModule } from '@iar/persistence-sqlite';
+import type { PersistenceProviderOptions, SessionPersistenceProvider } from '@iar/storage';
+import { PersistenceProviderLoader, PersistenceProviderRegistry } from '@iar/storage';
+import { sqlitePersistenceProviderModule } from '@iar/storage';
 
 const DEFAULT_SQLITE_PATH = join(process.cwd(), 'data', 'iar-sandbox.sqlite');
 

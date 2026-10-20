@@ -8,8 +8,8 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import test from 'node:test';
 import { SCHEMA_VERSIONS, type PluginManifest } from '@iar/contracts';
-import { signArtifact, type SignedPluginArtifact } from '@iar/plugin-distribution';
-import { PluginHost } from '@iar/plugin-host';
+import { signArtifact, type SignedPluginArtifact } from '@iar/control-plane';
+import { PluginHost } from '@iar/plugins';
 import { createTenantControlPlane, type ControlPlanePolicyDecision, type TenantControlPlaneRequest } from '@iar/control-plane';
 
 const signer = generateKeyPairSync('ed25519');

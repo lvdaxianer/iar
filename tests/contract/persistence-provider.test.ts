@@ -12,7 +12,7 @@ import {
   validateSessionIdentity,
   type PersistenceProviderManifest,
   type SessionIdentity
-} from '@iar/persistence-spi';
+} from '@iar/storage';
 
 const identity: SessionIdentity = {
   sessionId: 'session-001',

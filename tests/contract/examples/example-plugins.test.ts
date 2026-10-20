@@ -8,11 +8,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import type { FunctionPluginManifest, JsonValue, PluginManifest } from '@iar/contracts';
-import { PluginHost, type PluginRecord } from '@iar/plugin-host';
-import type { PluginHandlerResult, PluginRegistration } from '@iar/plugin-sdk';
-import { knowledgeQueryPlugin } from '../../../examples/knowledge-query/src/index.js';
-import { ticketCreatePlugin } from '../../../examples/ticket-create/src/index.js';
-import { humanTransferPlugin } from '../../../examples/human-transfer/src/index.js';
+import { PluginHost, type PluginRecord } from '@iar/plugins';
+import type { PluginHandlerResult, PluginRegistration } from '@iar/plugins';
+import { knowledgeQueryPlugin } from '../../../examples/plugins/knowledge-query/src/index.js';
+import { ticketCreatePlugin } from '../../../examples/plugins/ticket-create/src/index.js';
+import { humanTransferPlugin } from '../../../examples/plugins/human-transfer/src/index.js';
 
 /** 三个示例必须使用不同且稳定的 Function 归属。 */
 type ExampleRegistration = PluginRegistration & { manifest: FunctionPluginManifest };

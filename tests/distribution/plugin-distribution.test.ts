@@ -8,8 +8,8 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import test from 'node:test';
 import { ERROR_CODES, SCHEMA_VERSIONS, type PluginManifest } from '@iar/contracts';
-import { PluginHost, type PluginHostResult, type PluginRecord } from '@iar/plugin-host';
-import { RemotePluginDistributor, approveCapabilityChange, checkCompatibility, signArtifact, verifyArtifact, type CapabilityChangeApproval, type DistributionCompatibility, type SignedPluginArtifact } from '@iar/plugin-distribution';
+import { PluginHost, type PluginHostResult, type PluginRecord } from '@iar/plugins';
+import { RemotePluginDistributor, approveCapabilityChange, checkCompatibility, signArtifact, verifyArtifact, type CapabilityChangeApproval, type DistributionCompatibility, type SignedPluginArtifact } from '@iar/control-plane';
 
 const signer = generateKeyPairSync('ed25519');
 const trustedSigners = new Map([['test-signer', signer.publicKey]]);
@@ -52,7 +52,7 @@ function approval(approved = true, oldCapabilities = ['remote.read'], newCapabil
 }
 
 /** 从分发结果中读取稳定拒绝码，避免测试绕过结果联合类型。 */
-function reasonOf<T>(result: import('@iar/plugin-distribution').DistributionResult<T>): string {
+function reasonOf<T>(result: import('@iar/control-plane').DistributionResult<T>): string {
   assert.equal(result.ok, false);
   if (result.ok) throw new Error('expected rejection');
   return result.reasonCode;

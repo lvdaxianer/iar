@@ -10,7 +10,7 @@
  * @date 2026-10-17
  */
 import type { JsonValue } from '@iar/contracts';
-import type { PluginHandlerContext, PluginHandlerResult } from '@iar/plugin-sdk';
+import type { PluginHandlerContext, PluginHandlerResult } from '@iar/plugins';
 import { Worker } from 'node:worker_threads';
 
 /** worker 回传结果的联合类型。 */

@@ -6,8 +6,8 @@
  */
 import assert from 'node:assert/strict';
 import { replayEvents } from '@iar/runtime';
-import { PluginHost } from '@iar/plugin-host';
-import { fakeStopPlugin } from '../dist/examples/fake-plugin/src/index.js';
+import { PluginHost } from '@iar/plugins';
+import { fakeStopPlugin } from '../dist/examples/plugins/fake-plugin/src/index.js';
 
 // 演示入口只使用构建产物，避免文档示例依赖不存在的源码 .js 文件。
 // npm run demo:fake-plugin 会先生成 dist，再执行本文件。

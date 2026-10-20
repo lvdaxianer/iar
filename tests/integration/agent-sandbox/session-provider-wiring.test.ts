@@ -12,7 +12,7 @@ import { createServer } from 'node:net';
 import { once } from 'node:events';
 import test from 'node:test';
 import type { EventEnvelope } from '@iar/contracts';
-import type { RecentMessageQuery, SessionIdentity, SessionListPage, SessionListQuery, SessionMessage, SessionPersistenceProvider, SessionSnapshotRecord } from '@iar/persistence-spi';
+import type { RecentMessageQuery, SessionIdentity, SessionListPage, SessionListQuery, SessionMessage, SessionPersistenceProvider, SessionSnapshotRecord } from '@iar/storage';
 import { startSandboxServer } from '../../../examples/agent-sandbox/src/server.js';
 
 async function availablePort(): Promise<number> {

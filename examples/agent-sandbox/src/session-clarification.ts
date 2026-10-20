@@ -1,5 +1,5 @@
 import { MAX_CANDIDATE_VERSION_LENGTH, MAX_CLARIFICATION_LABEL_LENGTH, MAX_CLARIFICATION_OPTIONS, type BehaviorContext, type ClarificationState, type PendingInput } from '@iar/contracts';
-import type { PluginDescriptor } from '@iar/plugin-host';
+import type { PluginDescriptor } from '@iar/plugins';
 import type { RouteEvidence } from './session-types.js';
 
 /** 将当前动态 Plugin 描述转换为有限、不具备执行权限的选择状态。 */

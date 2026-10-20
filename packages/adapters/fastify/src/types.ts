@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import type { FastifyInstance } from 'fastify';
-import type { PluginHost, PluginRecord } from '@iar/plugin-host';
+import type { PluginHost, PluginRecord } from '@iar/plugins';
 import type { LocalWorkflow, WorkflowRun } from '@iar/workflow';
 
 /**

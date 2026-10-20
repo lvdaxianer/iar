@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import type { FunctionPluginManifest } from '@iar/contracts';
 import { SCHEMA_VERSIONS } from '@iar/contracts';
 import { MockDecisionProvider, type DecisionRequest } from '@iar/decision';
-import { PluginHost } from '@iar/plugin-host';
+import { PluginHost } from '@iar/plugins';
 import { TwoStageRouter, type RouteRequest, type RouteResult } from '@iar/runtime';
 import { facts, functionRule, pluginRule } from './rule-engine-fixtures.js';
 

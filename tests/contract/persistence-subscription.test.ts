@@ -11,8 +11,8 @@ import { SubscriptionDispatcher, SubscriptionRegistry, type DispatchEvent } from
 import {
   PersistenceSubscriptionBridge,
   type PersistenceSubscriptionProvider
-} from '@iar/persistence-runtime';
-import type { PersistenceProviderManifest, RecentMessageQuery, SessionListPage, SessionListQuery, SessionMessage, SessionSnapshotRecord } from '@iar/persistence-spi';
+} from '@iar/storage';
+import type { PersistenceProviderManifest, RecentMessageQuery, SessionListPage, SessionListQuery, SessionMessage, SessionSnapshotRecord } from '@iar/storage';
 
 const manifest: PersistenceProviderManifest = { providerId: 'test-memory', apiVersion: 'iar.persistence/v1', capabilities: ['messages', 'events', 'snapshots'] };
 const context: BehaviorContext = {

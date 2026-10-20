@@ -9,7 +9,7 @@
  * @date 2026-10-17
  */
 import type { JsonValue } from '@iar/contracts';
-import type { PluginHandlerContext, PluginHandlerResult } from '@iar/plugin-sdk';
+import type { PluginHandlerContext, PluginHandlerResult } from '@iar/plugins';
 import { parentPort, workerData } from 'node:worker_threads';
 import { sandboxPluginRegistry } from './plugin-registry.js';
 

@@ -16,7 +16,7 @@ import { registerSandboxRoutes } from './http-transport.js';
 import { SandboxSessionManager, type SandboxSessionLimits } from './session-manager.js';
 import { loadSandboxPage } from './page-template.js';
 import type { SnapshotStore } from '@iar/storage';
-import type { SessionPersistenceProvider } from '@iar/persistence-spi';
+import type { SessionPersistenceProvider } from '@iar/storage';
 import { loadSandboxPersistenceProvider } from './persistence-provider.js';
 
 /** sandbox 服务的启动配置。 */

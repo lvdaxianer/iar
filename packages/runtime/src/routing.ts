@@ -14,7 +14,7 @@ import { ACTION_TYPES, ERROR_CODES, MAX_ROUTING_SCOPE_PLUGINS, type ActionType, 
 import { providerFailureResult, type DecisionCandidate, type DecisionProvider, type DecisionRequest, type ModelGatewayResult } from '@iar/decision';
 import type { FunctionRule, PluginCandidate, PluginRule, RuleEvaluationFacts, RuleEvaluationResult } from '@iar/rule-engine';
 import { RuleEngine } from '@iar/rule-engine';
-import type { PluginHost, PluginRecord } from '@iar/plugin-host';
+import type { PluginHost, PluginRecord } from '@iar/plugins';
 
 const DECISION_VERSION = 'runtime.v1';
 const DECISION_THRESHOLD = 0.7;

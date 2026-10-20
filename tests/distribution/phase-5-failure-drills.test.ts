@@ -8,9 +8,9 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import test from 'node:test';
 import { ERROR_CODES, SCHEMA_VERSIONS, type PluginManifest } from '@iar/contracts';
-import { PluginHost, type PluginHostResult, type PluginRecord } from '@iar/plugin-host';
+import { PluginHost, type PluginHostResult, type PluginRecord } from '@iar/plugins';
 import { createTenantControlPlane, type ControlPlanePolicyDecision } from '@iar/control-plane';
-import { RemotePluginDistributor, signArtifact, type CapabilityChangeApproval, type DistributionCompatibility, type DistributionResult, type SignedPluginArtifact } from '@iar/plugin-distribution';
+import { RemotePluginDistributor, signArtifact, type CapabilityChangeApproval, type DistributionCompatibility, type DistributionResult, type SignedPluginArtifact } from '@iar/control-plane';
 
 const signer = generateKeyPairSync('ed25519');
 const trustedSigners = new Map([['drill-signer', signer.publicKey]]);

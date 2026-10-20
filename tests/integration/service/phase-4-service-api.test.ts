@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SCHEMA_VERSIONS, type WorkflowDefinition } from '@iar/contracts';
-import { PluginHost } from '@iar/plugin-host';
+import { PluginHost } from '@iar/plugins';
 import { createFastifyApp } from '@iar/adapters-fastify';
 import { createServiceApi, type ServiceApiRequest } from '@iar/adapters-service';
 import { LocalWorkflow } from '@iar/workflow';
