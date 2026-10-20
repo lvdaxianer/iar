@@ -2,6 +2,8 @@
 
 IAR 的层级固定为 `Plugin > Function > Operation`：Plugin 是发布、生命周期和授权边界；Function 是可被意图识别和路由的业务能力；Operation 是 Function 对外声明的具体动作。
 
+更完整的包边界和统一入口说明见：[Plugin > Function > Operation 架构](./plugin-function-architecture.md) 和[统一入口和包注册](./unified-entry.md)。
+
 业务 Plugin 必须通过 `@iar/plugin` 导出一个完整的 `PluginPackage`。业务 Function 不能脱离 Plugin 单独注册，也不能把 Function 字段继续放在 Plugin Manifest 顶层。
 
 ## 1. Plugin 包的组成

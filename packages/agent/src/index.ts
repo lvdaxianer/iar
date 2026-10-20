@@ -39,8 +39,7 @@ export function createIarAgent(options: IarAgentOptions): IarAgent {
       throw new ContractValidationError(enabled.error.message, [], enabled.error.code);
     }
   }
-  const functionRegistry = new FunctionRegistry();
-  functionRegistry.replace(pluginHost.all());
+  const functionRegistry = new FunctionRegistry(() => pluginHost.all());
   return { pluginHost, functionRegistry };
 }
 

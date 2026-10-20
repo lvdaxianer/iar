@@ -16,6 +16,9 @@ export type FunctionProvider = {
   handler: PluginFunctionRecord['handler'];
 };
 
+/** 为 FunctionRegistry 提供当前 PluginHost 记录的读取函数。 */
+export type FunctionRecordSource = () => readonly PluginRecord[];
+
 /**
  * 管理从 Plugin 生命周期派生的 Function 索引。
  *
@@ -26,6 +29,19 @@ export type FunctionProvider = {
  */
 export class FunctionRegistry {
   private providersByFunction = new Map<string, FunctionProvider[]>();
+  private readonly source: FunctionRecordSource | undefined;
+
+  /**
+   * 创建 Function 索引；传入 source 时，每次读取都会从当前 Host 记录重新派生。
+   *
+   * @param source - 可选的当前 PluginHost 记录读取函数
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  public constructor(source?: FunctionRecordSource) {
+    this.source = source;
+  }
 
   /**
    * 用当前启用 Plugin 快照替换索引。
@@ -49,8 +65,14 @@ export class FunctionRegistry {
     this.providersByFunction = next;
   }
 
+  /** 在读取前同步当前 Host 快照，避免生命周期变化留下过期 Function provider。 */
+  private sync(): void {
+    if (this.source) this.replace(this.source());
+  }
+
   /** 返回当前可路由的 Function 定义。 */
   public list(): readonly FunctionDefinition[] {
+    this.sync();
     return [...this.providersByFunction.entries()].map(([functionId, providers]) => {
       const definition = providers[0]?.definition;
       if (!definition) throw new Error(`Function provider 缺失: ${functionId}`);
@@ -60,6 +82,7 @@ export class FunctionRegistry {
 
   /** 返回指定 Function 的当前 Plugin providers。 */
   public providers(functionId: string): readonly FunctionProvider[] {
+    this.sync();
     return (this.providersByFunction.get(functionId) ?? []).map((provider) => ({
       ...provider,
       definition: structuredClone(provider.definition),
@@ -69,6 +92,7 @@ export class FunctionRegistry {
 
   /** 返回指定 Function 的公共定义。 */
   public get(functionId: string): FunctionDefinition | undefined {
+    this.sync();
     const provider = this.providersByFunction.get(functionId)?.[0];
     return provider ? structuredClone(provider.definition) : undefined;
   }

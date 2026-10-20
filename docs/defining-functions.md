@@ -2,6 +2,8 @@
 
 Function 是 IAR 意图识别和路由的能力单元。它回答“用户想使用哪项能力”，Plugin 则回答“由哪个已启用实现提供这项能力”。Function 必须嵌套在 Plugin 包中，不能作为全局孤立注册项存在。
 
+包依赖、生命周期和应用导入边界见：[Plugin > Function > Operation 架构](./plugin-function-architecture.md) 和[统一入口和包注册](./unified-entry.md)。
+
 ## 1. Function 在路由中的位置
 
 ```text
