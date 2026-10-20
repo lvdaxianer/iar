@@ -147,6 +147,56 @@ agent-sandbox 默认同时加载 JEV 和 Intent Model，并固定 JEV 优先。�
 
 会话 ID 仅隔离沙箱状态，不是身份认证或租户授权；持有 ID 的客户端可以读取状态并确认操作。沙箱只适合受信任的本机使用，生产接入必须另外实施认证、逐会话授权和传输保护。调用约束及错误码详见[会话接口与安全边界](docs/README.md#1221-沙箱会话接口与安全边界)。
 
+### 与 Pi 集成
+
+IAR 提供 `@iar/pi-bridge` Pi Package，把 Pi 的输入扩展为一层可选的意图路由。Pi 核心不需要修改：扩展在 Pi 的 `input` hook 中先调用 IAR，IAR 只返回处置结果；`pass_through` 继续交给 Pi Agent，其余结果由扩展展示并结束当前 Pi turn。
+
+启动本地 IAR Bridge：
+
+```bash
+npm run demo:sandbox
+```
+
+如果包已发布到 npm，可直接安装到 Pi：
+
+```bash
+pi install npm:@iar/pi-bridge
+```
+
+本地开发包可使用 Pi 的本地路径安装：
+
+```bash
+pi install -l /Users/lvdaxianer/workspace/my/project/iar/packages/adapters/pi
+```
+
+扩展默认连接 `http://127.0.0.1:8787`，也可通过 `IAR_PI_BRIDGE_URL` 覆盖。确认或取消待执行动作使用 `/iar-confirm` 和 `/iar-cancel`。IAR 不可用时扩展默认 fail-closed，当前输入会被安全阻断；如明确接受降级风险，可在 SDK 中设置 `onUnavailable: "continue"`。
+
+SDK 中也可以直接把工厂加入 Pi 的 `DefaultResourceLoader`：
+
+```ts
+import { createAgentSession, DefaultResourceLoader, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { createIarExtension } from "@iar/pi-bridge";
+
+const resourceLoader = new DefaultResourceLoader({
+  cwd: process.cwd(),
+  agentDir: getAgentDir(),
+  extensionFactories: [
+    createIarExtension({ baseUrl: process.env.IAR_PI_BRIDGE_URL ?? "http://127.0.0.1:8787" }),
+  ],
+});
+await resourceLoader.reload();
+const { session } = await createAgentSession({ resourceLoader });
+```
+
+两套会话职责保持分离：Pi 会话负责对话历史、模型调用和 Pi 扩展生命周期；IAR 会话负责意图识别、路由、策略、确认、执行和可恢复业务状态。Bridge 只保存 `piSessionId → iarSessionId` 映射以及当前 `actionId`，不会复制 IAR 的行为状态或 Action 输入。当前 Sandbox 的映射保存在进程内，服务重启后应在打开 Bridge 会话时显式传入可恢复的 `iarSessionId`；生产部署还需要在 Bridge 前增加认证、租户授权和传输保护。
+
+Bridge 协议版本为 `iar.pi-bridge/v1`，输入处置包括：
+
+- `pass_through`：IAR 未匹配到可执行业务意图，继续由 Pi Agent 回答。
+- `handled`：IAR 已完成查询或动作，结果直接展示给用户。
+- `clarification`：IAR 需要用户补充信息，结果直接展示，不触发 Pi Agent。
+- `awaiting_confirmation`：IAR 已准备待确认动作，使用 `/iar-confirm` 或 `/iar-cancel` 继续。
+
 ### 通用追问与动作边界
 
 每轮请求都会把当前问题和实时 `BehaviorContext` 一起交给语义模型。模型先输出固定 `action`：`query`、`create`、`update`、`delete`、`transfer`、`execute` 或 `unknown`；运行时只按会话范围、插件状态、权限和 Plugin Manifest 的 `actionTypes` 过滤有限候选，不根据工单、人工服务或其他业务关键词写路由分支。

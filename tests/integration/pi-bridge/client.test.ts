@@ -17,6 +17,45 @@ test('IAR bridge client sends bounded input and validates the response', async (
   assert.deepEqual(JSON.parse(calls[0]?.body ?? '{}'), { text: '普通问题' });
 });
 
+test('IAR bridge client covers open, confirm, state and HTTP failure paths', async () => {
+  const paths: string[] = [];
+  const client = new IarBridgeClient({
+    baseUrl: 'http://iar.test',
+    fetch: async (input) => {
+      const url = String(input);
+      paths.push(url);
+      if (url.endsWith('/sessions')) return Response.json({ version: PI_BRIDGE_VERSION, piSessionId: 'pi-1', iarSessionId: 'iar-1', resumed: false }, { status: 201 });
+      if (url.endsWith('/confirm')) return Response.json({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-1', disposition: 'handled', reply: '已取消' });
+      if (url.endsWith('/state')) return Response.json({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-1' });
+      return new Response('unavailable', { status: 503 });
+    }
+  });
+  assert.equal((await client.openSession({ piSessionId: 'pi-1' })).iarSessionId, 'iar-1');
+  assert.equal((await client.confirm('iar-1', 'action-1', false)).reply, '已取消');
+  assert.equal((await client.state('iar-1')).iarSessionId, 'iar-1');
+  await assert.rejects(() => client.input('iar-1', '普通问题'), (error: unknown) => error instanceof BridgeClientError && error.code === 'bridge_unavailable' && error.retryable);
+  assert.deepEqual(paths, [
+    'http://iar.test/api/bridge/v1/sessions',
+    'http://iar.test/api/bridge/v1/sessions/iar-1/confirm',
+    'http://iar.test/api/bridge/v1/sessions/iar-1/state',
+    'http://iar.test/api/bridge/v1/sessions/iar-1/input'
+  ]);
+});
+
+test('IAR bridge client rejects malformed responses and normalizes timeout failures', async () => {
+  const malformed = new IarBridgeClient({
+    baseUrl: 'http://iar.test',
+    fetch: async () => Response.json({ version: 'wrong', iarSessionId: 'iar-1', disposition: 'handled' })
+  });
+  await assert.rejects(() => malformed.input('iar-1', '普通问题'), (error: unknown) => error instanceof BridgeClientError && error.code === 'invalid_bridge_response');
+
+  const timedOut = new IarBridgeClient({
+    baseUrl: 'http://iar.test',
+    fetch: async () => { throw new DOMException('timed out', 'TimeoutError'); }
+  });
+  await assert.rejects(() => timedOut.input('iar-1', '普通问题'), (error: unknown) => error instanceof BridgeClientError && error.code === 'bridge_timeout' && error.retryable);
+});
+
 test('Pi extension continues pass-through and handles IAR results', async () => {
   const handlers = new Map<string, (event: unknown, context: PiExtensionContext) => Promise<unknown> | unknown>();
   const commands = new Map<string, { handler: (args: string, context: PiExtensionContext) => Promise<void> }>();

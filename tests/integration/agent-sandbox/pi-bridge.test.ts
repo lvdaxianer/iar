@@ -30,6 +30,9 @@ test('IAR bridge handles business input and protects confirmation isolation', as
     const pendingResponse = await server.app.inject({ method: 'POST', url: `/api/bridge/v1/sessions/${first}/input`, payload: { text: '帮我创建工单' } });
     const pending = pendingResponse.json() as { disposition: string; pending: { actionId: string } };
     assert.equal(pending.disposition, 'awaiting_confirmation');
+    const state = await server.app.inject({ method: 'GET', url: `/api/bridge/v1/sessions/${first}/state` });
+    assert.equal(state.statusCode, 200);
+    assert.equal(state.json().pending.actionId, pending.pending.actionId);
     const second = await openBridgeSession(server, 'pi-session-b');
     const secondPendingResponse = await server.app.inject({ method: 'POST', url: `/api/bridge/v1/sessions/${second}/input`, payload: { text: '帮我创建工单' } });
     const secondPending = secondPendingResponse.json() as { pending: { actionId: string } };
