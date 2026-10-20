@@ -16,7 +16,7 @@ type WorkerRequest =
   | { id: number; type: 'append_event'; sessionId: string; runId: string; traceId?: string; event: EventEnvelope }
   | { id: number; type: 'save_snapshot'; snapshot: SessionSnapshotRecord }
   | { id: number; type: 'load_snapshot'; sessionId: string }
-  | { id: number; type: 'list_messages'; sessionId: string }
+  | { id: number; type: 'list_messages'; sessionId: string; limit?: number }
   | { id: number; type: 'list_events'; sessionId: string }
   | { id: number; type: 'flush' };
 
@@ -74,7 +74,7 @@ function handleRequest(request: WorkerRequest): unknown {
     case 'append_event': return appendEvent(request);
     case 'save_snapshot': return saveSnapshot(request.snapshot);
     case 'load_snapshot': return loadSnapshot(request.sessionId);
-    case 'list_messages': return listMessages(request.sessionId);
+    case 'list_messages': return listMessages(request.sessionId, request.limit);
     case 'list_events': return listEvents(request.sessionId);
     case 'flush': return true;
   }
@@ -136,8 +136,11 @@ function loadSnapshot(sessionId: string): SessionSnapshotRecord | undefined {
 }
 
 /** 按接收顺序读取指定会话消息。 */
-function listMessages(sessionId: string): SessionMessage[] {
-  return database.prepare('SELECT payload FROM iar_session_messages WHERE session_id = ? ORDER BY sequence').all(sessionId).map((row) => JSON.parse(String(row.payload)) as SessionMessage);
+function listMessages(sessionId: string, limit?: number): SessionMessage[] {
+  const rows = limit === undefined
+    ? database.prepare('SELECT payload FROM iar_session_messages WHERE session_id = ? ORDER BY sequence').all(sessionId)
+    : database.prepare('SELECT payload FROM iar_session_messages WHERE session_id = ? ORDER BY sequence DESC LIMIT ?').all(sessionId, limit).reverse();
+  return rows.map((row) => JSON.parse(String(row.payload)) as SessionMessage);
 }
 
 /** 按接收顺序读取指定会话事件。 */

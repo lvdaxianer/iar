@@ -9,7 +9,7 @@
 ## 2. SQLite Message Window and Session Recovery
 
 - [x] 2.1 Write failing SQLite tests covering latest-N ordering, zero/oversized limits, and message-store reuse in `tests/integration/persistence-provider.test.ts`; verify the new tests fail for the current unbounded `listMessages` implementation.
-- [ ] 2.2 Implement the bounded query in `packages/persistence-sqlite/src/provider.ts` and `packages/persistence-sqlite/src/worker.ts` without adding a duplicate raw-message snapshot table; verify the SQLite focused tests pass and existing idempotency/revision tests remain green.
+- [x] 2.2 Implement the bounded query in `packages/persistence-sqlite/src/provider.ts` and `packages/persistence-sqlite/src/worker.ts` without adding a duplicate raw-message snapshot table; verify the SQLite focused tests pass and existing idempotency/revision tests remain green.
 - [ ] 2.3 Write a failing restart regression in `tests/integration/agent-sandbox/session-persistence.test.ts` that persists more than N messages, restarts the session, and asserts only the latest ordered window is supplied to the next model call; verify it fails before restore wiring.
 - [ ] 2.4 Update `examples/agent-sandbox/src/session-core.ts` and persistence adapters to restore the structured snapshot first, load the bounded message window second, and fail safe to an empty window when the message read is unavailable; verify file-backed resume restores both state classes without exposing message text as trusted facts.
 

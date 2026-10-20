@@ -9,11 +9,14 @@ import { Worker } from 'node:worker_threads';
 import type { EventEnvelope } from '@iar/contracts';
 import {
   PERSISTENCE_API_VERSION,
+  PersistenceValidationError,
   validateSessionIdentity,
+  validateRecentMessageQuery,
   type PersistenceProviderFactory,
   type PersistenceProviderManifest,
   type PersistenceProviderModule,
   type PersistenceProviderOptions,
+  type RecentMessageQuery,
   type SessionIdentity,
   type SessionMessage,
   type SessionPersistenceProvider,
@@ -32,7 +35,7 @@ export type SqlitePersistenceOptions = {
 export class SqlitePersistenceError extends Error {
   /** @param code - 稳定错误码 @param message - 不包含数据库路径和敏感内容的诊断信息 */
   public constructor(
-    public readonly code: 'provider_not_open' | 'provider_closed' | 'provider_queue_full' | 'provider_worker_failed' | 'provider_config_invalid' | 'message_invalid' | 'event_invalid' | 'snapshot_invalid' | 'message_id_conflict' | 'event_id_conflict' | 'snapshot_revision_conflict' | 'sqlite_failure',
+    public readonly code: 'provider_not_open' | 'provider_closed' | 'provider_queue_full' | 'provider_worker_failed' | 'provider_config_invalid' | 'message_invalid' | 'message_query_invalid' | 'event_invalid' | 'snapshot_invalid' | 'message_id_conflict' | 'event_id_conflict' | 'snapshot_revision_conflict' | 'sqlite_failure',
     message: string
   ) {
     super(message);
@@ -121,9 +124,10 @@ export class SqlitePersistenceProvider implements SessionPersistenceProvider {
   }
 
   /** 读取指定会话的有序消息。 */
-  public async listMessages(sessionId: string): Promise<SessionMessage[]> {
+  public async listMessages(sessionId: string, query?: RecentMessageQuery): Promise<SessionMessage[]> {
     validateSessionId(sessionId);
-    return await this.enqueue({ type: 'list_messages', sessionId }) as SessionMessage[];
+    const validatedQuery = normalizeMessageQuery(query);
+    return await this.enqueue({ type: 'list_messages', sessionId, ...(validatedQuery === undefined ? {} : { limit: validatedQuery.limit }) }) as SessionMessage[];
   }
 
   /** 等待所有已接受请求在 Worker 中处理完成。 */
@@ -221,6 +225,17 @@ function validateMessage(message: SessionMessage): void {
 /** 校验会话查询标识。 */
 function validateSessionId(sessionId: string): void {
   validateSessionIdentity({ sessionId, runId: 'read' });
+}
+
+/** 校验并复制最近消息查询参数，转换为 SQLite Provider 的稳定错误。 */
+function normalizeMessageQuery(query: RecentMessageQuery | undefined): RecentMessageQuery | undefined {
+  if (query === undefined) return undefined;
+  try {
+    return validateRecentMessageQuery(query);
+  } catch (error) {
+    if (error instanceof PersistenceValidationError) throw new SqlitePersistenceError('message_query_invalid', '最近消息查询参数无效');
+    throw error;
+  }
 }
 
 /** 判断 Provider 配置是否为对象。 */
