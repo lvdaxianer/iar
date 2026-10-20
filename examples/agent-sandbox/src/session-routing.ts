@@ -25,6 +25,8 @@ export type SessionRoutingContext = Pick<CompactionContext, 'eventStore' | 'proj
   /** 注册表和插件宿主由会话持有，不随路由组件销毁。 */
   registry: ModelProfileRegistry;
   pluginHost: PluginHost;
+  /** 从持久化恢复并持续维护的有界原文窗口。 */
+  recentMessages: Array<{ role: string; text: string }>;
   /** 两阶段决策各自使用对应适配器。 */
   functionDecisionAdapter: AsyncDecisionAdapter;
   pluginDecisionAdapter: AsyncDecisionAdapter;
@@ -64,12 +66,12 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public async extractFrame(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext): Promise<ExtractFrameOutcome> {
-    const extracted = await new SemanticExtractorAdapter(this.context.gateway).extract({ traceId, runId, input: { text: userText, behaviorContext } });
+  public async extractFrame(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages = this.context.recentMessages): Promise<ExtractFrameOutcome> {
+    const extracted = await new SemanticExtractorAdapter(this.context.gateway).extract({ traceId, runId, input: { text: userText, behaviorContext, recentMessages } });
     if (extracted.ok) return { ok: true, frame: extracted.value, semanticFallback: false };
     if (this.context.mode === 'brain') {
       // 真实 LLM 抽取失败时降级到离线关键词抽取，保证链路可以继续。
-      const retried = await this.retrySemanticWithScripted(traceId, runId, userText, behaviorContext);
+      const retried = await this.retrySemanticWithScripted(traceId, runId, userText, behaviorContext, recentMessages);
       if (retried.ok) return { ok: true, frame: retried.value, semanticFallback: true };
     }
     const route: RouteEvidence = { status: 'semantic_failed', reasonCode: extracted.error.code, semanticIntent: 'unknown', semanticConfidence: 0 };
@@ -90,9 +92,9 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected async retrySemanticWithScripted(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext): Promise<ModelGatewayResult<SemanticFrame>> {
+  protected async retrySemanticWithScripted(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>): Promise<ModelGatewayResult<SemanticFrame>> {
     const fallbackGateway = new ModelGateway({ registry: this.context.registry, providers: { brain: new ScriptedModelProvider() } });
-    return new SemanticExtractorAdapter(fallbackGateway).extract({ traceId, runId, input: { text: userText, behaviorContext } });
+    return new SemanticExtractorAdapter(fallbackGateway).extract({ traceId, runId, input: { text: userText, behaviorContext, recentMessages } });
   }
 
 

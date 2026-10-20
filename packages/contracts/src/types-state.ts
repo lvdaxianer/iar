@@ -10,6 +10,9 @@ import type { WorkflowStatus } from './types-routing.js';
 /** 最近消息窗口允许的最大消息数量。 */
 export const MAX_RECENT_MESSAGE_LIMIT = 20;
 
+/** 未显式配置时使用的最近消息数量。 */
+export const DEFAULT_RECENT_MESSAGE_LIMIT = 5;
+
 /** 最近消息窗口允许的单条消息最大字符数。 */
 export const MAX_RECENT_MESSAGE_CHARS = 2000;
 

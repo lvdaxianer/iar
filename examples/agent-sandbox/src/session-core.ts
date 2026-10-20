@@ -8,7 +8,7 @@
  * @date 2026-10-18
  */
 import { randomUUID } from 'node:crypto';
-import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type EventName, type JsonValue, type PendingInput, type WorkflowDefinition } from '@iar/contracts';
+import { DEFAULT_RECENT_MESSAGE_LIMIT, MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGE_LIMIT, SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type EventName, type JsonValue, type PendingInput, type WorkflowDefinition } from '@iar/contracts';
 import { ModelGateway, ModelProfileRegistry } from '@iar/decision';
 import { PersistenceSubscriptionBridge } from '@iar/persistence-runtime';
 import type { SessionMessage, SessionPersistenceProvider } from '@iar/persistence-spi';
@@ -48,6 +48,13 @@ type PersistenceEventInput = {
   eventId?: string;
   /** 事实发生时间。 */
   occurredAt?: string;
+};
+
+/** 兼容旧 SnapshotStore 与新 Persistence Provider 的共同快照形状。 */
+type RestorableSnapshot = {
+  eventId: string;
+  revision: number;
+  context: import('@iar/contracts').BehaviorContext;
 };
 
 /** sandbox 单轮执行状态机定义。 */
@@ -109,6 +116,10 @@ export class SandboxSessionCore {
   protected eventStore = new InMemoryEventStore();
   /** 最近对话用于回复生成，写入时限制保留数量。 */
   protected recentMessages: Array<{ role: string; text: string }> = [];
+  /** 最近消息窗口的会话级数量上限。 */
+  protected readonly recentMessageLimit: number;
+  /** 最近消息进入模型前的单条字符上限。 */
+  protected readonly recentMessageMaxChars = MAX_RECENT_MESSAGE_CHARS;
   /** 待确认动作只存在于本会话，不能被另一个会话确认。 */
   protected pending: { action: ActionDefinition } | null = null;
   /** 自重置以来的轮次、压缩及决策事件序号。 */
@@ -128,9 +139,10 @@ export class SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public constructor(options: { mode: SandboxMode; decisionBackend?: SandboxDecisionBackend; sessionId?: string; snapshotStore?: SnapshotStore; persistenceProvider?: SessionPersistenceProvider; persistenceProviderOpened?: boolean }) {
+  public constructor(options: { mode: SandboxMode; decisionBackend?: SandboxDecisionBackend; sessionId?: string; snapshotStore?: SnapshotStore; persistenceProvider?: SessionPersistenceProvider; persistenceProviderOpened?: boolean; recentMessageLimit?: number }) {
     try {
       this.mode = options.mode; this.sessionId = options.sessionId ?? SESSION_RUN_ID;
+      this.recentMessageLimit = normalizeRecentMessageLimit(options.recentMessageLimit);
       this.snapshotStore = options.snapshotStore; this.persistenceProvider = options.persistenceProvider;
       this.persistenceDispatcher = this.createPersistenceDispatcher(options.persistenceProvider);
       this.pluginHost = createSandboxPluginHost();
@@ -266,7 +278,6 @@ export class SandboxSessionCore {
     }
   }
 
-  /** 从最新有效快照恢复当前投影；无效快照只降级为空上下文。 */
   /**
    * 初始化 Provider 并恢复会话快照。
    * @returns Provider 初始化和快照恢复完成
@@ -286,16 +297,44 @@ export class SandboxSessionCore {
    */
   private async restoreSnapshot(): Promise<void> {
     if (!this.snapshotStore && !this.persistenceProvider) return;
+    const snapshot = await this.loadSnapshotSafely();
+    const restored = snapshot === undefined ? false : this.restoreStructuredSnapshot(snapshot);
+    await this.restoreRecentMessages();
+    if (restored && snapshot) this.enqueuePersistenceEvent({ eventName: 'session.restored', runId: SESSION_RUN_ID, payload: { revision: snapshot.revision, eventId: snapshot.eventId } as JsonValue, eventId: `session-restored-${snapshot.eventId}` });
+  }
+
+  /** 读取 Provider 或兼容快照，失败时只返回空恢复结果。 */
+  private async loadSnapshotSafely(): Promise<RestorableSnapshot | undefined> {
     try {
       const providerSnapshot = await this.persistenceProvider?.loadSnapshot(this.sessionId);
-      const snapshot = providerSnapshot ?? (await this.snapshotStore?.get(this.sessionId));
-      if (!snapshot) return;
+      return providerSnapshot ?? (await this.snapshotStore?.get(this.sessionId));
+    } catch {
+      writeSafeLog({ level: 'warn', event: 'sandbox.snapshot', outcome: 'snapshot_failed' });
+      return undefined;
+    }
+  }
+
+  /** 恢复经过契约校验的结构化快照，原始消息不参与可信状态投影。 */
+  private restoreStructuredSnapshot(snapshot: RestorableSnapshot): boolean {
+    try {
       this.projector = new BehaviorContextProjector(snapshot.context);
       this.snapshotRevision = snapshot.revision;
-      this.enqueuePersistenceEvent({ eventName: 'session.restored', runId: SESSION_RUN_ID, payload: { revision: snapshot.revision, eventId: snapshot.eventId } as JsonValue, eventId: `session-restored-${snapshot.eventId}` });
+      return true;
     } catch {
-      // 持久化损坏不能阻止会话建立，更不能把不可信内容交给模型。
-      writeSafeLog({ level: 'warn', event: 'sandbox.snapshot', outcome: 'snapshot_failed' });
+      writeSafeLog({ level: 'warn', event: 'sandbox.snapshot', outcome: 'snapshot_invalid' });
+      return false;
+    }
+  }
+
+  /** 从 Provider 读取有界消息窗口，读取失败时安全降级为空窗口。 */
+  private async restoreRecentMessages(): Promise<void> {
+    if (!this.persistenceProvider) return;
+    try {
+      const messages = await this.persistenceProvider.listMessages(this.sessionId, { limit: this.recentMessageLimit });
+      this.recentMessages = messages.flatMap((message) => toRecentMessage(message, this.recentMessageMaxChars)).slice(-this.recentMessageLimit);
+    } catch {
+      this.recentMessages = [];
+      writeSafeLog({ level: 'warn', event: 'sandbox.recent_messages', outcome: 'restore_failed' });
     }
   }
 
@@ -416,4 +455,17 @@ export class SandboxSessionCore {
 /** 为每次会话实例生成不会跨进程复用的事件来源前缀。 */
 function createSessionEventLog(): WorkflowEventLog {
   return new WorkflowEventLog({ correlationId: SESSION_CORRELATION_ID, eventIdPrefix: `workflow-event-${randomUUID()}` });
+}
+
+/** 校验会话级最近消息数量，避免模型窗口配置失控。 */
+function normalizeRecentMessageLimit(value: number | undefined): number {
+  const limit = value ?? DEFAULT_RECENT_MESSAGE_LIMIT;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_RECENT_MESSAGE_LIMIT) throw new Error('recentMessageLimit 超出允许范围');
+  return limit;
+}
+
+/** 将 Provider 消息转换为不具备执行权限的模型窗口条目。 */
+function toRecentMessage(message: SessionMessage, maxMessageChars: number): { role: string; text: string }[] {
+  if (!['user', 'assistant', 'system'].includes(message.role) || typeof message.content !== 'string') return [];
+  return [{ role: message.role, text: message.content.slice(0, maxMessageChars) }];
 }

@@ -18,7 +18,7 @@ import { streamModelReply } from './session-model-stream.js';
  * traceId 与 runId 继承当前轮次，不创建新的会话身份。
  * 所有回复路径共享同一个输入形状，避免普通和流式入口漂移。
  */
-type ReplyContext = { traceId: string; runId: string; userText: string; behaviorContext: BehaviorContext };
+type ReplyContext = { traceId: string; runId: string; userText: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }> };
 type FallbackContext = ReplyContext & { reasonCode: string };
 type ActionReplyContext = ReplyContext & { action: ActionDefinition; actionResult: ActionResult };
 
@@ -28,6 +28,10 @@ export type SessionRepliesContext = CompactionContext & {
   brainProvider: BrainModelProvider | ScriptedModelProvider;
   registry: ModelProfileRegistry;
   gateway: ModelGateway;
+  /** 当前会话允许提供给模型的原文消息数量上限。 */
+  recentMessageLimit: number;
+  /** 当前会话允许提供给模型的单条原文字符上限。 */
+  recentMessageMaxChars: number;
   updateClarification: (pending: PendingInput) => Promise<void>;
   /** 将完整消息发布给会话持久化 Hook；未配置 Provider 时为空操作。 */
   recordMessage?: (message: SessionMessage) => void;
@@ -67,7 +71,7 @@ export class SandboxSessionReplies {
    * @date 2026-10-18
    */
   public async fallbackReply(context: FallbackContext): Promise<string> {
-    const { traceId, runId, userText, behaviorContext, reasonCode } = context;
+    const { traceId, runId, userText, behaviorContext, recentMessages, reasonCode } = context;
     if (this.context.mode === 'brain') {
       const generated = await new ResponseGeneratorAdapter(this.context.gateway).generate({
         traceId,
@@ -75,6 +79,7 @@ export class SandboxSessionReplies {
         input: {
           userMessage: userText,
           behaviorContext,
+          recentMessages,
           availableFunctions: [...sandboxFunctionIds],
           reasonCode
         }
@@ -111,7 +116,7 @@ export class SandboxSessionReplies {
    * @date 2026-10-18
    */
   public async fallbackReplyStreamed(context: FallbackContext, onDelta: (delta: string) => void): Promise<string> {
-    const { traceId, runId, userText, behaviorContext, reasonCode } = context;
+    const { traceId, runId, userText, behaviorContext, recentMessages, reasonCode } = context;
     if (this.context.mode !== 'brain' || !(this.context.brainProvider instanceof OpenAICompatibleModelProvider)) {
       const reply = await this.fallbackReply(context);
       onDelta(reply);
@@ -120,6 +125,7 @@ export class SandboxSessionReplies {
     const input: JsonValue = {
       userMessage: userText,
       behaviorContext,
+      recentMessages,
       availableFunctions: [...sandboxFunctionIds],
       reasonCode
     };
@@ -176,7 +182,7 @@ export class SandboxSessionReplies {
    * @date 2026-10-18
    */
   public async generateReplyStreamed(context: ActionReplyContext, onDelta: (delta: string) => void): Promise<string> {
-    const { traceId, runId, userText, behaviorContext, action, actionResult } = context;
+    const { traceId, runId, userText, behaviorContext, recentMessages, action, actionResult } = context;
     if (this.context.mode !== 'brain' || !(this.context.brainProvider instanceof OpenAICompatibleModelProvider)) {
       const reply = await this.generateReply(context);
       onDelta(reply);
@@ -188,7 +194,8 @@ export class SandboxSessionReplies {
       pluginId: action.pluginId,
       actionStatus: actionResult.status,
       actionOutput: actionResult.output ?? null,
-      behaviorContext
+      behaviorContext,
+      recentMessages
     };
     return streamModelReply({ provider: this.context.brainProvider, profile: this.context.registry.forRole('response.generate'), traceId, runId, input, onDelta, onClarification: (clarification) => this.persistClarification(behaviorContext, clarification),
       onInvalid: async () => `动作已执行（${action.functionId}），但回复生成失败（model.schema_invalid）。`, onFailure: () => this.generateReply(context) });
@@ -206,7 +213,7 @@ export class SandboxSessionReplies {
    * @date 2026-10-17
    */
   public async generateReply(context: ActionReplyContext): Promise<string> {
-    const { traceId, runId, userText, behaviorContext, action, actionResult } = context;
+    const { traceId, runId, userText, behaviorContext, recentMessages, action, actionResult } = context;
     const generated = await new ResponseGeneratorAdapter(this.context.gateway).generate({
       traceId,
       runId,
@@ -216,7 +223,8 @@ export class SandboxSessionReplies {
         pluginId: action.pluginId,
         actionStatus: actionResult.status,
         actionOutput: actionResult.output ?? null,
-        behaviorContext
+        behaviorContext,
+        recentMessages
       }
     });
     if (!generated.ok) return `动作已执行（${action.functionId}），但回复生成失败（${generated.error.code}）。`;
@@ -236,7 +244,7 @@ export class SandboxSessionReplies {
    */
   public pushMessages(userText: string, assistantReply: string): void {
     const userMessage: SessionMessage = { messageId: `message-${randomUUID()}`, role: 'user', content: userText, occurredAt: new Date().toISOString() };
-    this.context.recentMessages.push({ role: userMessage.role, text: userMessage.content });
+    this.context.recentMessages.push({ role: userMessage.role, text: boundMessageText(userMessage.content, this.context.recentMessageMaxChars) });
     this.context.recordMessage?.(userMessage);
     this.pushAssistantMessage(assistantReply);
   }
@@ -251,10 +259,15 @@ export class SandboxSessionReplies {
    * @date 2026-10-17
    */
   public pushAssistantMessage(assistantReply: string): void {
-    this.context.recentMessages.push({ role: 'assistant', text: assistantReply });
+    this.context.recentMessages.push({ role: 'assistant', text: boundMessageText(assistantReply, this.context.recentMessageMaxChars) });
     this.context.recordMessage?.({ messageId: `message-${randomUUID()}`, role: 'assistant', content: assistantReply, occurredAt: new Date().toISOString() });
-    if (this.context.recentMessages.length > 20) this.context.recentMessages.splice(0, this.context.recentMessages.length - 20);
+    if (this.context.recentMessages.length > this.context.recentMessageLimit) this.context.recentMessages.splice(0, this.context.recentMessages.length - this.context.recentMessageLimit);
   }
+}
+
+/** 将进入模型窗口的消息限制在稳定的字符边界内。 */
+function boundMessageText(text: string, maxChars: number): string {
+  return text.slice(0, maxChars);
 }
 
 /** 判断用户是否在询问当前会话已经确认的事实，而不是发起新操作。 */

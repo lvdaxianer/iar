@@ -53,7 +53,7 @@ function decisionResult(input: unknown): Record<string, unknown> {
   };
 }
 
-test('model prompts carry the current message and structured context, never raw recent messages', () => {
+test('语义与回复模型接收当前问题、结构化上下文和有界最近消息', () => {
   const context = createInitialContext('run-context');
   context.facts = {
     'ticket.create.ticketId': {
@@ -65,7 +65,7 @@ test('model prompts carry the current message and structured context, never raw 
   const fallback = buildFallbackUserPrompt({ userMessage: '告诉我刚才的编号', behaviorContext: context, reasonCode: 'function_noul' }, ['ticket.create']);
   for (const prompt of [semantic, response, fallback]) {
     assert.match(prompt, /ticket-001/);
-    assert.doesNotMatch(prompt, /recentMessages|最近对话|原始聊天|用户私密标题/);
+  assert.match(prompt, /最近有限/);
     assert.match(prompt, /结构化|事实|澄清/);
   }
   assert.match(semantic, /告诉我刚才的编号/);
@@ -112,7 +112,7 @@ test('normal and streaming session calls use the live structured context after a
     prompts.push(userPrompt);
     const semantic = payload.messages?.[0]?.content.includes('Semantic Extractor') === true;
     if (semantic) {
-      const frame = userPrompt.includes('帮我创建')
+      const frame = userPrompt.startsWith('当前用户问题：帮我创建')
         ? { schemaVersion: 'iar.semantic-frame/v1', intent: 'ticket.create', action: 'create', slots: { operation: 'create' }, references: [], confidence: 0.99 }
         : { schemaVersion: 'iar.semantic-frame/v1', intent: 'unknown', slots: {}, references: [], confidence: 0.2 };
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(frame) } }] }), { status: 200 });
@@ -141,7 +141,7 @@ test('normal and streaming session calls use the live structured context after a
     assert.equal((await session.turnStreamed('还是告诉我这个编号', () => {})).status, 'clarification');
     assert.deepEqual((await session.state()).context.pending.options, [{ key: '1', label: '第一个对象' }, { key: '2', label: '第二个对象' }]);
     assert.ok(prompts.some((prompt) => prompt.includes(`<behavior_context>`) && prompt.includes(String(ticketId))));
-    assert.ok(prompts.filter((prompt) => prompt.includes(String(ticketId))).every((prompt) => !prompt.includes('最近对话')));
+    assert.ok(prompts.filter((prompt) => prompt.includes(String(ticketId))).every((prompt) => prompt.includes('最近有限')));
   } finally {
     session.dispose();
     globalThis.fetch = originalFetch;
