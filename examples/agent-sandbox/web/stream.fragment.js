@@ -21,6 +21,22 @@
     div.className = 'msg bot';
     var textEl = document.createElement('div');
     textEl.className = 'md-body';
+    var thinking = createThinkingIndicator();
+    div.appendChild(textEl);
+    div.appendChild(thinking.stageEl);
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    var state = { div: div, textEl: textEl, stageEl: thinking.stageEl, stageText: thinking.stageText, gotDelta: false };
+    return {
+      setStage: function (stage) { if (!state.gotDelta && STAGE_LABELS[stage]) state.stageText.textContent = '· ' + STAGE_LABELS[stage]; },
+      appendDelta: function (text) { appendStreamDelta(state, text); },
+      finalize: function (result) { finalizeStreamBubble(state, result); },
+      remove: function () { div.remove(); }
+    };
+  }
+
+  /** 创建流式气泡的阶段指示器。 */
+  function createThinkingIndicator() {
     var stageEl = document.createElement('span');
     stageEl.className = 'thinking';
     var dots = document.createElement('span');
@@ -36,17 +52,7 @@
     stageEl.appendChild(dots);
     stageEl.appendChild(label);
     stageEl.appendChild(stageText);
-    div.appendChild(textEl);
-    div.appendChild(stageEl);
-    messagesEl.appendChild(div);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-    var state = { div: div, textEl: textEl, stageEl: stageEl, stageText: stageText, gotDelta: false };
-    return {
-      setStage: function (stage) { if (!state.gotDelta && STAGE_LABELS[stage]) state.stageText.textContent = '· ' + STAGE_LABELS[stage]; },
-      appendDelta: function (text) { appendStreamDelta(state, text); },
-      finalize: function (result) { finalizeStreamBubble(state, result); },
-      remove: function () { div.remove(); }
-    };
+    return { stageEl: stageEl, stageText: stageText };
   }
 
   /** 增量以纯文本显示，直到终态才进行 Markdown 渲染。

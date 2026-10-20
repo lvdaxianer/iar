@@ -128,8 +128,8 @@ export class IarBridgeClient {
       const response = await this.fetchImpl(`${this.baseUrl}${options.path}`, requestInit(options.method, options.body, this.timeoutMs));
       const durationMs = Date.now() - startedAt;
       this.logger?.debug?.('IAR bridge response', { method: options.method, status: response.status, durationMs });
-      const payload = await readJson(response);
       if (!response.ok) throw httpError(response.status);
+      const payload = await readJson(response);
       return options.validate(payload);
     } catch (error) {
       const normalized = normalizeClientError(error);

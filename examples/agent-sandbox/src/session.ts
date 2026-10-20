@@ -9,12 +9,13 @@ import { resolveSandboxTraceId } from './safe-log.js';
 import { SandboxSessionStreamTurn } from './session-stream-turn.js';
 import { SandboxSessionReplies } from './session-replies.js';
 import { SandboxSessionRouting } from './session-routing.js';
-import { DEFAULT_UNRESOLVED_STREAK_THRESHOLD, MAX_UNRESOLVED_STREAK, type ActionDefinition, type ActionResult, type BehaviorContext, type PendingReference, type VerifiedFactRecord } from '@iar/contracts';
+import { DEFAULT_UNRESOLVED_STREAK_THRESHOLD, MAX_UNRESOLVED_STREAK, type ActionDefinition, type BehaviorContext, type PendingReference, type VerifiedFactRecord } from '@iar/contracts';
 import type { PluginDescriptor } from '@iar/plugins';
 import { confirmationScopeHash } from '@iar/workflow';
 import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
 import { createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
+import { canPassThrough, finishConfirmedAction, pendingBridgeResult, rejectSelection, resolveSelection } from './session-turn-helpers.js';
 import type { CompactResult, ConfirmResult, ExecuteTurnOutcome, ExtractFrameOutcome, RouteEvidence, StreamEvent, TurnResult } from './session-types.js';
 export type { CompactResult, ConfirmResult, PendingActionSummary, RouteEvidence, SandboxDecisionBackend, SandboxMode, SandboxState, StreamEvent, TurnResult, TurnStage } from './session-types.js';
 /** 公开会话对话和确认入口。
@@ -283,21 +284,9 @@ export class IarSandboxSession extends SandboxSessionCore {
   }
 
   /** 解析待选择的候选键，只接受当前启用且授权的候选快照。 */
-  public resolveSelection(text: string, context: BehaviorContext): { descriptor?: PluginDescriptor; invalid: boolean; reasonCode: string } {
-    if (context.clarification?.mode !== 'selection' || context.pending.kind !== 'selection' || context.pending.status !== 'required') return { invalid: false, reasonCode: 'none' };
-    const trimmed = text.trim();
-    const descriptor = this.pluginHost.descriptors().find((item) => item.candidateKey === trimmed);
-    // 新的自然语言需求可以主动替换选择；只有形似候选键的过期/非法值才 fail-closed。
-    if (descriptor) return { descriptor, invalid: false, reasonCode: 'none' };
-    return trimmed.startsWith('candidate-') ? { invalid: true, reasonCode: 'selection_invalid' } : { invalid: false, reasonCode: 'selection_replaced' };
-  }
-
+  public resolveSelection(text: string, context: BehaviorContext): { descriptor?: PluginDescriptor; invalid: boolean; reasonCode: string } { return resolveSelection(this.pluginHost.descriptors(), text, context); }
   /** 对过期或非法候选选择 fail-closed，不触发语义路由或插件执行。 */
-  public async rejectSelection(userText: string, reasonCode: string): Promise<TurnResult> {
-    const reply = '这个选项已失效，请从当前列出的选项中重新选择。';
-    this.replies.pushMessages(userText, reply);
-    return { status: 'clarification', reply, route: { status: 'rejected', reasonCode, semanticIntent: 'unknown', semanticConfidence: 0 }, reasonCode };
-  }
+  public async rejectSelection(userText: string, reasonCode: string): Promise<TurnResult> { return rejectSelection(this.replies, userText, reasonCode); }
   /**
    * 确认或取消当前待确认动作。
    *
@@ -353,47 +342,7 @@ export class IarSandboxSession extends SandboxSessionCore {
     this.pending = null;
     this.workflow.transition({ runId, event: 'complete' });
     await this.drainWorkflowEvents();
-    return this.finishConfirmedAction(action, executed.value);
+    return finishConfirmedAction({ replies: this.replies, projector: this.projector, recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), turnCount: this.turnCount }, action, executed.value);
   }
 
-  /** 为已确认执行的动作生成回复，超限时保留成功状态。
-   * 仅把完整的助手回复写入历史；超限时显式提示不要重复执行。
-   * @param action - 已执行动作
-   * @param actionResult - 动作执行结果
-   * @returns 含动作结果的确认响应
-   * @author lvdaxianer@yeah.net @date 2026-10-18
-   */
-  protected async finishConfirmedAction(action: ActionDefinition, actionResult: ActionResult): Promise<ConfirmResult> {
-    const reply = await trackModelResponseLimit(() => this.replies.generateReply({ traceId: resolveSandboxTraceId(`trace-sandbox-confirm-${String(this.turnCount)}`), runId: action.runId, userText: '（确认执行）', behaviorContext: this.projector.current(), recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), action, actionResult })).catch((error: unknown) => {
-      if (!(error instanceof ModelResponseLimitError)) throw error;
-      return undefined;
-    });
-    if (reply === undefined) return { status: 'executed', reply: '动作已执行，但模型回复超限且不完整，请勿重复执行。', actionResult, reasonCode: 'model_response_too_large' };
-    this.replies.pushAssistantMessage(reply);
-    return { status: 'executed', reply, actionResult };
-  }
-
-}
-
-/**
- * 构造待确认期间的 bridge 澄清结果。
- * @returns 不改变 pending 的安全澄清结果
- * @author lvdaxianer@yeah.net
- * @date 2026-10-20
- */
-function pendingBridgeResult(): TurnResult {
-  return { status: 'clarification', reply: '当前有待确认的 IAR 操作，请使用 /iar-confirm 或 /iar-cancel。', route: { status: 'rejected', reasonCode: 'pending_confirmation', semanticIntent: 'unknown', semanticConfidence: 0 }, reasonCode: 'pending_confirmation' };
-}
-
-/**
- * 判断路由未命中是否真的是普通 Pi 输入。
- * @param context - 当前结构化行为上下文
- * @param evidence - 当前轮路由证据
- * @param selectedDescriptor - 澄清选择绑定的 Plugin
- * @returns 是否允许交回 Pi Agent
- * @author lvdaxianer@yeah.net
- * @date 2026-10-20
- */
-function canPassThrough(context: BehaviorContext, evidence: RouteEvidence, selectedDescriptor: PluginDescriptor | undefined): boolean {
-  return selectedDescriptor === undefined && evidence.semanticIntent === 'unknown' && context.pending.status !== 'required' && !hasVerifiedFactsForFollowUp(context, evidence);
 }
