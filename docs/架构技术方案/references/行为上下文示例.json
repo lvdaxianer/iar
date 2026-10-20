@@ -1,0 +1,93 @@
+{
+  "schemaVersion": "iar.behavior-context/v1",
+  "subject": {
+    "type": "resource",
+    "id": "record-001",
+    "source": "conversation_reference"
+  },
+  "intent": "resource.update",
+  "action": {
+    "name": "update",
+    "status": "resolved"
+  },
+  "route": {
+    "functionId": "resource.update",
+    "pluginId": "resource-update-v1"
+  },
+  "routingScope": {
+    "activePluginId": "resource-update-v1",
+    "candidatePluginIds": ["resource-update-v1"],
+    "actionTypes": ["query", "update"],
+    "continuation": "reuse"
+  },
+  "slots": {
+    "resourceId": {
+      "value": "record-001",
+      "status": "resolved",
+      "source": "subject.id"
+    }
+  },
+  "workflow": {
+    "currentStep": "await_confirmation",
+    "status": "waiting"
+  },
+  "pending": {
+    "kind": "confirmation",
+    "status": "required"
+  },
+  "recentMessagePolicy": {
+    "limit": 5,
+    "maxChars": 2000
+  },
+  "clarification": {
+    "mode": "none",
+    "unresolvedStreak": 0
+  },
+  "pendingReference": {
+    "text": "上一个",
+    "relation": "previous",
+    "anchorRecordId": "record-002",
+    "candidateRecordIds": ["record-001"]
+  },
+  "confirmation": {
+    "state": "required",
+    "contextHash": "sha256:pending-context-hash"
+  },
+  "factHistory": {
+    "records": [
+      {
+        "recordId": "record-001",
+        "sequence": 1,
+        "sourceEventId": "evt_001",
+        "functionId": "resource.create",
+        "pluginId": "resource-create-v1",
+        "values": {
+          "reference": "opaque-value"
+        },
+        "createdAt": "2026-10-20T09:01:00Z"
+      },
+      {
+        "recordId": "record-002",
+        "sequence": 2,
+        "sourceEventId": "evt_002",
+        "functionId": "resource.create",
+        "pluginId": "resource-create-v1",
+        "values": {
+          "reference": "another-opaque-value"
+        },
+        "createdAt": "2026-10-20T09:02:00Z"
+      }
+    ],
+    "focusRecordId": "record-002"
+  },
+  "summary": {
+    "version": "compactor@1",
+    "text": "当前操作等待确认，事实链包含两条按顺序追加的记录。",
+    "eventId": "evt_compaction_001"
+  },
+  "idempotencyKey": "run-opaque-key",
+  "integrity": {
+    "criticalFieldHash": "sha256:critical-fields-hash",
+    "lastEventId": "evt_002"
+  }
+}

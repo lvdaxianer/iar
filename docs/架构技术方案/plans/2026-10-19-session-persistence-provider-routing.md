@@ -85,7 +85,7 @@
 - Modify: `examples/agent-sandbox/src/server.ts`
 - Modify: `examples/agent-sandbox/src/env.ts`
 - Modify: `README.md`
-- Modify: `docs/README.md`
+- Modify: `docs/架构技术方案/README.md`
 - Test: `tests/integration/agent-sandbox/session-resume-provider.test.ts`
 
 - [x] **Step 1: Write the failing tests** — 覆盖新建/恢复会话、跨会话隔离、模型决策前恢复上下文和默认 SQLite Provider。

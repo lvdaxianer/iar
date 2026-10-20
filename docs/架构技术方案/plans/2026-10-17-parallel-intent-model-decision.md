@@ -36,7 +36,7 @@
 - Modify: \`tests/integration/model-gateway/model-gateway.test.ts\`：覆盖统一 adapter 和 Prompt 输出。
 - Create: \`tests/integration/model-gateway/intent-model-decision.test.ts\`：覆盖 Intent Model 合法/非法输出和审计。
 - Modify: \`tests/routing/two-stage-router.test.ts\`、\`tests/security/phase-4-security.test.ts\`：验证两种后端输出仍受同一候选、权限和能力复核约束。
-- Modify: \`docs/README.md\`、\`README.md\`：记录 JEV/Intent Model 的统一输出、优先级和不授予权限边界。
+- Modify: \`docs/架构技术方案/README.md\`、\`README.md\`：记录 JEV/Intent Model 的统一输出、优先级和不授予权限边界。
 - Create: \`docs/implementation-audits/parallel-intent-model-decision.md\`：记录最终审计和验证证据。
 
 ## Task 1: Add explicit decision backend configuration
@@ -310,7 +310,7 @@ git commit -m "✨ feat(runtime): 接入 JEV 优先的决策后端选择"
 
 - Modify: \`config/models.yaml\`
 - Modify: \`.env.example\`
-- Modify: \`docs/README.md\`
+- Modify: \`docs/架构技术方案/README.md\`
 - Modify: \`README.md\`
 - Create: \`docs/implementation-audits/parallel-intent-model-decision.md\`
 - Test: \`tests/integration/model-gateway/model-profile.test.ts\`
@@ -365,7 +365,7 @@ Expected: OpenSpec valid, no whitespace errors, lint/build pass, and the full su
 - [ ] **Step 5: Commit Task 4**
 
 ~~~bash
-git add config/models.yaml .env.example docs/README.md README.md docs/implementation-audits/parallel-intent-model-decision.md tests/integration/model-gateway/model-profile.test.ts
+git add config/models.yaml .env.example docs/架构技术方案/README.md README.md docs/implementation-audits/parallel-intent-model-decision.md tests/integration/model-gateway/model-profile.test.ts
 git commit -m "📝 docs(decision): 补充意图模型兼容配置与边界"
 ~~~
 

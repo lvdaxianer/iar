@@ -2,7 +2,7 @@
 
 ## 目标
 
-把 `docs/README.md` 中的 IAR 方案转化为一条可执行、可验收、可逐阶段提交的工程路线。当前仓库只有方案文档，因此本文件只定义落地设计，不实现运行时代码。
+把 `docs/架构技术方案/README.md` 中的 IAR 方案转化为一条可执行、可验收、可逐阶段提交的工程路线。当前仓库只有方案文档，因此本文件只定义落地设计，不实现运行时代码。
 
 ## 设计原则
 
@@ -59,7 +59,7 @@ tests/                # contract、replay、routing、workflow、security、inte
 - OpenSpec change：`openspec/changes/iar-five-phase-roadmap/`
 - OpenSpec 规格：5 个 capability spec，覆盖契约、状态、路由、策略/API、服务化/持久工作流。
 - OpenSpec 任务：按 Phase 1～5 排序，包含依赖、允许文件、验证命令和交接证据。
-- 执行计划：[`docs/superpowers/plans/2026-10-16-iar-five-phase-roadmap.md`](../plans/2026-10-16-iar-five-phase-roadmap.md)
+- 执行计划：[`docs/架构技术方案/plans/2026-10-16-iar-five-phase-roadmap.md`](../plans/2026-10-16-iar-five-phase-roadmap.md)
 
 ## 计划阶段的验收
 

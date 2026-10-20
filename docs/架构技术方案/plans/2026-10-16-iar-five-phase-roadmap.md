@@ -23,7 +23,7 @@
 
 - Create: `.npmrc`、`package.json`、`package-lock.json`、`tsconfig.json`、`scripts/run-tests.mjs`、workspace package manifests、`packages/contracts/**`、`packages/plugin-sdk/**`、`packages/plugin-host/**`、`packages/storage/**`、`packages/subscriptions/**`、`packages/runtime/**`
 - Create: `tests/contract/**`、`tests/replay/**`、`docs/contracts/**`
-- Modify: `.editorconfig`、`.gitattributes`、`.gitignore`、`docs/README.md` only when examples need to match the final contract names
+- Modify: `.editorconfig`、`.gitattributes`、`.gitignore`、`docs/架构技术方案/README.md` only when examples need to match the final contract names
 
 **Boundary:** 只负责公共契约、Manifest 生命周期、EventLog/Snapshot/BehaviorContext、Hook/Event 订阅和重放；不接入真实模型、HTTP、PostgreSQL、Worker、容器或 Temporal。
 
@@ -259,8 +259,8 @@
 
 ## Source references
 
-- Requirements: `docs/README.md`
-- Contract examples: `docs/references/插件Manifest示例.yaml`、`docs/references/路由规则示例.yaml`、`docs/references/行为上下文示例.json`
-- Hook/logging examples: `docs/references/Hook订阅示例.yaml`、`docs/references/内置日志插件示例.yaml`
-- Compaction contract: `docs/references/上下文压缩提示词示例.md`
+- Requirements: `docs/架构技术方案/README.md`
+- Contract examples: `docs/架构技术方案/references/插件Manifest示例.yaml`、`docs/架构技术方案/references/路由规则示例.yaml`、`docs/架构技术方案/references/行为上下文示例.json`
+- Hook/logging examples: `docs/架构技术方案/references/Hook订阅示例.yaml`、`docs/架构技术方案/references/内置日志插件示例.yaml`
+- Compaction contract: `docs/架构技术方案/references/上下文压缩提示词示例.md`
 - OpenSpec source of truth: `openspec/changes/iar-five-phase-roadmap/`

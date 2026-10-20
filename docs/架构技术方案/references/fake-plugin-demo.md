@@ -2,7 +2,7 @@
 
 `examples/fake-plugin/src/index.ts` 提供一个不产生真实外部副作用的 `dip.service.stop` 插件。它使用与真实插件相同的 Manifest、输入输出 Schema、能力声明和高风险确认策略，但 Handler 只返回确定性 JSON 结果。
 
-从仓库根目录执行 `npm run demo:fake-plugin` 可直接运行构建后的演示；对应自动化断言见 [`tests/contract/fake-plugin-demo.test.ts`](../../tests/contract/fake-plugin-demo.test.ts)。
+从仓库根目录执行 `npm run demo:fake-plugin` 可直接运行构建后的演示；对应自动化断言见 [`tests/contract/fake-plugin-demo.test.ts`](../../../tests/contract/fake-plugin-demo.test.ts)。
 
 ## 安装与执行
 
@@ -52,4 +52,4 @@ plugin.disabled
 plugin.unloaded
 ```
 
-`PluginHost.events` 返回不可变快照，事件可以交给 `replayEvents()` 做确定性重放；演示测试见 [`tests/contract/fake-plugin-demo.test.ts`](../../tests/contract/fake-plugin-demo.test.ts)。
+`PluginHost.events` 返回不可变快照，事件可以交给 `replayEvents()` 做确定性重放；演示测试见 [`tests/contract/fake-plugin-demo.test.ts`](../../../tests/contract/fake-plugin-demo.test.ts)。
