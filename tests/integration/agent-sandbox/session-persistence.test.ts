@@ -9,7 +9,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { SqlitePersistenceProvider } from '@iar/persistence-sqlite';
 import { startSandboxServer } from '../../../examples/agent-sandbox/src/server.js';
+import { ScriptedModelProvider } from '../../../examples/agent-sandbox/src/models/scripted-provider.js';
+import { IarSandboxSession } from '../../../examples/agent-sandbox/src/session.js';
 
 /** 使用随机本地端口，避免与其他集成测试共享监听器。 */
 async function availablePort(): Promise<number> {
@@ -77,4 +80,42 @@ test('成功动作产生的可信事实会随 SQLite 快照恢复', async () => 
       assert.notEqual(nextBody.context.facts?.['ticket.create.ticketId']?.sourceEventId, ticket?.sourceEventId);
     } finally { await second.close(); }
   } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('会话重启后下一次模型调用只接收 SQLite 中最新的有界消息窗口', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'iar-message-window-'));
+  const filename = join(directory, 'session.sqlite');
+  const sessionId = 'message-window-session';
+  const recentMessageLimit = 5;
+  const provider = new SqlitePersistenceProvider();
+  const capturedInputs: unknown[] = [];
+  const originalComplete = ScriptedModelProvider.prototype.complete;
+  ScriptedModelProvider.prototype.complete = async function captureSemanticInput(request) {
+    if (request.profile.role === 'semantic.extract') capturedInputs.push(structuredClone(request.input));
+    return originalComplete.call(this, request);
+  };
+
+  try {
+    await provider.open({ filename });
+    const first = new IarSandboxSession({ mode: 'scripted', sessionId, persistenceProvider: provider, persistenceProviderOpened: true });
+    await first.whenReady();
+    for (const message of ['历史-1', '历史-2', '历史-3', '历史-4']) await first.turn(message);
+    await first.flushPersistence();
+    const persistedMessages = await provider.listMessages(sessionId);
+    first.dispose();
+
+    const restored = new IarSandboxSession({ mode: 'scripted', sessionId, persistenceProvider: provider, persistenceProviderOpened: true });
+    try {
+      await restored.whenReady();
+      await restored.turn('恢复后的新问题');
+      const input = capturedInputs.at(-1) as { recentMessages?: Array<{ role: string; text: string }> } | undefined;
+      assert.deepEqual(input?.recentMessages, persistedMessages.slice(-recentMessageLimit).map((message) => ({ role: message.role, text: message.content })));
+    } finally {
+      restored.dispose();
+    }
+  } finally {
+    ScriptedModelProvider.prototype.complete = originalComplete;
+    await provider.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
