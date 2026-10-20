@@ -13,6 +13,9 @@ import {
   MAX_CLARIFICATION_LABEL_LENGTH,
   MAX_CLARIFICATION_OPTIONS,
   MAX_CLARIFICATION_REASON_LENGTH,
+  MAX_PENDING_REFERENCE_CANDIDATES,
+  MAX_PENDING_REFERENCE_OFFSET,
+  MAX_PENDING_REFERENCE_TEXT_LENGTH,
   MAX_RECENT_MESSAGE_CHARS,
   MAX_RECENT_MESSAGE_LIMIT,
   MAX_UNRESOLVED_STREAK
@@ -141,6 +144,23 @@ export const ClarificationStateSchema = Type.Object({
   candidateKeys: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: MAX_CANDIDATE_KEY_LENGTH }), { maxItems: MAX_CLARIFICATION_OPTIONS, uniqueItems: true }))
 }, { additionalProperties: false });
 
+/** 待解析事实引用 Schema，只保存通用关系和不透明记录 ID。 */
+export const PendingReferenceSchema = Type.Object({
+  // text 仅用于模型理解当前待澄清指代，不授予执行权限。
+  text: Type.String({ minLength: 1, maxLength: MAX_PENDING_REFERENCE_TEXT_LENGTH }),
+  // relation 是有限的事实链相对关系。
+  relation: Type.Union([
+    Type.Literal('current'), Type.Literal('previous'), Type.Literal('next'),
+    Type.Literal('first'), Type.Literal('last'), Type.Literal('offset')
+  ]),
+  // anchorRecordId 必须是不透明事实记录 ID。
+  anchorRecordId: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_FACT_RECORD_ID_LENGTH })),
+  // offset 只允许在运行时关系边界内移动。
+  offset: Type.Optional(Type.Integer({ minimum: -MAX_PENDING_REFERENCE_OFFSET, maximum: MAX_PENDING_REFERENCE_OFFSET })),
+  // 候选数量有界且记录 ID 不重复。
+  candidateRecordIds: Type.Array(Type.String({ minLength: 1, maxLength: MAX_FACT_RECORD_ID_LENGTH }), { minItems: 1, maxItems: MAX_PENDING_REFERENCE_CANDIDATES, uniqueItems: true })
+}, { additionalProperties: false });
+
 /** BehaviorContext 的确认状态和绑定范围。 */
 export const ConfirmationStateSchema = Type.Object({
   // state 是动作确认的唯一状态来源。
@@ -251,6 +271,8 @@ export const BehaviorContextSchema = Type.Object({
   recentMessagePolicy: Type.Optional(RecentMessagePolicySchema),
   // clarification 保存可恢复的通用澄清状态。
   clarification: Type.Optional(ClarificationStateSchema),
+  // pendingReference 保存通用事实关系的有限消歧状态。
+  pendingReference: Type.Optional(PendingReferenceSchema),
   // confirmation 记录确认范围和状态。
   confirmation: ConfirmationStateSchema,
   // factHistory 保存成功输出中的有限、可追溯有序事实。

@@ -9,7 +9,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { ActionDefinition, ActionResult, BehaviorContext, EventEnvelope, JsonValue, VerifiedFactRecord } from '@iar/contracts';
+import type { ActionDefinition, ActionResult, BehaviorContext, EventEnvelope, JsonValue, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { DecisionBackend, SemanticFrame } from '@iar/decision';
 
 /** sandbox 模式：brain 使用真实 LLM，scripted 使用离线假大脑。 */
@@ -85,6 +85,11 @@ export type ResolvedFactReference = {
   text: string;
   record: VerifiedFactRecord;
 };
+
+/** 历史引用未唯一收敛时返回的安全候选状态。 */
+export type ReferenceResolution =
+  | { ok: true; references: ResolvedFactReference[] }
+  | { ok: false; reasonCode: 'reference_unresolved' | 'reference_ambiguous'; pendingReference?: PendingReference; candidates?: VerifiedFactRecord[] };
 
 /** 单轮执行阶段的内部结果联合。 */
 export type ExecuteTurnOutcome =

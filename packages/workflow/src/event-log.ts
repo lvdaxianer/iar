@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { SCHEMA_VERSIONS, validateContract, type ActionDefinition, type ActionResult, type ClarificationState, type EventEnvelope, type JsonValue, type PendingInput } from '@iar/contracts';
+import { SCHEMA_VERSIONS, validateContract, type ActionDefinition, type ActionResult, type ClarificationState, type EventEnvelope, type JsonValue, type PendingInput, type PendingReference } from '@iar/contracts';
 import type { WorkflowRun } from './types.js';
 
 /** WorkflowEventLog 的时钟和链路配置。 */
@@ -125,8 +125,8 @@ export class WorkflowEventLog {
   }
 
   /** 记录响应模型提出或结束澄清的结构化待输入状态。 */
-  public clarificationUpdated(runId: string, pending: PendingInput, clarification?: ClarificationState): void {
-    this.append('context.clarification.updated', runId, { pending: structuredClone(pending) as JsonValue, ...(clarification === undefined ? {} : { clarification: structuredClone(clarification) as JsonValue }) });
+  public clarificationUpdated(runId: string, pending: PendingInput, clarification?: ClarificationState, pendingReference?: PendingReference | null): void {
+    this.append('context.clarification.updated', runId, { pending: structuredClone(pending) as JsonValue, ...(clarification === undefined ? {} : { clarification: structuredClone(clarification) as JsonValue }), ...(pendingReference === undefined ? {} : { pendingReference: structuredClone(pendingReference) as JsonValue }) });
   }
 
   /**

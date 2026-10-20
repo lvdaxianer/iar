@@ -8,7 +8,7 @@
  * @date 2026-10-18
  */
 import { randomUUID } from 'node:crypto';
-import { DEFAULT_RECENT_MESSAGE_LIMIT, MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGE_LIMIT, SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type ClarificationState, type EventName, type JsonValue, type PendingInput, type WorkflowDefinition } from '@iar/contracts';
+import { DEFAULT_RECENT_MESSAGE_LIMIT, MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGE_LIMIT, SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type ClarificationState, type EventName, type JsonValue, type PendingInput, type PendingReference, type WorkflowDefinition } from '@iar/contracts';
 import { ModelGateway, ModelProfileRegistry } from '@iar/decision';
 import { PersistenceSubscriptionBridge } from '@iar/persistence-runtime';
 import type { SessionMessage, SessionPersistenceProvider } from '@iar/persistence-spi';
@@ -260,8 +260,9 @@ export class SandboxSessionCore {
   }
 
   /** 保存连续澄清状态与当前 pending，供重启后继续安全恢复。 */
-  protected async updateClarificationState(clarification: ClarificationState, pending: PendingInput = this.projector.current().pending): Promise<void> {
-    this.workflowEventLog.clarificationUpdated(SESSION_RUN_ID, pending, clarification);
+  protected async updateClarificationState(clarification: ClarificationState, pending: PendingInput = this.projector.current().pending, pendingReference: PendingReference | null | undefined = undefined): Promise<void> {
+    const eventLog = this.workflowEventLog as unknown as { clarificationUpdated: (runId: string, input: PendingInput, state: ClarificationState, reference: PendingReference | null | undefined) => void };
+    eventLog.clarificationUpdated(SESSION_RUN_ID, pending, clarification, pendingReference);
     await this.drainWorkflowEvents();
   }
 

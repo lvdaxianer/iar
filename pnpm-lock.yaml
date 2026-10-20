@@ -142,6 +142,30 @@ importers:
         specifier: 0.1.0
         version: link:../contracts
 
+  packages/persistence-runtime:
+    dependencies:
+      '@iar/persistence-spi':
+        specifier: 0.1.0
+        version: link:../persistence-spi
+      '@iar/subscriptions':
+        specifier: 0.1.0
+        version: link:../subscriptions
+
+  packages/persistence-spi:
+    dependencies:
+      '@iar/contracts':
+        specifier: 0.1.0
+        version: link:../contracts
+
+  packages/persistence-sqlite:
+    dependencies:
+      '@iar/contracts':
+        specifier: 0.1.0
+        version: link:../contracts
+      '@iar/persistence-spi':
+        specifier: 0.1.0
+        version: link:../persistence-spi
+
   packages/plugin-distribution:
     dependencies:
       '@iar/contracts':

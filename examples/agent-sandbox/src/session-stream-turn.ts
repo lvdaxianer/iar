@@ -1,11 +1,11 @@
 import { ModelResponseLimitError, trackModelResponseLimit } from './models/model-transport.js';
 import { SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
-import type { ActionDefinition, ActionResult, BehaviorContext } from '@iar/contracts';
+import type { ActionDefinition, ActionResult, BehaviorContext, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/decision';
 import type { RouteResult } from '@iar/runtime';
 import type { PluginDescriptor } from '@iar/plugin-host';
-import type { ExecuteTurnOutcome, ExtractFrameOutcome, ResolvedFactReference, RouteEvidence, StreamEvent, TurnResult } from './session-types.js';
+import type { ExecuteTurnOutcome, ExtractFrameOutcome, ReferenceResolution, ResolvedFactReference, RouteEvidence, StreamEvent, TurnResult } from './session-types.js';
 
 /** 流式编排所需的会话能力，状态和资源仍由宿主唯一持有。 */
 export type StreamTurnContext = {
@@ -16,7 +16,7 @@ export type StreamTurnContext = {
   /** 选择状态只接受当前授权候选；无效键必须在语义抽取前终止。 */
   resolveSelection: (text: string, context: BehaviorContext) => { descriptor?: PluginDescriptor; invalid: boolean; reasonCode: string };
   rejectSelection: (userText: string, reasonCode: string) => Promise<TurnResult>;
-  markUnresolved: (reasonCode: string) => Promise<void>;
+  markUnresolved: (reasonCode: string, pendingReference?: PendingReference) => Promise<void>;
   resetClarification: () => Promise<void>;
   /** 与普通入口共用语义抽取及路由，确保相同的策略边界。 */
   extractFrame: (traceId: string, runId: string, text: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>, selectedDescriptor?: PluginDescriptor) => Promise<ExtractFrameOutcome>;
@@ -25,7 +25,7 @@ export type StreamTurnContext = {
   /** 当前启用 Plugin 的动态能力描述。 */
   functionDescriptors: PluginDescriptor[];
   routeFrame: (traceId: string, runId: string, frame: SemanticFrame, behaviorContext: BehaviorContext, currentMessage: string, recentMessages: Array<{ role: string; text: string }>, selectedDescriptor?: PluginDescriptor) => Promise<RouteResult>;
-  resolveReferences: (frame: SemanticFrame, behaviorContext: BehaviorContext) => { ok: true; references: ResolvedFactReference[] } | { ok: false; reasonCode: string };
+  resolveReferences: (frame: SemanticFrame, behaviorContext: BehaviorContext) => ReferenceResolution;
   prepareAndExecute: (context: { runId: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext }) => Promise<ExecuteTurnOutcome>;
   /** 兜底与执行后回复分别保留增量回调和超限错误。 */
   fallbackReplyStreamed: (context: { traceId: string; runId: string; userText: string; reasonCode: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[]; resolvedReferences?: ResolvedFactReference[] }, onDelta: (delta: string) => void) => Promise<string>;
@@ -110,15 +110,17 @@ export class SandboxSessionStreamTurn {
     emit({ type: 'stage', stage: 'route' });
     const frame = extracted.frame;
     const references = this.context.resolveReferences(frame, behaviorContext);
-    if (!references.ok) return this.finishStreamFallback({ userText, traceId, emit, behaviorContext, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: frame.intent, semanticConfidence: frame.confidence } });
-    const route = await this.context.routeFrame(traceId, SESSION_RUN_ID, frame, behaviorContext, userText, this.context.recentMessages, selectedDescriptor);
+    if (!references.ok) return this.finishStreamFallback({ userText, traceId, emit, behaviorContext, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: frame.intent, semanticConfidence: frame.confidence }, ...(references.pendingReference === undefined ? {} : { pendingReference: references.pendingReference }), ...(references.candidates === undefined ? {} : { referenceCandidates: references.candidates }) });
+    if (behaviorContext.pendingReference !== undefined) await this.context.resetClarification();
+    const routeContext = this.context.currentBehaviorContext();
+    const route = await this.context.routeFrame(traceId, SESSION_RUN_ID, frame, routeContext, userText, this.context.recentMessages, selectedDescriptor);
     const evidence = buildEvidence(route, frame);
     if (extracted.semanticFallback) evidence.semanticFallback = true;
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
-      return this.finishStreamFallback({ userText, traceId, emit, behaviorContext, evidence, resolvedReferences: references.references });
+      return this.finishStreamFallback({ userText, traceId, emit, behaviorContext: routeContext, evidence, resolvedReferences: references.references });
     }
     emit({ type: 'stage', stage: 'action' });
-    const outcome = await this.context.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame, route, behaviorContext });
+    const outcome = await this.context.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame, route, behaviorContext: routeContext });
     return this.finishStreamOutcome({ userText, traceId, emit, evidence, outcome });
   }
 
@@ -128,11 +130,11 @@ export class SandboxSessionStreamTurn {
    * @returns 澄清或超限失败结果
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  protected async finishStreamFallback(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; evidence: RouteEvidence; resolvedReferences?: ResolvedFactReference[] }): Promise<TurnResult> {
-    const { userText, traceId, emit, behaviorContext, evidence, resolvedReferences } = context;
-    if (!(evidence.semanticIntent === 'unknown' && evidence.reasonCode !== 'reference_unresolved' && (behaviorContext.factHistory?.records.length ?? 0) > 0) && !(behaviorContext.pending.status === 'required' && behaviorContext.pending.options?.some((option) => option.key === userText.trim()) === true)) await this.context.markUnresolved(evidence.reasonCode);
+  protected async finishStreamFallback(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; evidence: RouteEvidence; resolvedReferences?: ResolvedFactReference[]; pendingReference?: PendingReference; referenceCandidates?: VerifiedFactRecord[] }): Promise<TurnResult> {
+    const { userText, traceId, emit, behaviorContext, evidence, resolvedReferences, pendingReference, referenceCandidates } = context;
+    if (!(evidence.semanticIntent === 'unknown' && evidence.reasonCode !== 'reference_unresolved' && (behaviorContext.factHistory?.records.length ?? 0) > 0) && !(behaviorContext.pending.status === 'required' && behaviorContext.pending.options?.some((option) => option.key === userText.trim()) === true)) await this.context.markUnresolved(evidence.reasonCode, pendingReference);
     const currentBehaviorContext = this.context.currentBehaviorContext();
-    const reply = await trackModelResponseLimit(() => this.context.fallbackReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: currentBehaviorContext, recentMessages: this.context.recentMessages, functionDescriptors: this.context.functionDescriptors, reasonCode: evidence.reasonCode, ...(resolvedReferences === undefined ? {} : { resolvedReferences }) }, (delta) => emit({ type: 'delta', text: delta }))).catch((error: unknown) => {
+    const reply = await trackModelResponseLimit(() => this.context.fallbackReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: currentBehaviorContext, recentMessages: this.context.recentMessages, functionDescriptors: this.context.functionDescriptors, reasonCode: evidence.reasonCode, ...(resolvedReferences === undefined ? {} : { resolvedReferences }), ...(referenceCandidates === undefined ? {} : { referenceCandidates }) }, (delta) => emit({ type: 'delta', text: delta }))).catch((error: unknown) => {
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
     });

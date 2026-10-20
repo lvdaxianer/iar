@@ -97,6 +97,7 @@ test('历史关系使用不透明记录并与动态能力和最近消息同时�
     behaviorContext: context,
     recentMessages: [{ role: 'user', text: '上一条原文' }],
     resolvedReferences: [{ text: '上一个', record: context.factHistory.records[0] }],
+    referenceCandidates: [context.factHistory.records[0]],
     functionDescriptors: [{ candidateKey: 'candidate-dynamic', functionId: 'function.dynamic', pluginId: 'plugin.dynamic', description: '动态能力', actionTypes: ['query'] }]
   };
   const semantic = buildSemanticUserPrompt(input);
@@ -108,6 +109,8 @@ test('历史关系使用不透明记录并与动态能力和最近消息同时�
     assert.match(prompt, /上一条原文/);
     assert.match(prompt, /candidate-dynamic/);
   }
+  assert.match(response, /运行时保留的历史引用候选/);
+  assert.match(fallback, /运行时保留的历史引用候选/);
   assert.match(SEMANTIC_SYSTEM_PROMPT, /iar\.semantic-frame\/v2/);
   assert.match(SEMANTIC_SYSTEM_PROMPT, /previous/);
   assert.doesNotMatch(SEMANTIC_SYSTEM_PROMPT, /resolvedTo/);

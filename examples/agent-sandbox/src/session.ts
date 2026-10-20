@@ -9,7 +9,7 @@ import { resolveSandboxTraceId } from './safe-log.js';
 import { SandboxSessionStreamTurn } from './session-stream-turn.js';
 import { SandboxSessionReplies } from './session-replies.js';
 import { SandboxSessionRouting } from './session-routing.js';
-import { DEFAULT_UNRESOLVED_STREAK_THRESHOLD, MAX_UNRESOLVED_STREAK, type ActionDefinition, type ActionResult, type BehaviorContext } from '@iar/contracts';
+import { DEFAULT_UNRESOLVED_STREAK_THRESHOLD, MAX_UNRESOLVED_STREAK, type ActionDefinition, type ActionResult, type BehaviorContext, type PendingReference, type VerifiedFactRecord } from '@iar/contracts';
 import type { PluginDescriptor } from '@iar/plugin-host';
 import { confirmationScopeHash } from '@iar/workflow';
 import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
@@ -17,7 +17,6 @@ import { buildEvidence, summarizeAction } from './session-helpers.js';
 import { createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
 import type { CompactResult, ConfirmResult, ExecuteTurnOutcome, ExtractFrameOutcome, RouteEvidence, StreamEvent, TurnResult } from './session-types.js';
 export type { CompactResult, ConfirmResult, PendingActionSummary, RouteEvidence, SandboxDecisionBackend, SandboxMode, SandboxState, StreamEvent, TurnResult, TurnStage } from './session-types.js';
-
 /** 公开会话对话和确认入口。
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
@@ -51,7 +50,6 @@ export class IarSandboxSession extends SandboxSessionCore {
       drainWorkflowEvents: () => session.drainWorkflowEvents()
     });
   }
-
   /** 创建回复组件，访问器避免重置后引用旧的会话状态。
    * @returns 使用当前会话依赖的回复组件
    * @author lvdaxianer@yeah.net
@@ -161,15 +159,17 @@ export class IarSandboxSession extends SandboxSessionCore {
   protected async routeNormalTurn(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }>; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
     const { userText, traceId, behaviorContext, extracted, selectedDescriptor } = context;
     const references = this.routing.resolveReferences(extracted.frame, behaviorContext);
-    if (!references.ok) return this.finishNormalFallback({ userText, traceId, behaviorContext, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: extracted.frame.intent, semanticConfidence: extracted.frame.confidence } });
-    const route = await this.routing.routeFrame(traceId, SESSION_RUN_ID, extracted.frame, behaviorContext, userText, this.recentMessages, selectedDescriptor);
+    if (!references.ok) return this.finishNormalFallback({ userText, traceId, behaviorContext, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: extracted.frame.intent, semanticConfidence: extracted.frame.confidence }, ...(references.pendingReference === undefined ? {} : { pendingReference: references.pendingReference }), ...(references.candidates === undefined ? {} : { referenceCandidates: references.candidates }) });
+    if (behaviorContext.pendingReference !== undefined) await this.resetClarification();
+    const routeContext = this.projector.current();
+    const route = await this.routing.routeFrame(traceId, SESSION_RUN_ID, extracted.frame, routeContext, userText, this.recentMessages, selectedDescriptor);
     const evidence = buildEvidence(route, extracted.frame);
     // 抽取降级须保留在返回的路由证据中。
     if (extracted.semanticFallback) evidence.semanticFallback = true;
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
-      return this.finishNormalFallback({ userText, traceId, behaviorContext, evidence, resolvedReferences: references.references });
+      return this.finishNormalFallback({ userText, traceId, behaviorContext: routeContext, evidence, resolvedReferences: references.references });
     }
-    const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame: extracted.frame, route, behaviorContext });
+    const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame: extracted.frame, route, behaviorContext: routeContext });
     return this.finishNormalOutcome({ userText, traceId, evidence, outcome });
   }
   /**
@@ -180,12 +180,12 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected async finishNormalFallback(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; evidence: RouteEvidence; resolvedReferences?: import('./session-types.js').ResolvedFactReference[] }): Promise<TurnResult> {
-    const { userText, traceId, behaviorContext, evidence, resolvedReferences } = context;
-    if (!hasVerifiedFactsForFollowUp(behaviorContext, evidence) && !matchesPendingOption(behaviorContext, userText)) await this.markUnresolved(evidence.reasonCode);
+  protected async finishNormalFallback(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; evidence: RouteEvidence; resolvedReferences?: import('./session-types.js').ResolvedFactReference[]; pendingReference?: PendingReference; referenceCandidates?: VerifiedFactRecord[] }): Promise<TurnResult> {
+    const { userText, traceId, behaviorContext, evidence, resolvedReferences, pendingReference, referenceCandidates } = context;
+    if (!hasVerifiedFactsForFollowUp(behaviorContext, evidence) && !matchesPendingOption(behaviorContext, userText)) await this.markUnresolved(evidence.reasonCode, pendingReference);
     const currentBehaviorContext = this.projector.current();
     // 未命中功能时只允许生成澄清回复，不能在兜底阶段隐式执行插件。
-    const reply = await trackModelResponseLimit(() => this.replies.fallbackReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: currentBehaviorContext, recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), reasonCode: evidence.reasonCode, ...(resolvedReferences === undefined ? {} : { resolvedReferences }) })).catch((error: unknown) => {
+    const reply = await trackModelResponseLimit(() => this.replies.fallbackReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: currentBehaviorContext, recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), reasonCode: evidence.reasonCode, ...(resolvedReferences === undefined ? {} : { resolvedReferences }), ...(referenceCandidates === undefined ? {} : { referenceCandidates }) })).catch((error: unknown) => {
       // 非超限错误必须继续向调用方传播。
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
@@ -239,21 +239,21 @@ export class IarSandboxSession extends SandboxSessionCore {
   }
 
   /** 累加未解决状态，达到阈值时将当前授权候选转换为动态选择。 */
-  public async markUnresolved(reasonCode: string): Promise<void> {
+  public async markUnresolved(reasonCode: string, pendingReference?: PendingReference): Promise<void> {
     const current = this.projector.current();
     const streak = Math.min(MAX_UNRESOLVED_STREAK, (current.clarification?.unresolvedStreak ?? 0) + 1);
     const descriptors = this.pluginHost.descriptors();
     if (streak >= DEFAULT_UNRESOLVED_STREAK_THRESHOLD && descriptors.length > 0) {
       const selection = createSelectionState(descriptors, streak, reasonCode);
-      await this.updateClarificationState(selection.state, { kind: 'selection', status: 'required', options: selection.options });
+      await this.updateClarificationState(selection.state, { kind: 'selection', status: 'required', options: selection.options }, null);
       return;
     }
-    await this.updateClarificationState({ mode: 'unresolved', unresolvedStreak: streak, reasonCode }, current.pending);
+    await this.updateClarificationState({ mode: 'unresolved', unresolvedStreak: streak, reasonCode }, current.pending, pendingReference ?? null);
   }
 
   /** 成功进入确认或执行阶段后清除旧的 unresolved 状态。 */
   public async resetClarification(): Promise<void> {
-    await this.updateClarificationState({ mode: 'none', unresolvedStreak: 0 }, { kind: 'input', status: 'none' });
+    await this.updateClarificationState({ mode: 'none', unresolvedStreak: 0 }, { kind: 'input', status: 'none' }, null);
   }
 
   /** 解析待选择的候选键，只接受当前启用且授权的候选快照。 */
