@@ -7,6 +7,16 @@
 import { Type } from '@sinclair/typebox';
 import { ActionTypeSchema, JsonValueSchema } from './schema-primitives.js';
 import { MAX_ROUTING_SCOPE_PLUGINS, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN } from './types-base.js';
+import {
+  MAX_CANDIDATE_KEY_LENGTH,
+  MAX_CANDIDATE_VERSION_LENGTH,
+  MAX_CLARIFICATION_LABEL_LENGTH,
+  MAX_CLARIFICATION_OPTIONS,
+  MAX_CLARIFICATION_REASON_LENGTH,
+  MAX_RECENT_MESSAGE_CHARS,
+  MAX_RECENT_MESSAGE_LIMIT,
+  MAX_UNRESOLVED_STREAK
+} from './types-state.js';
 import { SCHEMA_VERSIONS } from './versions.js';
 
 /** BehaviorContext 摘要文本的统一长度边界。 */
@@ -100,9 +110,35 @@ export const PendingInputSchema = Type.Object({
   status: Type.Union([Type.Literal('required'), Type.Literal('received'), Type.Literal('none')]),
   // options 只保存有限的展示键和值，不包含可执行动作。
   options: Type.Optional(Type.Array(Type.Object({
-    key: Type.String({ minLength: 1, maxLength: 60 }),
-    label: Type.String({ minLength: 1, maxLength: 200 })
-  }, { additionalProperties: false }), { maxItems: 12, uniqueItems: true }))
+    key: Type.String({ minLength: 1, maxLength: MAX_CANDIDATE_KEY_LENGTH }),
+    label: Type.String({ minLength: 1, maxLength: MAX_CLARIFICATION_LABEL_LENGTH })
+  }, { additionalProperties: false }), { maxItems: MAX_CLARIFICATION_OPTIONS, uniqueItems: true }))
+}, { additionalProperties: false });
+
+/** 最近消息窗口策略 Schema，只保存边界而不保存原文。 */
+export const RecentMessagePolicySchema = Type.Object({
+  // recentMessageLimit 限制模型可观察的历史消息数量。
+  recentMessageLimit: Type.Integer({ minimum: 1, maximum: MAX_RECENT_MESSAGE_LIMIT }),
+  // maxMessageChars 限制单条历史消息进入模型前的长度。
+  maxMessageChars: Type.Integer({ minimum: 1, maximum: MAX_RECENT_MESSAGE_CHARS })
+}, { additionalProperties: false });
+
+/** 连续未解决和动态候选选择的持久化状态 Schema。 */
+export const ClarificationStateSchema = Type.Object({
+  // mode 只表示澄清生命周期，不授予任何执行权限。
+  mode: Type.Union([
+    Type.Literal('none'),
+    Type.Literal('unresolved'),
+    Type.Literal('selection')
+  ]),
+  // unresolvedStreak 受界限保护，避免异常状态无限增长。
+  unresolvedStreak: Type.Integer({ minimum: 0, maximum: MAX_UNRESOLVED_STREAK }),
+  // reasonCode 记录稳定原因，不保存模型自由文本。
+  reasonCode: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_CLARIFICATION_REASON_LENGTH })),
+  // candidateVersion 用于检测候选注册表变更。
+  candidateVersion: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_CANDIDATE_VERSION_LENGTH })),
+  // candidateKeys 是当前候选集合中的不透明键。
+  candidateKeys: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: MAX_CANDIDATE_KEY_LENGTH }), { maxItems: MAX_CLARIFICATION_OPTIONS, uniqueItems: true }))
 }, { additionalProperties: false });
 
 /** BehaviorContext 的确认状态和绑定范围。 */
@@ -185,6 +221,10 @@ export const BehaviorContextSchema = Type.Object({
   workflow: BehaviorWorkflowSchema,
   // pending 记录当前等待的用户输入。
   pending: PendingInputSchema,
+  // recentMessagePolicy 只保存消息窗口策略，不复制原始消息。
+  recentMessagePolicy: Type.Optional(RecentMessagePolicySchema),
+  // clarification 保存可恢复的通用澄清状态。
+  clarification: Type.Optional(ClarificationStateSchema),
   // confirmation 记录确认范围和状态。
   confirmation: ConfirmationStateSchema,
   // facts 只保存成功输出中的有限、可追溯事实。

@@ -6,6 +6,7 @@
  */
 import type { TSchema } from '@sinclair/typebox';
 import { CompactionReferenceSchema, CompactionResultSchema } from './schema-compaction.js';
+import { ClarificationStateSchema, RecentMessagePolicySchema } from './schema-context.js';
 import {
   // Action 请求 Schema。
   ActionDefinitionSchema,
@@ -135,6 +136,8 @@ export {
   EventEnvelopeSchema,
   EventNameSchema,
   PendingInputSchema,
+  RecentMessagePolicySchema,
+  ClarificationStateSchema,
   SlotValueSchema,
   SubjectReferenceSchema
 };

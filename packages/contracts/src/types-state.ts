@@ -7,6 +7,24 @@
 import type { ActionType, JsonValue, RiskLevel } from './types-base.js';
 import type { WorkflowStatus } from './types-routing.js';
 
+/** 最近消息窗口允许的最大消息数量。 */
+export const MAX_RECENT_MESSAGE_LIMIT = 20;
+
+/** 最近消息窗口允许的单条消息最大字符数。 */
+export const MAX_RECENT_MESSAGE_CHARS = 2000;
+
+/** 待选择候选和展示选项允许的最大数量。 */
+export const MAX_CLARIFICATION_OPTIONS = 12;
+
+/** 连续未解决状态允许保存的最大次数。 */
+export const MAX_UNRESOLVED_STREAK = 8;
+
+/** 澄清原因和候选版本的长度边界。 */
+export const MAX_CLARIFICATION_REASON_LENGTH = 120;
+export const MAX_CANDIDATE_VERSION_LENGTH = 200;
+export const MAX_CANDIDATE_KEY_LENGTH = 60;
+export const MAX_CLARIFICATION_LABEL_LENGTH = 200;
+
 /** 待执行的副作用 Action。 */
 export type ActionDefinition = {
   // Action Schema 版本用于结果解析。
@@ -130,6 +148,28 @@ export type PendingInput = {
   options?: Array<{ key: string; label: string }>;
 };
 
+/** 最近消息窗口的有界策略，不保存消息原文。 */
+export type RecentMessagePolicy = {
+  /** 模型最多接收的最近消息数量。 */
+  recentMessageLimit: number;
+  /** 单条消息允许进入模型窗口的最大字符数。 */
+  maxMessageChars: number;
+};
+
+/** 可随快照恢复的通用澄清状态。 */
+export type ClarificationState = {
+  /** 当前澄清模式，不代表任何执行授权。 */
+  mode: 'none' | 'unresolved' | 'selection';
+  /** 连续未解决次数，用于受控升级。 */
+  unresolvedStreak: number;
+  /** 最近一次稳定的未解决原因。 */
+  reasonCode?: string;
+  /** 产生候选键的注册表版本。 */
+  candidateVersion?: string;
+  /** 当前候选集合中的不透明键。 */
+  candidateKeys?: string[];
+};
+
 /** 高风险动作的确认状态及绑定范围。 */
 export type ConfirmationState = {
   // state 是动作确认的唯一来源。
@@ -189,6 +229,10 @@ export type BehaviorContext = {
   workflow: BehaviorWorkflow;
   // pending 记录当前等待的用户输入。
   pending: PendingInput;
+  // recentMessagePolicy 只保存窗口策略，不复制原始消息。
+  recentMessagePolicy?: RecentMessagePolicy;
+  // clarification 保存连续未解决和待选择候选的结构化状态。
+  clarification?: ClarificationState;
   // confirmation 记录确认范围和状态。
   confirmation: ConfirmationState;
   // facts 只保存成功输出中的有限、可追溯事实。

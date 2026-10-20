@@ -3,7 +3,7 @@
 ## 1. Contracts and Provider SPI
 
 - [x] 1.1 Add failing contract tests for bounded recent-message input, backward-compatible clarification state, and invalid oversized or malformed selection data in `tests/contract/contracts.test.ts`; verify the focused contract command fails for the new cases before implementation.
-- [ ] 1.2 Add the generic recent-message policy and persisted unresolved/selection state to `packages/contracts/src/types-state.ts` and `packages/contracts/src/schema-context.ts`; keep old snapshots valid through optional fields and verify `npm test -- --test-name-pattern='contract|behaviorContext'` passes after the implementation.
+- [x] 1.2 Add the generic recent-message policy and persisted unresolved/selection state to `packages/contracts/src/types-state.ts` and `packages/contracts/src/schema-context.ts`; keep old snapshots valid through optional fields and verify `npm test -- --test-name-pattern='contract|behaviorContext'` passes after the implementation.
 - [ ] 1.3 Extend `packages/persistence-spi/src/types.ts` with a bounded ordered recent-message read and update every test/dummy Provider implementation; verify `tests/contract/persistence-provider.test.ts`, `tests/integration/persistence-provider.test.ts`, and TypeScript build pass.
 
 ## 2. SQLite Message Window and Session Recovery

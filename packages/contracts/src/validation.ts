@@ -146,7 +146,7 @@ function validateValidatedContract(name: ContractName, input: unknown): Validati
   if (issues.length > 0) return { ok: false, error: validationError(issues, ERROR_CODES.INVALID_EMBEDDED_SCHEMA) };
   const eventIssues = name === 'event' ? validateEventPayload(input) : [];
   if (eventIssues.length > 0) return { ok: false, error: validationError(eventIssues) };
-  const relationIssues = name === 'pluginManifest' ? validatePluginManifestRelations(input) : [];
+  const relationIssues = validateRelationIssues(name, input);
   // 跨字段关系失败时拒绝 Manifest，但保留字段级诊断。
   if (relationIssues.length > 0) return { ok: false, error: validationError(relationIssues) };
   return { ok: true, value: input };
@@ -158,6 +158,22 @@ function validateEventPayload(input: unknown): ContractIssue[] {
   const validator = eventPayloadValidators[input.eventName as keyof typeof eventPayloadValidators];
   if (!validator || validator(input.payload)) return [];
   return toIssues(validator.errors);
+}
+
+/** 按契约类型校验需要跨字段判断的结构化关系。 */
+function validateRelationIssues(name: ContractName, input: unknown): ContractIssue[] {
+  if (name === 'pluginManifest') return validatePluginManifestRelations(input);
+  if (name === 'behaviorContext') return validateBehaviorContextRelations(input);
+  return [];
+}
+
+/** 拒绝 pending 选项中复用同一不透明键的歧义数据。 */
+function validateBehaviorContextRelations(input: unknown): ContractIssue[] {
+  if (!isRecord(input) || !isRecord(input.pending) || !Array.isArray(input.pending.options)) return [];
+  const keys = input.pending.options.map((option) => isRecord(option) && typeof option.key === 'string' ? option.key : undefined);
+  const validKeys = keys.filter((key): key is string => key !== undefined);
+  if (new Set(validKeys).size === validKeys.length) return [];
+  return [{ path: '/pending/options', keyword: 'uniqueKeys', message: '澄清选项键必须唯一' }];
 }
 
 /**
