@@ -113,6 +113,67 @@ test('SQLite Provider reads a bounded latest-message window from the existing me
   }
 });
 
+test('SQLite Provider lists paged session summaries without exposing messages', async () => {
+  const provider = await new PersistenceProviderLoader(
+    new PersistenceProviderRegistry([sqlitePersistenceProviderModule])
+  ).load({ provider: 'sqlite', options: { filename: ':memory:' } });
+  const listSessions = (query?: unknown) => (provider as unknown as { listSessions: (input?: unknown) => Promise<{ sessions: Array<{ sessionId: string; summary?: string }>; nextCursor?: string }> }).listSessions(query);
+  const sessionA: SessionIdentity = { sessionId: 'session-summary-a', runId: 'run-a' };
+  const sessionB: SessionIdentity = { sessionId: 'session-summary-b', runId: 'run-b' };
+  const sessionC: SessionIdentity = { sessionId: 'session-summary-c', runId: 'run-c' };
+  try {
+    await provider.appendMessage(sessionA, { messageId: 'summary-a-message', role: 'user', content: '首条会话消息 A', occurredAt: '2026-10-20T00:00:00.000Z' });
+    await provider.saveSnapshot(sessionA, { ...snapshot, sessionId: sessionA.sessionId, runId: sessionA.runId, eventId: 'summary-a-event', context: { ...snapshot.context, summary: { text: '结构化摘要 A', version: 'v1', eventId: 'summary-a-event' } } });
+    await provider.appendMessage(sessionB, { messageId: 'summary-b-message', role: 'assistant', content: '首条助手消息 B', occurredAt: '2026-10-20T00:01:00.000Z' });
+    await provider.appendMessage(sessionB, { messageId: 'summary-b-user', role: 'user', content: '首条用户消息 B', occurredAt: '2026-10-20T00:02:00.000Z' });
+    await provider.appendEvent(sessionC, { ...event, eventId: 'summary-c-event', runId: sessionC.runId });
+    await provider.flush();
+
+    const first = await listSessions({ limit: 2 });
+    assert.equal(first.sessions.length, 2);
+    assert.equal(first.sessions.some((item) => 'lastMessage' in item), false);
+    assert.equal(typeof first.nextCursor, 'string');
+
+    const second = await listSessions({ limit: 2, cursor: first.nextCursor });
+    const sessions = [...first.sessions, ...second.sessions];
+    assert.deepEqual(sessions.find((item) => item.sessionId === sessionA.sessionId), { sessionId: sessionA.sessionId, summary: '结构化摘要 A' });
+    assert.deepEqual(sessions.find((item) => item.sessionId === sessionB.sessionId), { sessionId: sessionB.sessionId, summary: '首条用户消息 B' });
+    assert.deepEqual(sessions.find((item) => item.sessionId === sessionC.sessionId), { sessionId: sessionC.sessionId });
+    assert.equal(second.nextCursor, undefined);
+    await assert.rejects(
+      listSessions({ limit: 0 }),
+      (error: unknown) => error instanceof SqlitePersistenceError && error.code === 'session_list_query_invalid'
+    );
+    await assert.rejects(
+      listSessions({ limit: 1, cursor: 'malformed-cursor' }),
+      (error: unknown) => error instanceof SqlitePersistenceError && error.code === 'session_list_query_invalid'
+    );
+  } finally {
+    await provider.close();
+  }
+});
+
+test('SQLite Provider preserves session summaries across restart', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'iar-session-summary-'));
+  const filename = join(directory, 'session.sqlite');
+  const sessionId = 'session-summary-restart';
+  try {
+    const first = await new PersistenceProviderLoader(new PersistenceProviderRegistry([sqlitePersistenceProviderModule])).load({ provider: 'sqlite', options: { filename } });
+    await first.appendMessage({ sessionId, runId: 'run-summary-restart' }, { messageId: 'summary-restart-message', role: 'user', content: '重启后仍可见的会话摘要', occurredAt: '2026-10-20T00:03:00.000Z' });
+    await first.close();
+
+    const second = await new PersistenceProviderLoader(new PersistenceProviderRegistry([sqlitePersistenceProviderModule])).load({ provider: 'sqlite', options: { filename } });
+    try {
+      const page = await (second as unknown as { listSessions: (input?: unknown) => Promise<{ sessions: Array<{ sessionId: string; summary?: string }> }> }).listSessions({ limit: 10 });
+      assert.deepEqual(page.sessions, [{ sessionId, summary: '重启后仍可见的会话摘要' }]);
+    } finally {
+      await second.close();
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('SQLite Provider makes duplicate message and event writes idempotent', async () => {
   const provider = await new PersistenceProviderLoader(
     new PersistenceProviderRegistry([sqlitePersistenceProviderModule])

@@ -1,5 +1,7 @@
 /** 注册页面及独立会话的创建、删除生命周期入口。 */
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyRequest } from 'fastify';
+import { validateSessionListQuery, type SessionListQuery } from '@iar/persistence-spi';
 import { SandboxSessionManager, SessionError } from './session-manager.js';
 import type { RunOperation } from './http-reservation.js';
 import { readSessionId } from './http-reservation.js';
@@ -21,6 +23,7 @@ import { readSessionId } from './http-reservation.js';
 export function registerSessionLifecycleRoutes(app: FastifyInstance, options: { manager: SandboxSessionManager; run: RunOperation; indexHtml: string }): void {
   const { manager, run, indexHtml } = options;
   app.get('/', async (_request, reply) => { void reply.type('text/html; charset=utf-8'); return indexHtml; });
+  app.get('/api/sessions', async (request, reply) => handleError(reply, async () => reply.send(await manager.listSessions(readSessionListQuery(request)))));
   app.post('/api/sessions', async (_request, reply) => handleError(reply, async () => reply.code(201).send({ sessionId: manager.create() })));
   app.post('/api/sessions/:sessionId/resume', async (request, reply) => handleError(reply, async () => {
     await manager.restore(readSessionId(request)!);
@@ -30,6 +33,21 @@ export function registerSessionLifecycleRoutes(app: FastifyInstance, options: { 
     await run(request, 'delete', async (session) => { manager.removeReserved(readSessionId(request)!, session); });
     return reply.code(204).send();
   }));
+}
+
+/** 将 HTTP 查询字符串转换为经过 SPI 边界校验的分页参数。 */
+function readSessionListQuery(request: FastifyRequest): SessionListQuery {
+  const query = request.query;
+  if (typeof query !== 'object' || query === null || Array.isArray(query)) throw new SessionError(400, 'invalid_session_list_query');
+  const values = query as Record<string, unknown>;
+  const limit = values.limit === undefined ? undefined : typeof values.limit === 'string' && /^\d+$/.test(values.limit) ? Number(values.limit) : NaN;
+  if (values.cursor !== undefined && typeof values.cursor !== 'string') throw new SessionError(400, 'invalid_session_list_query');
+  const cursor = values.cursor as string | undefined;
+  try {
+    return validateSessionListQuery({ ...(limit === undefined ? {} : { limit }), ...(cursor === undefined ? {} : { cursor }) });
+  } catch {
+    throw new SessionError(400, 'invalid_session_list_query');
+  }
 }
 
 /**

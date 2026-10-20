@@ -11,6 +11,8 @@ import type { EventEnvelope } from '@iar/contracts';
 import type {
   PersistenceProviderManifest,
   RecentMessageQuery,
+  SessionListPage,
+  SessionListQuery,
   SessionIdentity,
   SessionMessage,
   SessionPersistenceProvider,
@@ -59,6 +61,10 @@ class RecordingProvider implements SessionPersistenceProvider {
 
   public async listMessages(_sessionId: string, _query?: RecentMessageQuery): Promise<SessionMessage[]> {
     return structuredClone(this.messages);
+  }
+
+  public async listSessions(_query?: SessionListQuery): Promise<SessionListPage> {
+    return { sessions: [] };
   }
 
   public async flush(): Promise<void> {}

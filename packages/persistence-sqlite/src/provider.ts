@@ -12,6 +12,7 @@ import {
   PersistenceValidationError,
   validateSessionIdentity,
   validateRecentMessageQuery,
+  validateSessionListQuery,
   type PersistenceProviderFactory,
   type PersistenceProviderManifest,
   type PersistenceProviderModule,
@@ -19,6 +20,8 @@ import {
   type RecentMessageQuery,
   type SessionIdentity,
   type SessionMessage,
+  type SessionListPage,
+  type SessionListQuery,
   type SessionPersistenceProvider,
   type SessionSnapshotRecord
 } from '@iar/persistence-spi';
@@ -35,7 +38,7 @@ export type SqlitePersistenceOptions = {
 export class SqlitePersistenceError extends Error {
   /** @param code - 稳定错误码 @param message - 不包含数据库路径和敏感内容的诊断信息 */
   public constructor(
-    public readonly code: 'provider_not_open' | 'provider_closed' | 'provider_queue_full' | 'provider_worker_failed' | 'provider_config_invalid' | 'message_invalid' | 'message_query_invalid' | 'event_invalid' | 'snapshot_invalid' | 'message_id_conflict' | 'event_id_conflict' | 'snapshot_revision_conflict' | 'sqlite_failure',
+    public readonly code: 'provider_not_open' | 'provider_closed' | 'provider_queue_full' | 'provider_worker_failed' | 'provider_config_invalid' | 'message_invalid' | 'message_query_invalid' | 'session_list_query_invalid' | 'event_invalid' | 'snapshot_invalid' | 'message_id_conflict' | 'event_id_conflict' | 'snapshot_revision_conflict' | 'sqlite_failure',
     message: string
   ) {
     super(message);
@@ -128,6 +131,12 @@ export class SqlitePersistenceProvider implements SessionPersistenceProvider {
     validateSessionId(sessionId);
     const validatedQuery = normalizeMessageQuery(query);
     return await this.enqueue({ type: 'list_messages', sessionId, ...(validatedQuery === undefined ? {} : { limit: validatedQuery.limit }) }) as SessionMessage[];
+  }
+
+  /** 读取有界、按活动顺序分页的会话摘要。 */
+  public async listSessions(query?: SessionListQuery): Promise<SessionListPage> {
+    const validatedQuery = normalizeSessionListQuery(query);
+    return await this.enqueue({ type: 'list_sessions', ...validatedQuery }) as SessionListPage;
   }
 
   /** 等待所有已接受请求在 Worker 中处理完成。 */
@@ -238,6 +247,16 @@ function normalizeMessageQuery(query: RecentMessageQuery | undefined): RecentMes
   }
 }
 
+/** 校验并复制会话摘要分页参数，转换为 SQLite Provider 的稳定错误。 */
+function normalizeSessionListQuery(query: SessionListQuery | undefined): Required<Pick<SessionListQuery, 'limit'>> & Pick<SessionListQuery, 'cursor'> {
+  try {
+    return validateSessionListQuery(query);
+  } catch (error) {
+    if (error instanceof PersistenceValidationError) throw new SqlitePersistenceError('session_list_query_invalid', '会话摘要查询参数无效');
+    throw error;
+  }
+}
+
 /** 判断 Provider 配置是否为对象。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -245,6 +264,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** 将 Worker 返回的错误码收敛到 Provider 公开错误集合。 */
 function mapWorkerCode(code: string): SqlitePersistenceError['code'] {
-  if (code === 'message_id_conflict' || code === 'event_id_conflict' || code === 'snapshot_revision_conflict') return code;
+  if (code === 'message_id_conflict' || code === 'event_id_conflict' || code === 'snapshot_revision_conflict' || code === 'session_list_query_invalid') return code;
   return 'sqlite_failure';
 }

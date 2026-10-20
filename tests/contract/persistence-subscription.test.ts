@@ -12,7 +12,7 @@ import {
   PersistenceSubscriptionBridge,
   type PersistenceSubscriptionProvider
 } from '@iar/persistence-runtime';
-import type { PersistenceProviderManifest, RecentMessageQuery, SessionMessage, SessionSnapshotRecord } from '@iar/persistence-spi';
+import type { PersistenceProviderManifest, RecentMessageQuery, SessionListPage, SessionListQuery, SessionMessage, SessionSnapshotRecord } from '@iar/persistence-spi';
 
 const manifest: PersistenceProviderManifest = { providerId: 'test-memory', apiVersion: 'iar.persistence/v1', capabilities: ['messages', 'events', 'snapshots'] };
 const context: BehaviorContext = {
@@ -49,6 +49,7 @@ class RecordingProvider implements PersistenceSubscriptionProvider {
   public async loadSnapshot(): Promise<SessionSnapshotRecord | undefined> { return undefined; }
   public async listEvents(): Promise<EventEnvelope[]> { return []; }
   public async listMessages(_sessionId: string, _query?: RecentMessageQuery): Promise<SessionMessage[]> { return []; }
+  public async listSessions(_query?: SessionListQuery): Promise<SessionListPage> { return { sessions: [] }; }
   public async flush(): Promise<void> {}
   public async close(): Promise<void> {}
 }

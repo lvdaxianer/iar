@@ -2,9 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   MAX_RECENT_MESSAGE_QUERY_LIMIT,
+  DEFAULT_SESSION_LIST_LIMIT,
+  MAX_SESSION_LIST_LIMIT,
   PERSISTENCE_API_VERSION,
   PersistenceValidationError,
   validateRecentMessageQuery,
+  validateSessionListQuery,
   validatePersistenceProviderManifest,
   validateSessionIdentity,
   type PersistenceProviderManifest,
@@ -61,5 +64,22 @@ test('validates bounded recent-message query options', () => {
   assert.throws(
     () => validateRecentMessageQuery({ limit: 1.5 }),
     (error: unknown) => error instanceof PersistenceValidationError && error.code === 'recent_message_query_invalid'
+  );
+});
+
+test('validates bounded session-summary pagination options', () => {
+  assert.deepEqual(validateSessionListQuery(undefined), { limit: DEFAULT_SESSION_LIST_LIMIT });
+  assert.deepEqual(validateSessionListQuery({ limit: MAX_SESSION_LIST_LIMIT, cursor: 'opaque-cursor' }), { limit: MAX_SESSION_LIST_LIMIT, cursor: 'opaque-cursor' });
+  assert.throws(
+    () => validateSessionListQuery({ limit: 0 }),
+    (error: unknown) => error instanceof PersistenceValidationError && error.code === 'session_list_query_invalid'
+  );
+  assert.throws(
+    () => validateSessionListQuery({ limit: MAX_SESSION_LIST_LIMIT + 1 }),
+    (error: unknown) => error instanceof PersistenceValidationError && error.code === 'session_list_query_invalid'
+  );
+  assert.throws(
+    () => validateSessionListQuery({ limit: 1, cursor: '' }),
+    (error: unknown) => error instanceof PersistenceValidationError && error.code === 'session_list_query_invalid'
   );
 });

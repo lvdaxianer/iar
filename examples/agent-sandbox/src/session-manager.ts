@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { AsyncResource } from 'node:async_hooks';
 import { IarSandboxSession, type SandboxMode } from './session.js';
 import type { SnapshotStore } from '@iar/storage';
-import type { SessionPersistenceProvider } from '@iar/persistence-spi';
+import type { SessionListPage, SessionListQuery, SessionPersistenceProvider } from '@iar/persistence-spi';
 
 /** 会话管理可配置上限；包含正在执行的请求。 */
 /** 每个节点单独记录开始和取消状态，避免重复释放容量。 */
@@ -78,6 +78,12 @@ export class SandboxSessionManager {
     const operation = this.restoreEntry(id);
     this.restoring.set(id, operation);
     try { await operation; } finally { this.restoring.delete(id); }
+  }
+
+  /** 查询持久化会话的轻量摘要；无 Provider 时保持内存模式兼容并返回空页。 */
+  public async listSessions(query?: SessionListQuery): Promise<SessionListPage> {
+    if (!this.persistenceProvider) return { sessions: [] };
+    return this.persistenceProvider.listSessions(query);
   }
 
   /** 读取快照并等待新会话完成恢复，失败时不把半初始化条目放入索引。 */
