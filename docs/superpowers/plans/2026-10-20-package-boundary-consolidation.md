@@ -73,6 +73,16 @@
   git commit -m "docs(architecture): record package boundary baseline"
   ```
 
+- [ ] **Step 5: Add the target package boundary smoke test and verify RED.**
+
+  Add `tests/contract/package-boundaries.test.ts` importing the former public ABI, plugin, persistence, distribution, and system-plugin symbols from their target package roots. Run:
+
+  ```bash
+  npm run build
+  ```
+
+  Expected: FAIL because `@iar/plugins` does not exist yet and the other target entries do not export all former symbols. The failure must be a missing target package/export diagnostic, not a syntax or test setup error.
+
 ### Task 2: Merge ABI into contracts
 
 **Files:**
