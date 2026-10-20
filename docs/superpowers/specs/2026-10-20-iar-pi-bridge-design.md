@@ -39,7 +39,7 @@ Pi 扩展在 `session_start` 取得 Pi session ID，调用 bridge open；IAR 端
 
 ### 4. 用 disposition 驱动 Pi `input` 结果
 
-扩展忽略 `source=extension`，避免 `sendMessage` 等展示行为再次触发桥接。`pass_through` 返回 Pi `continue`；其它 disposition 使用 custom message 展示 IAR 回复并返回 `handled`。IAR 不可用时也返回 `handled`，避免业务文本落入 Pi 的 shell/tool 路径。确认与取消通过 `/iar-confirm`、`/iar-cancel` 命令和明确的中文快捷输入直接调用 IAR。
+扩展忽略 `source=extension`，避免扩展行为再次触发桥接。`pass_through` 返回 Pi `continue`；其它 disposition 使用 display-only custom entry 展示 IAR 回复并返回 `handled`，该 entry 不进入 Pi 后续 LLM context。IAR 不可用时也返回 `handled`，避免业务文本落入 Pi 的 shell/tool 路径。确认与取消通过 `/iar-confirm`、`/iar-cancel` 命令和明确的中文快捷输入直接调用 IAR。
 
 ### 5. Bridge client 保持 Pi 依赖可选
 
@@ -52,9 +52,9 @@ Bridge 路由复用 Sandbox 的请求审计和会话预约；session key、消�
 ## Risks / Trade-offs
 
 - [IAR 进程重启后内存映射丢失] → Bridge API 接受显式 `iarSessionId` 恢复路径；IAR 已有 Provider/快照恢复能力，后续可把映射目录接入同一 Provider。
-- [Pi custom message 进入 Pi 会话上下文] → custom message 只承载 IAR 的公开 reply 和 disposition，不承载事实、Action input、token 或完整事件；IAR 仍是业务状态权威。
+- [Pi 展示内容进入 Pi 会话上下文] → 使用 `appendEntry` 和 `registerEntryRenderer` 写入 display-only custom entry；entry 只承载受限后的公开 reply 和 disposition，不承载事实、Action input、token 或完整事件。
 - [Bridge 不可用时普通 Pi 输入被阻断] → 默认安全优先并提供配置项切换为显式 `continue`，由部署方自行承担降级风险；默认值保持 fail-closed。
-- [Pi 扩展 API 未来变化] → 只使用 `input`、生命周期、命令、`sendMessage`、`appendEntry`/UI 的最小能力，并通过结构化适配类型和集成测试锁定兼容面。
+- [Pi 扩展 API 未来变化] → 只使用 `input`、生命周期、命令、`appendEntry`、`registerEntryRenderer`/UI 的最小能力，并通过结构化适配类型和集成测试锁定兼容面。
 
 ## Migration Plan
 

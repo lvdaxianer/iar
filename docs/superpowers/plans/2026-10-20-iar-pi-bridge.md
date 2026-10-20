@@ -4,7 +4,7 @@
 
 **Goal:** 在不修改 Pi 核心的前提下，交付可安装的 `@iar/pi-bridge` 和 IAR `/api/bridge/v1`，让 IAR 处理业务意图、动作和确认，让普通输入继续进入 Pi Agent。
 
-**Architecture:** IAR Bridge HTTP API 复用现有 SandboxSessionManager 的串行会话；`bridgeTurn` 在明确 `noul` 且没有 IAR 上下文时返回 `pass_through`。`@iar/pi-bridge` 只依赖 Fetch 和 Pi 扩展的最小结构类型，在 `input` 钩子中调用 IAR，非 pass-through 通过 custom message 展示并 handled；确认/取消由显式命令直达 IAR。
+**Architecture:** IAR Bridge HTTP API 复用现有 SandboxSessionManager 的串行会话；`bridgeTurn` 在明确 `noul` 且没有 IAR 上下文时返回 `pass_through`。`@iar/pi-bridge` 只依赖 Fetch 和 Pi 扩展的最小结构类型，在 `input` 钩子中调用 IAR，非 pass-through 通过不进入 LLM context 的 display-only custom entry 展示并 handled；确认/取消由显式命令直达 IAR。
 
 **Tech Stack:** Node.js 24、TypeScript ESM、Fastify、Node test runner、Pi Extension API。
 
@@ -51,7 +51,7 @@
 
 - [ ] **Step 1: Write failing client and extension tests**
 
-  Stub `fetch` and a minimal Pi API. Assert open/input/confirm URLs and bounded JSON; `pass_through` returns `{action:"continue"}`; `handled`, clarification and awaiting confirmation append one display message and return `{action:"handled"}`; `source:"extension"` does not call Fetch; timeout/error shows a bounded error and returns handled; `/iar-confirm` forwards the stored action ID.
+  Stub `fetch` and a minimal Pi API. Assert open/input/confirm URLs and bounded JSON; `pass_through` returns `{action:"continue"}`; `handled`, clarification and awaiting confirmation append one display-only entry and return `{action:"handled"}`; `source:"extension"` does not call Fetch; timeout/error shows a bounded error and returns handled; `/iar-confirm` forwards the stored action ID.
 
 - [ ] **Step 2: Run tests and verify they fail**
 
@@ -63,7 +63,7 @@
 
 - [ ] **Step 4: Implement extension lifecycle and routing**
 
-  On `session_start`, call `openSession(ctx.sessionManager.getSessionId())`; on `input`, skip extension-originated messages, call IAR, continue only for pass-through, otherwise send a custom `iar-bridge` display message and handle. Register `iar-confirm` and `iar-cancel`; clean local pending state on `session_shutdown`. Export a default Pi Package entry from `pi-extension.ts`.
+  On `session_start`, call `openSession(ctx.sessionManager.getSessionId())`; on `input`, skip extension-originated messages, call IAR, continue only for pass-through, otherwise append a display-only `iar-bridge` entry and handle. Register `iar-confirm` and `iar-cancel`; clean local pending state on `session_shutdown`. Export a default Pi Package entry from `pi-extension.ts`.
 
 - [ ] **Step 5: Run tests and verify they pass**
 

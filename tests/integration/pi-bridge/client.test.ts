@@ -59,7 +59,8 @@ test('IAR bridge client rejects malformed responses and normalizes timeout failu
 test('Pi extension continues pass-through and handles IAR results', async () => {
   const handlers = new Map<string, (event: unknown, context: PiExtensionContext) => Promise<unknown> | unknown>();
   const commands = new Map<string, { handler: (args: string, context: PiExtensionContext) => Promise<void> }>();
-  const messages: unknown[] = [];
+  const entries: Array<{ customType: string; data: unknown }> = [];
+  const renderers = new Map<string, (entry: { data?: unknown }, options: { expanded: boolean }, theme: unknown) => { render(width: number): string[]; invalidate(): void } | undefined>();
   const notifications: string[] = [];
   let inputCalls = 0;
   const responses: BridgeInputResponse[] = [
@@ -75,18 +76,27 @@ test('Pi extension continues pass-through and handles IAR results', async () => 
   const pi: PiExtensionAPI = {
     on: (event, handler) => { handlers.set(event, handler); },
     registerCommand: (name, definition) => { commands.set(name, definition); },
-    sendMessage: (message) => { messages.push(message); }
+    appendEntry: (customType, data) => { entries.push({ customType, data }); },
+    registerEntryRenderer: (customType, renderer) => { renderers.set(customType, renderer); }
   };
   await createIarExtension({ client: fakeClient })(pi);
   const context = { sessionManager: { getSessionId: () => 'pi-1' }, ui: { notify: (message: string) => notifications.push(message) } };
   await handlers.get('session_start')?.({}, context);
   assert.deepEqual(await handlers.get('input')?.({ text: '普通问题', source: 'interactive' }, context), { action: 'continue' });
   assert.deepEqual(await handlers.get('input')?.({ text: '执行动作', source: 'interactive' }, context), { action: 'handled' });
-  assert.equal(messages.length, 1);
+  assert.equal(entries.length, 1);
+  assert.deepEqual(entries[0], { customType: 'iar-bridge', data: { content: '请确认', disposition: 'awaiting_confirmation' } });
+  assert.equal(renderers.has('iar-bridge'), true);
+  const rendered = renderers.get('iar-bridge')?.({ data: entries[0]?.data }, { expanded: false }, {});
+  assert.deepEqual(rendered?.render(80), ['[IAR awaiting_confirmation] 请确认']);
+  const unsafe = renderers.get('iar-bridge')?.({ data: { content: `\u001b[31m${'x'.repeat(5000)}\u001b[0m`, disposition: 'handled' } }, { expanded: false }, {});
+  assert.equal(unsafe?.render(80).some((line) => line.includes('\u001b')), false);
+  assert.equal(unsafe?.render(80).join('').length <= 4096 + '[IAR handled] '.length, true);
   assert.deepEqual(await handlers.get('input')?.({ text: '由扩展注入', source: 'extension' }, context), { action: 'continue' });
   assert.equal(inputCalls, 2);
   await commands.get('iar-confirm')?.handler('', context);
-  assert.equal(messages.length, 2);
+  assert.equal(entries.length, 2);
+  assert.deepEqual(entries[1], { customType: 'iar-bridge', data: { content: 'action-1:true', disposition: 'confirmed' } });
   assert.deepEqual(notifications, []);
 });
 
@@ -96,7 +106,8 @@ test('Pi extension fails closed when IAR is unavailable', async () => {
   const pi: PiExtensionAPI = {
     on: (event, handler) => { handlers.set(event, handler); },
     registerCommand: () => {},
-    sendMessage: () => {}
+    appendEntry: () => {},
+    registerEntryRenderer: () => {}
   };
   const client = { openSession: async () => { throw new BridgeClientError('bridge_unavailable', 'IAR 不可用', true); }, input: async () => { throw new Error('unreachable'); }, confirm: async () => { throw new Error('unreachable'); }, state: async () => { throw new Error('unreachable'); } };
   await createIarExtension({ client })(pi);

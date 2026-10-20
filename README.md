@@ -166,7 +166,7 @@ pi install npm:@iar/pi-bridge
 本地开发包可使用 Pi 的本地路径安装：
 
 ```bash
-pi install -l /Users/lvdaxianer/workspace/my/project/iar/packages/adapters/pi
+pi install -l ./packages/adapters/pi
 ```
 
 扩展默认连接 `http://127.0.0.1:8787`，也可通过 `IAR_PI_BRIDGE_URL` 覆盖。确认或取消待执行动作使用 `/iar-confirm` 和 `/iar-cancel`。IAR 不可用时扩展默认 fail-closed，当前输入会被安全阻断；如明确接受降级风险，可在 SDK 中设置 `onUnavailable: "continue"`。
@@ -188,7 +188,7 @@ await resourceLoader.reload();
 const { session } = await createAgentSession({ resourceLoader });
 ```
 
-两套会话职责保持分离：Pi 会话负责对话历史、模型调用和 Pi 扩展生命周期；IAR 会话负责意图识别、路由、策略、确认、执行和可恢复业务状态。Bridge 只保存 `piSessionId → iarSessionId` 映射以及当前 `actionId`，不会复制 IAR 的行为状态或 Action 输入。当前 Sandbox 的映射保存在进程内，服务重启后应在打开 Bridge 会话时显式传入可恢复的 `iarSessionId`；生产部署还需要在 Bridge 前增加认证、租户授权和传输保护。
+两套会话职责保持分离：Pi 会话负责对话历史、模型调用和 Pi 扩展生命周期；IAR 会话负责意图识别、路由、策略、确认、执行和可恢复业务状态。Bridge 只保存 `piSessionId → iarSessionId` 映射以及当前 `actionId`，不会复制 IAR 的行为状态或 Action 输入。IAR 的 handled、clarification、awaiting_confirmation 和确认/取消结果通过 Pi display-only custom entry 展示，不进入 Pi 后续 LLM context。当前 Sandbox 的映射保存在进程内，服务重启后应在打开 Bridge 会话时显式传入可恢复的 `iarSessionId`；生产部署还需要在 Bridge 前增加认证、租户授权和传输保护。
 
 Bridge 协议版本为 `iar.pi-bridge/v1`，输入处置包括：
 
