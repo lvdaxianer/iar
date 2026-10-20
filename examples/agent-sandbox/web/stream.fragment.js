@@ -1,14 +1,14 @@
-  // 阶段文字仅在收到第一段回复之前显示。
-  // 收到增量后移除阶段标记，避免把处理状态混入正文。
-  // 没有收到内容时保留当前阶段，便于区分网络等待与回复生成。
+  // 阶段标签折叠在统一的 Thinking 指示器中，仅显示当前阶段短词。
+  // 收到增量后整体移除指示器，避免把处理状态混入正文。
+  // 没有收到内容时保留指示器，便于区分网络等待与回复生成。
   let STAGE_LABELS = {
-    semantic: '正在理解意图…',
-    route: '正在路由…',
-    action: '正在执行插件…',
-    response: '正在生成回复…'
+    semantic: '理解意图',
+    route: '路由选择',
+    action: '执行插件',
+    response: '生成回复'
   };
 
-  /** 创建流式助手气泡，管理阶段文字和当前回复。
+  /** 创建流式助手气泡，管理 Thinking 指示器和当前回复。
    * 流式期间使用纯文本追加，防止部分 HTML 被执行。
    * 只有终态结果到达时才将内容转换为安全 Markdown。
    * 断流时调用 remove，避免半条回复被误认成成功结果。
@@ -22,15 +22,27 @@
     var textEl = document.createElement('div');
     textEl.className = 'md-body';
     var stageEl = document.createElement('span');
-    stageEl.className = 'meta';
-    stageEl.textContent = STAGE_LABELS.semantic;
+    stageEl.className = 'thinking';
+    var dots = document.createElement('span');
+    dots.className = 'thinking-dots';
+    dots.appendChild(document.createElement('i'));
+    dots.appendChild(document.createElement('i'));
+    dots.appendChild(document.createElement('i'));
+    var label = document.createElement('span');
+    label.className = 'thinking-label';
+    label.textContent = 'Thinking';
+    var stageText = document.createElement('span');
+    stageText.className = 'thinking-stage';
+    stageEl.appendChild(dots);
+    stageEl.appendChild(label);
+    stageEl.appendChild(stageText);
     div.appendChild(textEl);
     div.appendChild(stageEl);
     messagesEl.appendChild(div);
     messagesEl.scrollTop = messagesEl.scrollHeight;
-    var state = { div: div, textEl: textEl, stageEl: stageEl, gotDelta: false };
+    var state = { div: div, textEl: textEl, stageEl: stageEl, stageText: stageText, gotDelta: false };
     return {
-      setStage: function (stage) { if (!state.gotDelta && STAGE_LABELS[stage]) state.stageEl.textContent = STAGE_LABELS[stage]; },
+      setStage: function (stage) { if (!state.gotDelta && STAGE_LABELS[stage]) state.stageText.textContent = '· ' + STAGE_LABELS[stage]; },
       appendDelta: function (text) { appendStreamDelta(state, text); },
       finalize: function (result) { finalizeStreamBubble(state, result); },
       remove: function () { div.remove(); }

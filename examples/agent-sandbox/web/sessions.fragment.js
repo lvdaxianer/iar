@@ -196,9 +196,28 @@
     // 首页刷新时清空重建，避免旧条目与新数据混排。
     if (!isAppend) listEl.innerHTML = '';
     items.forEach(function (item) { if (isSessionSummary(item)) listEl.appendChild(createSessionItem(item)); });
+    // 服务端摘要可能尚未包含当前会话；本地兜底插入并置顶，保证当前会话始终可见且可标识。
+    if (!isAppend && typeof sessionId === 'string' && sessionId.length > 0
+      && !items.some(function (item) { return isSessionSummary(item) && item.sessionId === sessionId; })) {
+      var fallback = currentSessionFallbackSummary();
+      listEl.insertBefore(createSessionItem({ sessionId: sessionId, summary: fallback }), listEl.firstChild || null);
+    }
     document.getElementById('sessionsMoreBtn').hidden = !sessionsNextCursor;
     if (listEl.children.length === 0) showSessionsStatus('暂无会话，点击「新建会话」开始。');
     else showSessionsStatus('');
+  }
+
+  /** 当前会话不在服务端摘要时的兜底文字：取本地历史最后一条用户消息。
+   * @returns 兜底摘要文本
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-20
+   */
+  function currentSessionFallbackSummary() {
+    var history = readConversation(sessionId);
+    for (var index = history.length - 1; index >= 0; index -= 1) {
+      if (history[index].role === 'user') return history[index].text;
+    }
+    return '（当前会话）';
   }
 
   /** 校验摘要条目结构；非法标识或类型不进入列表。
@@ -224,6 +243,7 @@
     button.textContent = sessionItemLabel(item);
     button.onclick = function () { switchSession(item.sessionId); };
     var li = document.createElement('li');
+    if (item.sessionId === sessionId) li.className = 'current';
     li.appendChild(button);
     return li;
   }
