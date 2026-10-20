@@ -27,12 +27,10 @@ function manifest(overrides: Partial<PluginManifest> = {}): PluginManifest {
     apiVersion: 'iar.dev/v1',
     schemaVersion: SCHEMA_VERSIONS.pluginManifest,
     pluginId: 'drill-plugin',
-    pluginKind: 'function',
-    scope: 'function',
-    functionId: 'function.drill',
+    pluginKind: 'system',
+    scope: 'runtime',
     version: '1.0.0',
     description: 'phase 5 distribution drill',
-    actionTypes: ['query'],
     capabilities: ['remote.read'],
     inputSchema: { type: 'object', additionalProperties: false },
     outputSchema: { type: 'object', additionalProperties: false },
@@ -119,7 +117,7 @@ class FailNextEnableHost extends PluginHost {
 
 test('invalid signer and tampered digest never mutate the PluginHost', () => {
   // Given：两个篡改 artifact 在进入生命周期前被验证。
-  const host = new PluginHost({ functionIds: ['function.drill'] });
+  const host = new PluginHost();
   const distributor = new RemotePluginDistributor({ host, trustedSigners, compatibility: compatibility() });
   const unknownSigner = { ...artifact(), signerKeyId: 'untrusted' };
   const tampered = { ...artifact(), bundleDigest: `sha256:${'b'.repeat(64)}` };
@@ -133,7 +131,7 @@ test('invalid signer and tampered digest never mutate the PluginHost', () => {
 
 test('capability expansion is rejected without exact approval and preserves the current version', () => {
   // Given：当前版本只有 remote.read，候选版本请求新增 remote.write。
-  const host = new PluginHost({ functionIds: ['function.drill'] });
+  const host = new PluginHost();
   const distributor = new RemotePluginDistributor({ host, trustedSigners, compatibility: compatibility() });
   assert.equal(distributor.install(artifact()).ok, true);
   const expanded = manifest({ version: '2.0.0', capabilities: ['remote.read', 'remote.write'], policy: { riskLevel: 'medium', requiresConfirmation: true, allowedCapabilities: ['remote.read', 'remote.write'] } });
@@ -149,7 +147,7 @@ test('capability expansion is rejected without exact approval and preserves the 
 
 test('upgrade enable failure restores the exact previous version and rollback appends safe audit', () => {
   // Given：v1 已安装，v2 已成功升级，v3 在 enable 阶段失败。
-  const host = new FailNextEnableHost({ functionIds: ['function.drill'] });
+  const host = new FailNextEnableHost();
   const distributor = new RemotePluginDistributor({ host, trustedSigners, compatibility: compatibility() });
   const initial = artifact();
   assert.equal(distributor.install(initial).ok, true);
@@ -182,7 +180,7 @@ test('foreign tenant and policy denial happen before target Host creation', asyn
     trustedSigners,
     hostFactory: () => {
       created += 1;
-      return { host: new PluginHost({ functionIds: ['function.drill'] }), compatibility: compatibility() };
+      return { host: new PluginHost(), compatibility: compatibility() };
     },
     authorize: (context) => context.tenantId === 'tenant-a' ? { allowed: true } : deny
   });
@@ -202,7 +200,7 @@ test('foreign tenant upgrade and rollback are denied before the target Host exis
     trustedSigners,
     hostFactory: () => {
       created += 1;
-      return { host: new PluginHost({ functionIds: ['function.drill'] }), compatibility: compatibility() };
+      return { host: new PluginHost(), compatibility: compatibility() };
     },
     authorize: () => ({ allowed: true })
   });
@@ -231,7 +229,7 @@ test('successful lifecycle drill preserves tenant audit order and hides signed m
   // Given：单个 tenant 通过 ABI 执行 install、upgrade、rollback。
   const api = createTenantControlPlane({
     trustedSigners,
-    hostFactory: () => ({ host: new PluginHost({ functionIds: ['function.drill'] }), compatibility: compatibility() }),
+    hostFactory: () => ({ host: new PluginHost(), compatibility: compatibility() }),
     authorize: () => ({ allowed: true })
   });
   /**

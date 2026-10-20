@@ -7,24 +7,36 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import type { FunctionPluginManifest, JsonValue } from '@iar/contracts';
-import type { PluginHandler, PluginRegistration } from '@iar/plugins';
+import { SCHEMA_VERSIONS, type BusinessPluginManifest, type FunctionDefinition, type JsonValue } from '@iar/contracts';
+import { definePlugin, type FunctionHandler, type PluginPackage } from '@iar/plugin';
 
 /** knowledge query 输入的最大长度，避免示例边界接受无界请求。 */
 const MAX_QUERY_LENGTH = 500;
 
 /** knowledge query 的版本化、只读 Manifest。 */
-export const knowledgeQueryManifest: FunctionPluginManifest = {
+export const knowledgeQueryManifest: BusinessPluginManifest = {
   apiVersion: 'iar.dev/v1',
   schemaVersion: 'iar.plugin-manifest/v1',
   pluginId: 'knowledge-query-v1',
-  pluginKind: 'function',
-  scope: 'function',
-  functionId: 'knowledge.query',
+  pluginKind: 'business',
+  scope: 'plugin',
   version: '1.0.0',
   description: '查询确定性知识片段的示例插件',
-  actionTypes: ['query'],
   capabilities: ['knowledge.read'],
+  lifecycle: { entrypoint: './dist/examples/plugins/knowledge-query/src/index.js' },
+  policy: { riskLevel: 'low', requiresConfirmation: false, allowedCapabilities: ['knowledge.read'] },
+  dependencies: []
+};
+
+export const knowledgeQueryFunction: FunctionDefinition = {
+  schemaVersion: SCHEMA_VERSIONS.function,
+  functionId: 'knowledge.query',
+  version: knowledgeQueryManifest.version,
+  name: knowledgeQueryManifest.description,
+  description: knowledgeQueryManifest.description,
+  actionTypes: ['query'],
+  capabilities: [...knowledgeQueryManifest.capabilities],
+  riskLevel: knowledgeQueryManifest.policy.riskLevel,
   inputSchema: {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     type: 'object',
@@ -38,10 +50,7 @@ export const knowledgeQueryManifest: FunctionPluginManifest = {
       { type: 'object', properties: { accepted: { const: true }, answer: { type: 'string', minLength: 1 }, citations: { type: 'array', items: { type: 'object', properties: { sourceId: { type: 'string', minLength: 1 }, snippet: { type: 'string', minLength: 1 } }, required: ['sourceId', 'snippet'], additionalProperties: false } }, confidence: { type: 'number', minimum: 0, maximum: 1 } }, required: ['accepted', 'answer', 'citations', 'confidence'], additionalProperties: false },
       { type: 'object', properties: { accepted: { const: false }, errorCode: { type: 'string', minLength: 1 } }, required: ['accepted', 'errorCode'], additionalProperties: false }
     ]
-  },
-  lifecycle: { entrypoint: './dist/examples/plugins/knowledge-query/src/index.js' },
-  policy: { riskLevel: 'low', requiresConfirmation: false, allowedCapabilities: ['knowledge.read'] },
-  dependencies: []
+  }
 };
 
 /**
@@ -74,7 +83,7 @@ function queryInput(input: JsonValue): { query: string; topK: number } | undefin
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-export const knowledgeQueryHandler: PluginHandler = async (input) => {
+export const knowledgeQueryHandler: FunctionHandler = async (input) => {
   // 输入校验先于任何业务输出，避免错误路径复制原始请求。
   const request = queryInput(input);
   if (!request) return { output: { accepted: false, errorCode: 'knowledge.invalid_input' }, status: 'failed', errorCode: 'knowledge.invalid_input' };
@@ -88,4 +97,4 @@ export const knowledgeQueryHandler: PluginHandler = async (input) => {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-export const knowledgeQueryPlugin: PluginRegistration = { manifest: knowledgeQueryManifest, handler: knowledgeQueryHandler };
+export const knowledgeQueryPlugin: PluginPackage = definePlugin({ manifest: knowledgeQueryManifest, functions: [{ definition: knowledgeQueryFunction, operations: [{ name: 'search', kind: 'read', description: '查询确定性知识片段' }], handler: knowledgeQueryHandler }] });

@@ -9,7 +9,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { PluginRegistration } from '@iar/plugins';
+import type { PluginPackage } from '@iar/plugin';
 import { accountPrivilegeOperations, accountPrivilegePlugin } from './account-privilege.js';
 import { apiGatewayOperations, apiGatewayPlugin } from './api-gateway.js';
 import type { SandboxOperation } from './common.js';
@@ -137,7 +137,7 @@ export const sandboxFunctionIds: readonly string[] = [
 ];
 
 /** 交给 PluginHost 顺序安装的十个插件注册对象。 */
-export const allSandboxPlugins: readonly PluginRegistration[] = [
+export const allSandboxPlugins: readonly PluginPackage[] = [
   knowledgeQueryPlugin,
   dipManagePlugin,
   jobMonitorPlugin,

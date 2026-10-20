@@ -26,7 +26,7 @@ function definition(): WorkflowDefinition {
  * Function 集合只包含本测试需要的稳定边界。
  */
 function dependencies() {
-  return { workflow: new LocalWorkflow(), pluginHost: new PluginHost({ functionIds: ['knowledge.query'] }) };
+  return { workflow: new LocalWorkflow(), pluginHost: new PluginHost() };
 }
 
 /**

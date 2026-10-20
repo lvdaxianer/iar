@@ -8,14 +8,12 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import type { FunctionPluginManifest } from '@iar/contracts';
 import { SCHEMA_VERSIONS } from '@iar/contracts';
 import { MockDecisionProvider, type DecisionRequest } from '@iar/decision';
 import { PluginHost } from '@iar/plugins';
 import { TwoStageRouter, type RouteRequest, type RouteResult } from '@iar/runtime';
 import { facts, functionRule, pluginRule } from './rule-engine-fixtures.js';
+import { loadBusinessManifest, pluginPackage } from '../contract/fixtures/plugin-package.js';
 
 /** 三个待处理的 DIP 服务，首个服务固定为 `test1`。 */
 export const DIP_SERVICES = ['test1', 'test2', 'test3'] as const;
@@ -29,13 +27,12 @@ export type StopRouteScenario = {
 
 /**
  * 读取 Phase 1 已验证的 DIP stop Manifest。
- * @returns 可安装的 FunctionPluginManifest
+ * @returns 可安装的 PluginPackage
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function loadManifest(): FunctionPluginManifest {
-  const path = join(process.cwd(), 'tests', 'contract', 'fixtures', 'valid-plugin-manifest.json');
-  return JSON.parse(readFileSync(path, 'utf8')) as FunctionPluginManifest;
+function loadManifest(): ReturnType<typeof pluginPackage> {
+  return pluginPackage(loadBusinessManifest());
 }
 
 /**
@@ -45,7 +42,7 @@ function loadManifest(): FunctionPluginManifest {
  * @date 2026-10-17
  */
 function createHost(): PluginHost {
-  const host = new PluginHost({ functionIds: ['dip.service.stop'] });
+  const host = new PluginHost();
   const manifest = loadManifest();
   assertInstall(host.install(manifest));
   assertInstall(host.enable(manifest.pluginId));

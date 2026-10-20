@@ -221,7 +221,7 @@ export function publicRun(run: WorkflowRun): PublicWorkflowRun {
  */
 export function publicPlugin(record: PluginRecord): PublicPlugin {
   const base = { pluginId: record.manifest.pluginId, version: record.manifest.version, state: record.state };
-  return record.manifest.pluginKind === 'function' ? { ...base, functionId: record.manifest.functionId } : base;
+  return record.manifest.pluginKind === 'business' ? { ...base, functionIds: [...record.functions.keys()] } : base;
 }
 
 /**

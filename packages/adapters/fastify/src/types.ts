@@ -59,7 +59,7 @@ export type PublicWorkflowRun = Pick<WorkflowRun, 'runId' | 'workflowId' | 'curr
 /** 对外暴露的 Plugin 生命周期摘要，不包含 schema、lifecycle 和敏感配置。 */
 export type PublicPlugin = {
   pluginId: string;
-  functionId?: string;
+  functionIds?: string[];
   version: string;
   state: PluginRecord['state'];
 };

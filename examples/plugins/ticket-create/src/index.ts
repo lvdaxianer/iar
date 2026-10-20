@@ -7,21 +7,33 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import type { FunctionPluginManifest, JsonValue } from '@iar/contracts';
-import type { PluginHandler, PluginRegistration } from '@iar/plugins';
+import { SCHEMA_VERSIONS, type BusinessPluginManifest, type FunctionDefinition, type JsonValue } from '@iar/contracts';
+import { definePlugin, type FunctionHandler, type PluginPackage } from '@iar/plugin';
 
 /** ticket create 的高风险写入 Manifest。 */
-export const ticketCreateManifest: FunctionPluginManifest = {
+export const ticketCreateManifest: BusinessPluginManifest = {
   apiVersion: 'iar.dev/v1',
   schemaVersion: 'iar.plugin-manifest/v1',
   pluginId: 'ticket-create-v1',
-  pluginKind: 'function',
-  scope: 'function',
-  functionId: 'ticket.create',
+  pluginKind: 'business',
+  scope: 'plugin',
   version: '1.0.0',
   description: '创建确定性工单的示例插件',
-  actionTypes: ['query', 'create'],
   capabilities: ['ticket.write'],
+  lifecycle: { entrypoint: './dist/examples/plugins/ticket-create/src/index.js' },
+  policy: { riskLevel: 'high', requiresConfirmation: true, allowedCapabilities: ['ticket.write'] },
+  dependencies: []
+};
+
+export const ticketCreateFunction: FunctionDefinition = {
+  schemaVersion: SCHEMA_VERSIONS.function,
+  functionId: 'ticket.create',
+  version: ticketCreateManifest.version,
+  name: ticketCreateManifest.description,
+  description: ticketCreateManifest.description,
+  actionTypes: ['query', 'create'],
+  capabilities: [...ticketCreateManifest.capabilities],
+  riskLevel: ticketCreateManifest.policy.riskLevel,
   inputSchema: {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     type: 'object',
@@ -35,10 +47,7 @@ export const ticketCreateManifest: FunctionPluginManifest = {
       { type: 'object', properties: { accepted: { const: true }, ticketId: { type: 'string', minLength: 1 }, status: { const: 'created' } }, required: ['accepted', 'ticketId', 'status'], additionalProperties: false },
       { type: 'object', properties: { accepted: { const: false }, errorCode: { type: 'string', minLength: 1 } }, required: ['accepted', 'errorCode'], additionalProperties: false }
     ]
-  },
-  lifecycle: { entrypoint: './dist/examples/plugins/ticket-create/src/index.js' },
-  policy: { riskLevel: 'high', requiresConfirmation: true, allowedCapabilities: ['ticket.write'] },
-  dependencies: []
+  }
 };
 
 /**
@@ -72,7 +81,7 @@ function ticketInput(input: JsonValue): { title: string; description: string; pr
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-export const ticketCreateHandler: PluginHandler = async (input) => {
+export const ticketCreateHandler: FunctionHandler = async (input) => {
   // 输入校验失败只能返回稳定错误码，不能返回标题或描述。
   if (!ticketInput(input)) return { output: { accepted: false, errorCode: 'ticket.invalid_input' }, status: 'failed', errorCode: 'ticket.invalid_input' };
   return { output: { accepted: true, ticketId: 'ticket-fixture-1', status: 'created' }, status: 'succeeded' };
@@ -85,4 +94,4 @@ export const ticketCreateHandler: PluginHandler = async (input) => {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-export const ticketCreatePlugin: PluginRegistration = { manifest: ticketCreateManifest, handler: ticketCreateHandler };
+export const ticketCreatePlugin: PluginPackage = definePlugin({ manifest: ticketCreateManifest, functions: [{ definition: ticketCreateFunction, operations: [{ name: 'create', kind: 'action', description: '创建工单' }], handler: ticketCreateHandler }] });

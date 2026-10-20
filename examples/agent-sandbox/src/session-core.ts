@@ -444,7 +444,8 @@ export class SandboxSessionCore {
    */
   private executePluginAction(action: ActionDefinition): ActionResult {
     const resolved = this.pluginHost.resolveCandidate(action.functionId, action.pluginId);
-    if (!resolved.ok || typeof resolved.value.handler !== 'function') {
+    const functionRecord = resolved.ok ? resolved.value.functions.get(action.functionId) : undefined;
+    if (!resolved.ok || !functionRecord || typeof functionRecord.handler !== 'function') {
       return { schemaVersion: SCHEMA_VERSIONS.action, actionId: action.actionId, status: 'failed', errorCode: 'plugin.unavailable' };
     }
     try {

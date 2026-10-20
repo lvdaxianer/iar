@@ -9,10 +9,10 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { FunctionPluginManifest, JsonValue } from '@iar/contracts';
-import type { PluginHandler, PluginRegistration } from '@iar/plugins';
+import { SCHEMA_VERSIONS, type BusinessPluginManifest, type FunctionDefinition, type JsonValue } from '@iar/contracts';
+import type { FunctionHandler, PluginPackage } from '@iar/plugin';
 import { retrieveKnowledge } from '../knowledge/retrieval.js';
-import { fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
+import { defineSandboxPlugin, fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
 
 /** dip.manage 的确定性集成任务 fixture。 */
 const DIP_TASKS: ReadonlyArray<Record<string, JsonValue>> = [
@@ -69,23 +69,31 @@ export const dipManageOperations: readonly SandboxOperation[] = [
 ];
 
 /** dip.manage 的版本化 Function Manifest，policy 声明 high 作为安全上限。 */
-export const dipManageManifest: FunctionPluginManifest = {
+export const dipManageManifest: BusinessPluginManifest = {
   apiVersion: 'iar.dev/v1',
   schemaVersion: 'iar.plugin-manifest/v1',
   pluginId: 'dip-manage-v1',
-  pluginKind: 'function',
-  scope: 'function',
-  functionId: 'dip.manage',
+  pluginKind: 'business',
+  scope: 'plugin',
   version: '1.0.0',
   description: '数据集成管理插件，提供 DIP 任务列表、详情、重跑与停止的确定性模拟',
-  actionTypes: ['query', 'execute'],
-  operations: dipManageOperations,
   capabilities: ['dip.read', 'dip.control'],
-  inputSchema: sandboxInputSchema(),
-  outputSchema: sandboxOutputSchema(),
   lifecycle: { entrypoint: './dist/examples/agent-sandbox/src/functions/dip-manage.js' },
   policy: { riskLevel: 'high', requiresConfirmation: true, allowedCapabilities: ['dip.read', 'dip.control'] },
   dependencies: []
+};
+
+export const dipManageFunction: FunctionDefinition = {
+  schemaVersion: SCHEMA_VERSIONS.function,
+  functionId: 'dip.manage',
+  version: dipManageManifest.version,
+  name: '数据集成管理',
+  description: dipManageManifest.description,
+  actionTypes: ['query', 'execute'],
+  inputSchema: sandboxInputSchema(),
+  outputSchema: sandboxOutputSchema(),
+  capabilities: [...dipManageManifest.capabilities],
+  riskLevel: dipManageManifest.policy.riskLevel
 };
 
 /**
@@ -138,7 +146,7 @@ function isKnowledgeQuery(query: string): boolean {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export const dipManageHandler: PluginHandler = async (input) => {
+export const dipManageHandler: FunctionHandler = async (input) => {
   const parsed = parseSandboxInput(input);
   if (!parsed) return fail('dip.invalid_input');
   const operation = parsed.operation ?? (isKnowledgeQuery(parsed.query) ? 'search' : inferReadOperation(parsed.query));
@@ -167,4 +175,4 @@ export const dipManageHandler: PluginHandler = async (input) => {
 };
 
 /** 可直接交给 PluginHost.install 的 dip.manage 注册对象。 */
-export const dipManagePlugin: PluginRegistration = { manifest: dipManageManifest, handler: dipManageHandler };
+export const dipManagePlugin: PluginPackage = defineSandboxPlugin(dipManageManifest, dipManageFunction, dipManageOperations, dipManageHandler);

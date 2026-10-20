@@ -4,21 +4,43 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import type { FunctionPluginManifest, JsonValue } from '@iar/contracts';
-import type { PluginHandler, PluginRegistration } from '@iar/plugins';
+import { SCHEMA_VERSIONS, type BusinessPluginManifest, type FunctionDefinition, type JsonValue } from '@iar/contracts';
+import { definePlugin, type FunctionHandler, type PluginPackage } from '@iar/plugin';
 
 /** fake stop plugin 的稳定 Manifest，模拟高风险服务停止能力。 */
-const fakeStopManifest: FunctionPluginManifest = {
+export const fakeStopManifest: BusinessPluginManifest = {
   apiVersion: 'iar.dev/v1',
   schemaVersion: 'iar.plugin-manifest/v1',
   pluginId: 'fake-dip-stop-v1',
-  pluginKind: 'function',
-  scope: 'function',
-  functionId: 'dip.service.stop',
+  pluginKind: 'business',
+  scope: 'plugin',
   version: '1.0.0',
   description: '用于 Phase 1 生命周期和重放演示的内存 DIP 服务停止插件',
-  actionTypes: ['execute'],
   capabilities: ['dip.service.write'],
+  lifecycle: {
+    entrypoint: './dist/examples/plugins/fake-plugin/src/index.js',
+    onLoad: 'onLoad',
+    onEnable: 'onEnable',
+    onDisable: 'onDisable',
+    onUnload: 'onUnload'
+  },
+  policy: {
+    riskLevel: 'high',
+    requiresConfirmation: true,
+    allowedCapabilities: ['dip.service.write']
+  },
+  dependencies: []
+};
+
+export const fakeStopFunction: FunctionDefinition = {
+  schemaVersion: SCHEMA_VERSIONS.function,
+  functionId: 'dip.service.stop',
+  version: fakeStopManifest.version,
+  name: fakeStopManifest.description,
+  description: fakeStopManifest.description,
+  actionTypes: ['execute'],
+  capabilities: [...fakeStopManifest.capabilities],
+  riskLevel: fakeStopManifest.policy.riskLevel,
   inputSchema: {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     type: 'object',
@@ -42,20 +64,7 @@ const fakeStopManifest: FunctionPluginManifest = {
         additionalProperties: false
       }
     ]
-  },
-  lifecycle: {
-    entrypoint: './dist/examples/plugins/fake-plugin/src/index.js',
-    onLoad: 'onLoad',
-    onEnable: 'onEnable',
-    onDisable: 'onDisable',
-    onUnload: 'onUnload'
-  },
-  policy: {
-    riskLevel: 'high',
-    requiresConfirmation: true,
-    allowedCapabilities: ['dip.service.write']
-  },
-  dependencies: []
+  }
 };
 
 /**
@@ -132,7 +141,7 @@ export async function onUnload(): Promise<void> {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-const fakeStopHandler: PluginHandler = async (input) => {
+const fakeStopHandler: FunctionHandler = async (input) => {
   // 输入边界先于任何业务字段读取。
   const serviceId = serviceIdOf(input);
   if (!serviceId) {
@@ -144,7 +153,4 @@ const fakeStopHandler: PluginHandler = async (input) => {
 };
 
 /** 可直接交给 PluginHost.install 的 fake plugin 注册对象。 */
-export const fakeStopPlugin: PluginRegistration = {
-  manifest: fakeStopManifest,
-  handler: fakeStopHandler
-};
+export const fakeStopPlugin: PluginPackage = definePlugin({ manifest: fakeStopManifest, functions: [{ definition: fakeStopFunction, operations: [{ name: 'stop', kind: 'action', description: '停止 DIP 服务' }], handler: fakeStopHandler }] });

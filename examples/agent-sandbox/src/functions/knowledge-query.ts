@@ -7,10 +7,10 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { FunctionPluginManifest } from '@iar/contracts';
-import type { PluginHandler, PluginRegistration } from '@iar/plugins';
+import { SCHEMA_VERSIONS, type BusinessPluginManifest, type FunctionDefinition } from '@iar/contracts';
+import type { FunctionHandler, PluginPackage } from '@iar/plugin';
 import { retrieveKnowledge } from '../knowledge/retrieval.js';
-import { fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
+import { defineSandboxPlugin, fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
 
 /** knowledge.query 的显式操作目录。 */
 export const knowledgeQueryOperations: readonly SandboxOperation[] = [
@@ -18,23 +18,31 @@ export const knowledgeQueryOperations: readonly SandboxOperation[] = [
 ];
 
 /** knowledge.query 的版本化 Function Manifest，policy 声明 high 作为安全上限。 */
-export const knowledgeQueryManifest: FunctionPluginManifest = {
+export const knowledgeQueryManifest: BusinessPluginManifest = {
   apiVersion: 'iar.dev/v1',
   schemaVersion: 'iar.plugin-manifest/v1',
   pluginId: 'knowledge-query-v1',
-  pluginKind: 'function',
-  scope: 'function',
-  functionId: 'knowledge.query',
+  pluginKind: 'business',
+  scope: 'plugin',
   version: '1.0.0',
   description: '平台通用知识问答插件，检索本地知识库返回确定性 FAQ 结果',
-  actionTypes: ['query'],
-  operations: knowledgeQueryOperations,
   capabilities: ['knowledge.read'],
-  inputSchema: sandboxInputSchema(),
-  outputSchema: sandboxOutputSchema(),
   lifecycle: { entrypoint: './dist/examples/agent-sandbox/src/functions/knowledge-query.js' },
   policy: { riskLevel: 'high', requiresConfirmation: true, allowedCapabilities: ['knowledge.read'] },
   dependencies: []
+};
+
+export const knowledgeQueryFunction: FunctionDefinition = {
+  schemaVersion: SCHEMA_VERSIONS.function,
+  functionId: 'knowledge.query',
+  version: knowledgeQueryManifest.version,
+  name: '平台通用知识',
+  description: knowledgeQueryManifest.description,
+  actionTypes: ['query'],
+  inputSchema: sandboxInputSchema(),
+  outputSchema: sandboxOutputSchema(),
+  capabilities: [...knowledgeQueryManifest.capabilities],
+  riskLevel: knowledgeQueryManifest.policy.riskLevel
 };
 
 /**
@@ -45,7 +53,7 @@ export const knowledgeQueryManifest: FunctionPluginManifest = {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export const knowledgeQueryHandler: PluginHandler = async (input) => {
+export const knowledgeQueryHandler: FunctionHandler = async (input) => {
   const parsed = parseSandboxInput(input);
   if (!parsed) return fail('knowledge.invalid_input');
   const operation = parsed.operation ?? 'search';
@@ -56,4 +64,4 @@ export const knowledgeQueryHandler: PluginHandler = async (input) => {
 };
 
 /** 可直接交给 PluginHost.install 的 knowledge.query 注册对象。 */
-export const knowledgeQueryPlugin: PluginRegistration = { manifest: knowledgeQueryManifest, handler: knowledgeQueryHandler };
+export const knowledgeQueryPlugin: PluginPackage = defineSandboxPlugin(knowledgeQueryManifest, knowledgeQueryFunction, knowledgeQueryOperations, knowledgeQueryHandler);

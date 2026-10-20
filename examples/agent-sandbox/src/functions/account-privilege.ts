@@ -9,10 +9,10 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { FunctionPluginManifest, JsonValue } from '@iar/contracts';
-import type { PluginHandler, PluginRegistration } from '@iar/plugins';
+import { SCHEMA_VERSIONS, type BusinessPluginManifest, type FunctionDefinition, type JsonValue } from '@iar/contracts';
+import type { FunctionHandler, PluginPackage } from '@iar/plugin';
 import { retrieveKnowledge } from '../knowledge/retrieval.js';
-import { fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
+import { defineSandboxPlugin, fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
 
 /** account.privilege 的确定性当前用户权限 fixture。 */
 const MY_ACCOUNT: Record<string, JsonValue> = {
@@ -35,23 +35,31 @@ export const accountPrivilegeOperations: readonly SandboxOperation[] = [
 ];
 
 /** account.privilege 的版本化 Function Manifest，policy 声明 high 作为安全上限。 */
-export const accountPrivilegeManifest: FunctionPluginManifest = {
+export const accountPrivilegeManifest: BusinessPluginManifest = {
   apiVersion: 'iar.dev/v1',
   schemaVersion: 'iar.plugin-manifest/v1',
   pluginId: 'account-privilege-v1',
-  pluginKind: 'function',
-  scope: 'function',
-  functionId: 'account.privilege',
+  pluginKind: 'business',
+  scope: 'plugin',
   version: '1.0.0',
   description: '账户与权限插件，提供本人权限查询与授权申请受理的确定性模拟',
-  actionTypes: ['query', 'update'],
-  operations: accountPrivilegeOperations,
   capabilities: ['account.read', 'account.grant'],
-  inputSchema: sandboxInputSchema(),
-  outputSchema: sandboxOutputSchema(),
   lifecycle: { entrypoint: './dist/examples/agent-sandbox/src/functions/account-privilege.js' },
   policy: { riskLevel: 'high', requiresConfirmation: true, allowedCapabilities: ['account.read', 'account.grant'] },
   dependencies: []
+};
+
+export const accountPrivilegeFunction: FunctionDefinition = {
+  schemaVersion: SCHEMA_VERSIONS.function,
+  functionId: 'account.privilege',
+  version: accountPrivilegeManifest.version,
+  name: '账户与权限',
+  description: accountPrivilegeManifest.description,
+  actionTypes: ['query', 'update'],
+  inputSchema: sandboxInputSchema(),
+  outputSchema: sandboxOutputSchema(),
+  capabilities: [...accountPrivilegeManifest.capabilities],
+  riskLevel: accountPrivilegeManifest.policy.riskLevel
 };
 
 /**
@@ -87,7 +95,7 @@ function isKnowledgeQuery(query: string): boolean {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export const accountPrivilegeHandler: PluginHandler = async (input) => {
+export const accountPrivilegeHandler: FunctionHandler = async (input) => {
   const parsed = parseSandboxInput(input);
   if (!parsed) return fail('account.invalid_input');
   const operation = parsed.operation ?? (isKnowledgeQuery(parsed.query) ? 'search' : inferOperation(parsed.query));
@@ -114,4 +122,4 @@ export const accountPrivilegeHandler: PluginHandler = async (input) => {
 };
 
 /** 可直接交给 PluginHost.install 的 account.privilege 注册对象。 */
-export const accountPrivilegePlugin: PluginRegistration = { manifest: accountPrivilegeManifest, handler: accountPrivilegeHandler };
+export const accountPrivilegePlugin: PluginPackage = defineSandboxPlugin(accountPrivilegeManifest, accountPrivilegeFunction, accountPrivilegeOperations, accountPrivilegeHandler);

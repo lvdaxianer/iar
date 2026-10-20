@@ -61,7 +61,7 @@ function createApi(): ReturnType<typeof createServiceApi> {
     hostFactory: (tenantId) => {
       const existing = hosts.get(tenantId);
       if (existing) return existing;
-      const host = { workflow: new LocalWorkflow(), pluginHost: new PluginHost({ functionIds: ['service.finish'] }) };
+      const host = { workflow: new LocalWorkflow(), pluginHost: new PluginHost() };
       hosts.set(tenantId, host);
       return host;
     }
@@ -87,7 +87,7 @@ function request(input: { operation: ServiceApiRequest['operation']; tenantId?: 
 /** Service run request 必须与 Embedded Fastify response 保持同一 data/error 语义。 */
 test('Service API preserves Fastify v1 run contract for an authorized tenant', async () => {
   const api = createApi();
-  const embedded = await createFastifyApp({ workflow: new LocalWorkflow(), pluginHost: new PluginHost({ functionIds: ['service.finish'] }) });
+  const embedded = await createFastifyApp({ workflow: new LocalWorkflow(), pluginHost: new PluginHost() });
   const embeddedResponse = await embedded.inject({ method: 'POST', url: '/v1/runs', headers: { 'x-trace-id': 'run.create-trace' }, payload: { runId: 'run-parity', definition: definition() } });
   const serviceResponse = await api.request<{ runId: string }>(request({ operation: 'run.create', payload: { runId: 'run-parity', definition: definition() } }));
   assert.equal(embeddedResponse.statusCode, 201);
@@ -113,7 +113,7 @@ test('Service API fails closed for authorization and tenant state isolation', as
 
 /** 授权器不能修改上下文，host 工厂也不能跨 tenant 复用核心状态。 */
 test('Service API freezes authorization context and rejects shared hosts', async () => {
-  const shared = { workflow: new LocalWorkflow(), pluginHost: new PluginHost({ functionIds: ['service.finish'] }) };
+  const shared = { workflow: new LocalWorkflow(), pluginHost: new PluginHost() };
   const api = createServiceApi({
     authorize: (context) => {
       assert.equal(Object.isFrozen(context), true);

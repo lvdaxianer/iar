@@ -178,7 +178,7 @@ export class TwoStageRouter {
     const pluginEvaluation = this.engine.evaluatePlugins({ facts: request.facts, functionId, candidates, rules: request.pluginRules });
     // Plugin 没有规则和宿主共同认可的候选时必须 fail-closed。
     if (pluginEvaluation.status !== 'matched') return { ...evaluationResult('plugin', pluginEvaluation), functionId, functionEvaluation, functionDecision, pluginEvaluation };
-    const pluginDecision = request.pluginProvider.decide(decisionRequest('plugin.select', pluginEvaluation));
+    const pluginDecision = request.pluginProvider.decide(decisionRequest('plugin.select', pluginEvaluation, records, functionId));
     // Plugin provider 的非 choice 不能产生 matched 路由。
     if (pluginDecision.status !== 'choice' || !pluginDecision.choice) return { status: routeStatus(pluginDecision.status), reasonCode: `plugin_${pluginDecision.status}`, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision };
     return finalizePluginRoute({ request, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision });
@@ -192,7 +192,7 @@ export class TwoStageRouter {
     const pluginEvaluation = this.engine.evaluatePlugins({ facts: request.facts, functionId, candidates, rules: request.pluginRules });
     // Plugin 候选为空时保持同步路由的 fail-closed 语义。
     if (pluginEvaluation.status !== 'matched') return { ...evaluationResult('plugin', pluginEvaluation), functionId, functionEvaluation, functionDecision, pluginEvaluation };
-    const pluginRequest = decisionRequest('plugin.select', pluginEvaluation);
+    const pluginRequest = decisionRequest('plugin.select', pluginEvaluation, records, functionId);
     const pluginDecision = await safeAsyncDecision(request.pluginDecisionAdapter, request.traceId, request.runId, pluginRequest, request.behaviorContext, request.currentMessage, request.recentMessages);
     if (pluginDecision.status !== 'choice' || !pluginDecision.choice) return { status: routeStatus(pluginDecision.status), reasonCode: `plugin_${pluginDecision.status}`, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision };
     return finalizePluginRoute({ request, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision });
@@ -211,7 +211,8 @@ export class PluginFirstRouter {
   /** 执行 Plugin-first → Function-secondary 的异步路由。 */
   public async routeAsync(request: AsyncRouteRequest): Promise<RouteResult> {
     const records = filterRecordsByActionType(request.pluginHost.businessCandidates(), request.facts);
-    const authorized = authorizeCandidates(request, records);
+    const functionIdsByPlugin = new Map(records.map((record) => [record.manifest.pluginId, functionIdsForAction(record, request.facts)]));
+    const authorized = authorizeCandidates(request, records, (record) => selectPluginRuleFunction(record, request.pluginRules) ?? functionIdsByPlugin.get(record.manifest.pluginId)?.[0] ?? '');
     const pluginEvaluation = evaluatePluginScope(this.engine, request.facts, authorized, request.pluginRules);
     if (pluginEvaluation.status === 'no_match' || pluginEvaluation.candidates.length === 0) {
       return evaluationResult('plugin', pluginEvaluation);
@@ -220,7 +221,7 @@ export class PluginFirstRouter {
       request.pluginDecisionAdapter,
       request.traceId,
       request.runId,
-      decisionRequest('plugin.select', pluginEvaluation, records),
+      decisionRequest('plugin.select', pluginEvaluation, records, undefined, (record) => selectPluginRuleFunction(record, request.pluginRules) ?? functionIdsByPlugin.get(record.manifest.pluginId)?.[0]),
       request.behaviorContext,
       request.currentMessage,
       request.recentMessages
@@ -229,12 +230,15 @@ export class PluginFirstRouter {
       return { status: routeStatus(pluginDecision.status), reasonCode: `plugin_${pluginDecision.status}`, pluginEvaluation, pluginDecision };
     }
     const selected = records.find((record) => record.manifest.pluginId === pluginDecision.choice);
-    if (!selected || selected.manifest.pluginKind !== 'function') {
+    if (!selected || selected.manifest.pluginKind !== 'business') {
       return rejectedResult({ functionId: '', functionEvaluation: emptyFunctionEvaluation(), functionDecision: emptyFunctionDecision(''), pluginEvaluation, pluginDecision, reasonCode: 'plugin_unavailable' });
     }
-    const selectedManifest = selected.manifest;
-    const functionId = selectedManifest.functionId;
-    const functionEvaluation = singleFunctionEvaluation(functionId);
+    const functionIds = functionIdsByPlugin.get(selected.manifest.pluginId) ?? [];
+    const functionId = functionIds[0];
+    if (!functionId) {
+      return rejectedResult({ functionId: '', functionEvaluation: emptyFunctionEvaluation(), functionDecision: emptyFunctionDecision(''), pluginEvaluation, pluginDecision, reasonCode: 'plugin_unavailable' });
+    }
+    const functionEvaluation = functionSelectionEvaluation(functionIds);
     const functionDecision = await safeAsyncDecision(
       request.functionDecisionAdapter,
       request.traceId,
@@ -244,11 +248,12 @@ export class PluginFirstRouter {
       request.currentMessage,
       request.recentMessages
     );
-    if (functionDecision.status !== 'choice' || functionDecision.choice !== functionId) {
+    if (functionDecision.status !== 'choice' || !functionDecision.choice || !functionIds.includes(functionDecision.choice)) {
       return { status: routeStatus(functionDecision.status), reasonCode: `function_${functionDecision.status}`, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision };
     }
-    const routingScope = buildRoutingScope(pluginEvaluation, selected, request.behaviorContext);
-    return finalizePluginRoute({ request, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision, routingScope });
+    const selectedFunctionId = functionDecision.choice;
+    const routingScope = buildRoutingScope(pluginEvaluation, selected, request.behaviorContext, selectedFunctionId);
+    return finalizePluginRoute({ request, functionId: selectedFunctionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision, routingScope });
   }
 }
 
@@ -260,7 +265,21 @@ function filterRecordsByActionType(records: readonly PluginRecord[], facts: Rule
   const semantic = facts.semantic;
   const action = typeof semantic === 'object' && semantic !== null && !Array.isArray(semantic) ? (semantic as Record<string, unknown>).action : undefined;
   if (!isActionType(action)) return [];
-  return records.filter((record) => record.manifest.pluginKind === 'function' && record.manifest.actionTypes.includes(action));
+  return records.filter((record) => record.manifest.pluginKind === 'business' && pluginFunctionIds(record).some((functionId) => record.functions.get(functionId)?.definition.actionTypes.includes(action)));
+}
+
+/** 返回 Plugin 内支持当前语义动作的 Function，保持注册顺序稳定。 */
+function functionIdsForAction(record: PluginRecord, facts: RuleEvaluationFacts): string[] {
+  const semantic = facts.semantic;
+  const action = typeof semantic === 'object' && semantic !== null && !Array.isArray(semantic) ? (semantic as Record<string, unknown>).action : undefined;
+  if (!isActionType(action) || record.manifest.pluginKind !== 'business') return [];
+  return pluginFunctionIds(record).filter((functionId) => record.functions.get(functionId)?.definition.actionTypes.includes(action));
+}
+
+/** 选择 Plugin-first 阶段用于规则、授权和候选描述的 Function 归属。 */
+function selectPluginRuleFunction(record: PluginRecord, rules: readonly PluginRule[]): string | undefined {
+  if (record.manifest.pluginKind !== 'business') return undefined;
+  return pluginFunctionIds(record).find((functionId) => rules.some((rule) => rule.pluginId === record.manifest.pluginId && rule.functionId === functionId));
 }
 
 /** 判断事实中的动作是否属于运行时固定协议。 */
@@ -277,10 +296,10 @@ function isActionType(value: unknown): value is ActionType {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function authorizeCandidates(request: RouteContext, records: readonly PluginRecord[]) {
+function authorizeCandidates(request: RouteContext, records: readonly PluginRecord[], functionIdOf: (record: PluginRecord) => string = (record) => record.manifest.pluginKind === 'business' ? pluginFunctionIds(record)[0] ?? '' : '') {
   return records.map((record) => ({
     pluginId: record.manifest.pluginId,
-    functionId: record.manifest.pluginKind === 'function' ? record.manifest.functionId : '',
+    functionId: functionIdOf(record),
     enabled: true,
     authorized: request.authorizePlugin({ phase: 'candidate', ...requestContext(request, freezeRecordSnapshot(record)) }),
     capabilities: record.manifest.capabilities
@@ -364,9 +383,9 @@ function deepFreeze<T>(value: T): T {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function decisionRequest(decisionType: DecisionRequest['decisionType'], evaluation: RuleEvaluationResult, records?: readonly PluginRecord[]): DecisionRequest {
+function decisionRequest(decisionType: DecisionRequest['decisionType'], evaluation: RuleEvaluationResult, records?: readonly PluginRecord[], functionId?: string, functionIdOf?: (record: PluginRecord) => string | undefined): DecisionRequest {
   const recordsById = new Map((records ?? []).map((record) => [record.manifest.pluginId, record]));
-  return { decisionType, decisionVersion: DECISION_VERSION, threshold: DECISION_THRESHOLD, candidates: evaluation.candidates.map((candidate) => toDecisionCandidate(candidate, recordsById.get(candidate.candidateId))) };
+  return { decisionType, decisionVersion: DECISION_VERSION, threshold: DECISION_THRESHOLD, candidates: evaluation.candidates.map((candidate) => toDecisionCandidate(candidate, recordsById.get(candidate.candidateId), functionId ?? functionIdOf?.(recordsById.get(candidate.candidateId)!))) };
 }
 
 /** 解包 UnifiedDecisionAdapter 结果；模型 gateway 失败收敛为既有 provider_failed 决策，不暴露 provider 错误。 @param adapter - 异步决策适配器 @param traceId - 链路标识 @param runId - 运行标识 @param request - 有限候选请求 @returns 稳定 DecisionResult @author lvdaxianer@yeah.net @date 2026-10-17 */
@@ -388,12 +407,14 @@ async function safeAsyncDecision(adapter: AsyncDecisionAdapter, traceId: string,
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function toDecisionCandidate(candidate: RuleEvaluationResult['candidates'][number], record?: PluginRecord): DecisionCandidate {
+function toDecisionCandidate(candidate: RuleEvaluationResult['candidates'][number], record?: PluginRecord, functionId?: string): DecisionCandidate {
   const base: DecisionCandidate = { candidateId: candidate.candidateId, priority: candidate.priority, specificity: candidate.specificity, requiredSlots: candidate.requiredSlots, evidenceCodes: candidate.evidenceCodes };
-  if (record?.manifest.pluginKind === 'function') {
+  if (record?.manifest.pluginKind === 'business') {
+    const functionRecord = functionId ? record.functions.get(functionId) : undefined;
+    if (!functionRecord) return base;
     base.description = record.manifest.description;
-    base.functionId = record.manifest.functionId;
-    base.actionTypes = [...record.manifest.actionTypes];
+    base.functionId = functionId!;
+    base.actionTypes = [...functionRecord.definition.actionTypes];
   }
   // 未声明风险等级时不伪造 provider 解释元数据。
   if (candidate.riskLevel === undefined) return base;
@@ -424,7 +445,7 @@ function selectedPluginRule(input: { evaluation: RuleEvaluationResult; rules: re
  */
 function hasCapabilities(record: PluginRecord, requiredCapabilities: readonly string[] | undefined): boolean {
   // 系统插件没有业务能力边界，不能成为最终路由目标。
-  if (record.manifest.pluginKind !== 'function') return false;
+  if (record.manifest.pluginKind !== 'business') return false;
   return (requiredCapabilities ?? []).every((capability) => record.manifest.capabilities.includes(capability));
 }
 
@@ -520,12 +541,12 @@ function evaluatePluginScope(engine: RuleEngine, facts: RuleEvaluationFacts, can
   };
 }
 
-/** 为已选 Plugin 构造只含一个 Function 的二级候选。 */
-function singleFunctionEvaluation(functionId: string): RuleEvaluationResult {
+/** 为已选 Plugin 构造其动作范围内的 Function 二级候选。 */
+function functionSelectionEvaluation(functionIds: readonly string[]): RuleEvaluationResult {
   return {
     status: 'matched',
-    selectedCandidateId: functionId,
-    candidates: [{ candidateId: functionId, priority: 100, specificity: 1, requiredSlots: [], evidenceCodes: ['plugin.selected'], matchedRuleIds: [] }],
+    ...(functionIds.length === 1 ? { selectedCandidateId: functionIds[0] } : {}),
+    candidates: functionIds.map((functionId) => ({ candidateId: functionId, priority: 100, specificity: 1, requiredSlots: [], evidenceCodes: ['plugin.selected'], matchedRuleIds: [] })),
     matchedRules: [],
     excludedCandidates: [],
     conflicts: []
@@ -550,15 +571,23 @@ function emptyFunctionDecision(functionId: string): DecisionResult {
 }
 
 /** 将当前 Plugin 选择投影为下一轮模型可读取的有限路由范围。 */
-function buildRoutingScope(evaluation: RuleEvaluationResult, selected: PluginRecord, behaviorContext?: BehaviorContext): RoutingScope {
-  if (selected.manifest.pluginKind !== 'function') throw new Error('系统插件不能形成路由范围');
+function buildRoutingScope(evaluation: RuleEvaluationResult, selected: PluginRecord, behaviorContext?: BehaviorContext, functionId?: string): RoutingScope {
+  if (selected.manifest.pluginKind !== 'business') throw new Error('系统插件不能形成路由范围');
   const manifest = selected.manifest;
+  const selectedFunctionId = functionId ?? pluginFunctionIds(selected)[0];
+  const functionRecord = selectedFunctionId ? selected.functions.get(selectedFunctionId) : undefined;
+  if (!selectedFunctionId || !functionRecord) throw new Error('Plugin 不包含路由目标 Function');
   const candidatePluginIds = evaluation.candidates.slice(0, MAX_ROUTING_SCOPE_PLUGINS).map((candidate) => candidate.candidateId);
   const continuation = behaviorContext?.routingScope?.activePluginId === manifest.pluginId ? 'reuse' : 'replace';
   return {
     activePluginId: manifest.pluginId,
     candidatePluginIds,
-    actionTypes: [...manifest.actionTypes],
+    actionTypes: [...functionRecord.definition.actionTypes],
     continuation
   };
+}
+
+/** 返回业务 Plugin 中按注册顺序稳定排列的 Function 标识。 */
+function pluginFunctionIds(record: PluginRecord): string[] {
+  return record.manifest.pluginKind === 'business' ? [...record.functions.keys()] : [];
 }

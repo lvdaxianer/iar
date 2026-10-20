@@ -14,16 +14,16 @@ import {
 import { buildFallbackUserPrompt, buildResponseUserPrompt, buildSemanticUserPrompt } from '../../../examples/agent-sandbox/src/models/model-input-transport.js';
 import { ResponseGeneratorAdapter } from '@iar/decision';
 import { PluginHost } from '@iar/plugins';
-import type { FunctionPluginManifest } from '@iar/contracts';
+import type { ActionType } from '@iar/contracts';
 import { SEMANTIC_SYSTEM_PROMPT } from '../../../examples/agent-sandbox/src/models/model-input-transport.js';
+import { pluginPackage } from '../../contract/fixtures/plugin-package.js';
 
-function descriptorManifest(pluginId: string, functionId: string): FunctionPluginManifest {
-  return {
-    apiVersion: 'iar.dev/v1', schemaVersion: 'iar.plugin-manifest/v1', pluginId, pluginKind: 'function', scope: 'function', functionId,
-    version: '1.0.0', description: `descriptor-${pluginId}`, actionTypes: ['query'], capabilities: ['read.capability'],
-    inputSchema: { type: 'object' }, outputSchema: { type: 'object' }, lifecycle: { entrypoint: './handler.js' },
+function descriptorManifest(pluginId: string, functionId: string, actionTypes: ActionType[] = ['query']) {
+  return pluginPackage({
+    apiVersion: 'iar.dev/v1', schemaVersion: 'iar.plugin-manifest/v1', pluginId, pluginKind: 'business', scope: 'plugin',
+    version: '1.0.0', description: `descriptor-${pluginId}`, capabilities: ['read.capability'], lifecycle: { entrypoint: './handler.js' },
     policy: { riskLevel: 'low', requiresConfirmation: false, allowedCapabilities: ['read.capability'] }, dependencies: []
-  };
+  }, functionId, { actionTypes });
 }
 
 function request(): DecisionRequest {
@@ -117,7 +117,7 @@ test('历史关系使用不透明记录并与动态能力和最近消息同时�
 });
 
 test('PluginHost 只投影当前启用且授权的通用描述，并使用不透明候选键', () => {
-  const host = new PluginHost({ functionIds: ['function.visible', 'function.hidden'] });
+  const host = new PluginHost();
   assert.equal(host.install(descriptorManifest('plugin.visible', 'function.visible')).ok, true);
   assert.equal(host.install(descriptorManifest('plugin.hidden', 'function.hidden')).ok, true);
   assert.equal(host.enable('plugin.visible').ok, true);

@@ -167,11 +167,13 @@ export class SandboxSessionRouting {
     if (!route.functionId || !route.pluginId) return { status: 'failed', reply: '路由结果缺少 Function 或 Plugin。', reasonCode: 'route_incomplete' };
     const resolved = this.context.pluginHost.resolveCandidate(route.functionId, route.pluginId);
     if (!resolved.ok) return { status: 'failed', reply: `路由选中的插件不可用（${resolved.error.code}）。`, reasonCode: resolved.error.code };
-    if (resolved.value.manifest.pluginKind !== 'function') return { status: 'failed', reply: '路由选中的插件不是 Function 插件。', reasonCode: 'plugin_kind_invalid' };
+    if (resolved.value.manifest.pluginKind !== 'business') return { status: 'failed', reply: '路由选中的插件不是业务 Plugin。', reasonCode: 'plugin_kind_invalid' };
     const manifest = resolved.value.manifest;
-    const built = buildActionInput(route.functionId, frame.slots, userText, frame.action, behaviorContext, manifest.operations ?? []);
+    const functionRecord = resolved.value.functions.get(route.functionId);
+    if (!functionRecord) return { status: 'failed', reply: '路由选中的 Plugin 不包含目标 Function。', reasonCode: 'function_unavailable' };
+    const built = buildActionInput(route.functionId, frame.slots, userText, frame.action, behaviorContext, functionRecord.operations);
     if ('missing' in built) return { status: 'clarification', reply: `还缺少必要信息（${built.missing.join('、')}），请补充完整后再试。`, reasonCode: 'slots_missing' };
-    const action = this.createAction({ runId, functionId: route.functionId, pluginId: route.pluginId, input: built.input, policy: manifest.policy, operations: manifest.operations ?? [] });
+    const action = this.createAction({ runId, functionId: route.functionId, pluginId: route.pluginId, input: built.input, policy: manifest.policy, operations: functionRecord.operations });
     await this.appendDecisionEvent({ runId, frame, route, input: built.input });
     return this.executePreparedAction(action, manifest.capabilities);
   }
@@ -236,7 +238,7 @@ export class SandboxSessionRouting {
     if (reasonCode === 'confirmation_required') {
       this.context.pending = { action };
       const resolved = this.context.pluginHost.resolveCandidate(action.functionId, action.pluginId);
-      const descriptor = resolved.ok && resolved.value.manifest.pluginKind === 'function' ? resolved.value.manifest : undefined;
+      const descriptor = resolved.ok && resolved.value.manifest.pluginKind === 'business' ? resolved.value.functions.get(action.functionId)?.definition : undefined;
       return { status: 'awaiting_confirmation', action, reply: `即将执行高风险操作「${describeAction(action, descriptor)}」（插件 ${action.pluginId}），需要你的确认。` };
     }
     return { status: 'failed', reply: `动作被拒绝：${reasonCode}`, reasonCode };

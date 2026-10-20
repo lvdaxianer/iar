@@ -51,7 +51,7 @@ function definition(): WorkflowDefinition {
 function createApi() {
   return createServiceApi({
     authorize: (context) => context.tenantId === 'tenant-sidecar' && context.actorId === 'actor-sidecar',
-    hostFactory: () => ({ workflow: new LocalWorkflow(), pluginHost: new PluginHost({ functionIds: ['service.finish'] }) })
+    hostFactory: () => ({ workflow: new LocalWorkflow(), pluginHost: new PluginHost() })
   });
 }
 

@@ -7,16 +7,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Ajv2020 } from 'ajv/dist/2020.js';
-import type { FunctionPluginManifest, JsonValue, PluginManifest } from '@iar/contracts';
+import type { BusinessPluginManifest, JsonValue } from '@iar/contracts';
 import { PluginHost, type PluginRecord } from '@iar/plugins';
-import type { PluginHandlerResult, PluginRegistration } from '@iar/plugins';
+import type { FunctionHandlerResult, PluginPackage } from '@iar/plugin';
 import { knowledgeQueryPlugin } from '../../../examples/plugins/knowledge-query/src/index.js';
 import { ticketCreatePlugin } from '../../../examples/plugins/ticket-create/src/index.js';
 import { humanTransferPlugin } from '../../../examples/plugins/human-transfer/src/index.js';
 
 /** 三个示例必须使用不同且稳定的 Function 归属。 */
-type ExampleRegistration = PluginRegistration & { manifest: FunctionPluginManifest };
-type ExampleManifestTuple = [FunctionPluginManifest, FunctionPluginManifest, FunctionPluginManifest];
+type ExampleRegistration = PluginPackage;
+type ExampleManifestTuple = [BusinessPluginManifest, BusinessPluginManifest, BusinessPluginManifest];
 type ExampleRecordTuple = [PluginRecord, PluginRecord, PluginRecord];
 const registrations: readonly ExampleRegistration[] = [knowledgeQueryPlugin as ExampleRegistration, ticketCreatePlugin as ExampleRegistration, humanTransferPlugin as ExampleRegistration];
 
@@ -28,7 +28,7 @@ const registrations: readonly ExampleRegistration[] = [knowledgeQueryPlugin as E
  * @date 2026-10-17
  */
 function host(): PluginHost {
-  return new PluginHost({ functionIds: registrations.map(({ manifest }) => manifest.functionId) });
+  return new PluginHost();
 }
 
 /**
@@ -66,13 +66,14 @@ function manifests(): ExampleManifestTuple {
  * 证明由示例注册的 Manifest 必须是 Function Plugin。
  *
  * @param manifest - PluginHost 返回的 Manifest
- * @returns 具有唯一 Function ownership 的 Manifest
+ * @returns 具有唯一 Function ownership 的 Function 定义
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function functionManifest(manifest: PluginManifest): FunctionPluginManifest {
-  if (manifest.pluginKind !== 'function') throw new Error(`示例插件不能是 system plugin: ${manifest.pluginId}`);
-  return manifest;
+function functionDefinition(registration: PluginPackage) {
+  const definition = registration.functions[0]?.definition;
+  if (!definition) throw new Error(`示例插件缺少 Function: ${registration.manifest.pluginId}`);
+  return definition;
 }
 
 /**
@@ -97,9 +98,11 @@ function matchesSchema(schema: Record<string, unknown>, value: unknown): boolean
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-async function execute(record: PluginRecord, input: JsonValue): Promise<PluginHandlerResult> {
-  assert.ok(record.handler);
-  const result = await record.handler(input, { pluginId: record.manifest.pluginId, functionId: functionManifest(record.manifest).functionId, runId: 'run-example', correlationId: 'trace-example' });
+async function execute(record: PluginRecord, input: JsonValue): Promise<FunctionHandlerResult> {
+  const functionId = [...record.functions.keys()][0];
+  const functionRecord = functionId ? record.functions.get(functionId) : undefined;
+  assert.ok(functionRecord);
+  const result = await functionRecord.handler(input, { pluginId: record.manifest.pluginId, functionId: functionId!, runId: 'run-example', correlationId: 'trace-example' });
   assert.ok(result);
   assert.equal(typeof result.status, 'string');
   return result;
@@ -113,11 +116,11 @@ async function execute(record: PluginRecord, input: JsonValue): Promise<PluginHa
 test('installs examples with one Function ownership each', () => {
   const records = enabledRecords();
   assert.deepEqual(records.map(({ manifest }) => manifest.pluginId), ['knowledge-query-v1', 'ticket-create-v1', 'human-transfer-v1']);
-  assert.deepEqual(records.map(({ manifest }) => functionManifest(manifest).functionId), ['knowledge.query', 'ticket.create', 'human.transfer']);
+  assert.deepEqual(registrations.map(functionDefinition).map(({ functionId }) => functionId), ['knowledge.query', 'ticket.create', 'human.transfer']);
   records.forEach((record) => {
     assert.equal(record.state, 'enabled');
-    assert.equal(record.manifest.pluginKind, 'function');
-    assert.equal(record.manifest.scope, 'function');
+    assert.equal(record.manifest.pluginKind, 'business');
+    assert.equal(record.manifest.scope, 'plugin');
   });
 });
 
@@ -153,9 +156,9 @@ test('returns schema-valid deterministic outputs for all examples', async () => 
   assert.equal(knowledgeOutput.status, 'succeeded');
   assert.equal(ticketOutput.status, 'succeeded');
   assert.equal(transferOutput.status, 'succeeded');
-  assert.equal(matchesSchema(knowledge.manifest.outputSchema, knowledgeOutput.output), true);
-  assert.equal(matchesSchema(ticket.manifest.outputSchema, ticketOutput.output), true);
-  assert.equal(matchesSchema(transfer.manifest.outputSchema, transferOutput.output), true);
+  assert.equal(matchesSchema(knowledge.functions.get('knowledge.query')!.definition.outputSchema, knowledgeOutput.output), true);
+  assert.equal(matchesSchema(ticket.functions.get('ticket.create')!.definition.outputSchema, ticketOutput.output), true);
+  assert.equal(matchesSchema(transfer.functions.get('human.transfer')!.definition.outputSchema, transferOutput.output), true);
   assert.equal(JSON.stringify(await execute(knowledge, { query: 'api-key=secret-knowledge', topK: 3 })).includes('api-key=secret-knowledge'), false);
   assert.deepEqual(knowledgeOutput, await execute(knowledge, { query: 'restart policy', topK: 3 }));
   assert.deepEqual(ticketOutput, await execute(ticket, { title: 'Service incident', description: 'test1 is unavailable', priority: 'high' }));
@@ -178,7 +181,8 @@ test('rejects malformed inputs without echoing sensitive values', async () => {
   for (const item of cases) {
     const result = await execute(item.record, item.input);
     assert.equal(result.status, 'failed');
-    assert.equal(matchesSchema(item.record.manifest.outputSchema, result.output), true);
+    const functionId = [...item.record.functions.keys()][0]!;
+    assert.equal(matchesSchema(item.record.functions.get(functionId)!.definition.outputSchema, result.output), true);
     assert.equal(JSON.stringify(result).includes(item.marker), false);
   }
 });

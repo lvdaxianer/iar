@@ -7,10 +7,10 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { FunctionPluginManifest, JsonValue } from '@iar/contracts';
-import type { PluginHandler, PluginRegistration } from '@iar/plugins';
+import { SCHEMA_VERSIONS, type BusinessPluginManifest, type FunctionDefinition, type JsonValue } from '@iar/contracts';
+import type { FunctionHandler, PluginPackage } from '@iar/plugin';
 import { retrieveKnowledge } from '../knowledge/retrieval.js';
-import { fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
+import { defineSandboxPlugin, fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
 
 /** dataset.query 的确定性血缘 fixture，按表名索引。 */
 const LINEAGE_FIXTURES: Readonly<Record<string, Record<string, JsonValue>>> = {
@@ -38,23 +38,31 @@ export const datasetQueryOperations: readonly SandboxOperation[] = [
 ];
 
 /** dataset.query 的版本化 Function Manifest，policy 声明 high 作为安全上限。 */
-export const datasetQueryManifest: FunctionPluginManifest = {
+export const datasetQueryManifest: BusinessPluginManifest = {
   apiVersion: 'iar.dev/v1',
   schemaVersion: 'iar.plugin-manifest/v1',
   pluginId: 'dataset-query-v1',
-  pluginKind: 'function',
-  scope: 'function',
-  functionId: 'dataset.query',
+  pluginKind: 'business',
+  scope: 'plugin',
   version: '1.0.0',
   description: '数据资产目录插件，提供资产检索与表级血缘查询的确定性模拟',
-  actionTypes: ['query'],
-  operations: datasetQueryOperations,
   capabilities: ['dataset.read'],
-  inputSchema: sandboxInputSchema(),
-  outputSchema: sandboxOutputSchema(),
   lifecycle: { entrypoint: './dist/examples/agent-sandbox/src/functions/dataset-query.js' },
   policy: { riskLevel: 'high', requiresConfirmation: true, allowedCapabilities: ['dataset.read'] },
   dependencies: []
+};
+
+export const datasetQueryFunction: FunctionDefinition = {
+  schemaVersion: SCHEMA_VERSIONS.function,
+  functionId: 'dataset.query',
+  version: datasetQueryManifest.version,
+  name: '数据资产目录',
+  description: datasetQueryManifest.description,
+  actionTypes: ['query'],
+  inputSchema: sandboxInputSchema(),
+  outputSchema: sandboxOutputSchema(),
+  capabilities: [...datasetQueryManifest.capabilities],
+  riskLevel: datasetQueryManifest.policy.riskLevel
 };
 
 /**
@@ -82,7 +90,7 @@ function resolveTable(query: string, params: Record<string, string>): string | u
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export const datasetQueryHandler: PluginHandler = async (input) => {
+export const datasetQueryHandler: FunctionHandler = async (input) => {
   const parsed = parseSandboxInput(input);
   if (!parsed) return fail('dataset.invalid_input');
   const operation = parsed.operation ?? 'search';
@@ -103,4 +111,4 @@ export const datasetQueryHandler: PluginHandler = async (input) => {
 };
 
 /** 可直接交给 PluginHost.install 的 dataset.query 注册对象。 */
-export const datasetQueryPlugin: PluginRegistration = { manifest: datasetQueryManifest, handler: datasetQueryHandler };
+export const datasetQueryPlugin: PluginPackage = defineSandboxPlugin(datasetQueryManifest, datasetQueryFunction, datasetQueryOperations, datasetQueryHandler);

@@ -9,10 +9,10 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { FunctionPluginManifest, JsonValue } from '@iar/contracts';
-import type { PluginHandler, PluginRegistration } from '@iar/plugins';
+import { SCHEMA_VERSIONS, type BusinessPluginManifest, type FunctionDefinition, type JsonValue } from '@iar/contracts';
+import type { FunctionHandler, PluginPackage } from '@iar/plugin';
 import { retrieveKnowledge } from '../knowledge/retrieval.js';
-import { fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
+import { defineSandboxPlugin, fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
 
 /** job.monitor 的确定性调度任务 fixture。 */
 const JOBS: ReadonlyArray<Record<string, JsonValue>> = [
@@ -75,23 +75,31 @@ export const jobMonitorOperations: readonly SandboxOperation[] = [
 ];
 
 /** job.monitor 的版本化 Function Manifest，policy 声明 high 作为安全上限。 */
-export const jobMonitorManifest: FunctionPluginManifest = {
+export const jobMonitorManifest: BusinessPluginManifest = {
   apiVersion: 'iar.dev/v1',
   schemaVersion: 'iar.plugin-manifest/v1',
   pluginId: 'job-monitor-v1',
-  pluginKind: 'function',
-  scope: 'function',
-  functionId: 'job.monitor',
+  pluginKind: 'business',
+  scope: 'plugin',
   version: '1.0.0',
   description: '任务调度监控插件，提供调度任务状态与运行日志的确定性模拟',
-  actionTypes: ['query'],
-  operations: jobMonitorOperations,
   capabilities: ['job.read'],
-  inputSchema: sandboxInputSchema(),
-  outputSchema: sandboxOutputSchema(),
   lifecycle: { entrypoint: './dist/examples/agent-sandbox/src/functions/job-monitor.js' },
   policy: { riskLevel: 'high', requiresConfirmation: true, allowedCapabilities: ['job.read'] },
   dependencies: []
+};
+
+export const jobMonitorFunction: FunctionDefinition = {
+  schemaVersion: SCHEMA_VERSIONS.function,
+  functionId: 'job.monitor',
+  version: jobMonitorManifest.version,
+  name: '任务调度监控',
+  description: jobMonitorManifest.description,
+  actionTypes: ['query'],
+  inputSchema: sandboxInputSchema(),
+  outputSchema: sandboxOutputSchema(),
+  capabilities: [...jobMonitorManifest.capabilities],
+  riskLevel: jobMonitorManifest.policy.riskLevel
 };
 
 /**
@@ -136,7 +144,7 @@ function isKnowledgeQuery(query: string): boolean {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export const jobMonitorHandler: PluginHandler = async (input) => {
+export const jobMonitorHandler: FunctionHandler = async (input) => {
   const parsed = parseSandboxInput(input);
   if (!parsed) return fail('job.invalid_input');
   const operation = parsed.operation ?? (isKnowledgeQuery(parsed.query) ? 'search' : 'status');
@@ -161,4 +169,4 @@ export const jobMonitorHandler: PluginHandler = async (input) => {
 };
 
 /** 可直接交给 PluginHost.install 的 job.monitor 注册对象。 */
-export const jobMonitorPlugin: PluginRegistration = { manifest: jobMonitorManifest, handler: jobMonitorHandler };
+export const jobMonitorPlugin: PluginPackage = defineSandboxPlugin(jobMonitorManifest, jobMonitorFunction, jobMonitorOperations, jobMonitorHandler);

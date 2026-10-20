@@ -9,10 +9,10 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { FunctionPluginManifest, JsonValue } from '@iar/contracts';
-import type { PluginHandler, PluginRegistration } from '@iar/plugins';
+import { SCHEMA_VERSIONS, type BusinessPluginManifest, type FunctionDefinition, type JsonValue } from '@iar/contracts';
+import type { FunctionHandler, PluginPackage } from '@iar/plugin';
 import { retrieveKnowledge } from '../knowledge/retrieval.js';
-import { fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
+import { defineSandboxPlugin, fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
 
 /** system.status 的确定性服务健康度 fixture。 */
 const SERVICES: ReadonlyArray<Record<string, JsonValue>> = [
@@ -37,23 +37,31 @@ export const systemStatusOperations: readonly SandboxOperation[] = [
 ];
 
 /** system.status 的版本化 Function Manifest，policy 声明 high 作为安全上限。 */
-export const systemStatusManifest: FunctionPluginManifest = {
+export const systemStatusManifest: BusinessPluginManifest = {
   apiVersion: 'iar.dev/v1',
   schemaVersion: 'iar.plugin-manifest/v1',
   pluginId: 'system-status-v1',
-  pluginKind: 'function',
-  scope: 'function',
-  functionId: 'system.status',
+  pluginKind: 'business',
+  scope: 'plugin',
   version: '1.0.0',
   description: '系统状态与告警插件，提供服务健康度总览与活动告警列表的确定性模拟',
-  actionTypes: ['query'],
-  operations: systemStatusOperations,
   capabilities: ['status.read'],
-  inputSchema: sandboxInputSchema(),
-  outputSchema: sandboxOutputSchema(),
   lifecycle: { entrypoint: './dist/examples/agent-sandbox/src/functions/system-status.js' },
   policy: { riskLevel: 'high', requiresConfirmation: true, allowedCapabilities: ['status.read'] },
   dependencies: []
+};
+
+export const systemStatusFunction: FunctionDefinition = {
+  schemaVersion: SCHEMA_VERSIONS.function,
+  functionId: 'system.status',
+  version: systemStatusManifest.version,
+  name: '系统状态与告警',
+  description: systemStatusManifest.description,
+  actionTypes: ['query'],
+  inputSchema: sandboxInputSchema(),
+  outputSchema: sandboxOutputSchema(),
+  capabilities: [...systemStatusManifest.capabilities],
+  riskLevel: systemStatusManifest.policy.riskLevel
 };
 
 /**
@@ -88,7 +96,7 @@ function isKnowledgeQuery(query: string): boolean {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export const systemStatusHandler: PluginHandler = async (input) => {
+export const systemStatusHandler: FunctionHandler = async (input) => {
   const parsed = parseSandboxInput(input);
   if (!parsed) return fail('status.invalid_input');
   const operation = parsed.operation ?? (isKnowledgeQuery(parsed.query) ? 'search' : inferOperation(parsed.query));
@@ -109,4 +117,4 @@ export const systemStatusHandler: PluginHandler = async (input) => {
 };
 
 /** 可直接交给 PluginHost.install 的 system.status 注册对象。 */
-export const systemStatusPlugin: PluginRegistration = { manifest: systemStatusManifest, handler: systemStatusHandler };
+export const systemStatusPlugin: PluginPackage = defineSandboxPlugin(systemStatusManifest, systemStatusFunction, systemStatusOperations, systemStatusHandler);

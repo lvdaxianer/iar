@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SCHEMA_VERSIONS } from '@iar/contracts';
 import { DecisionBackendResolver, IntentModelDecisionAdapter, JevDecisionAdapter, ModelGateway, ModelProfileRegistry, UnifiedDecisionAdapter, loadModelProfiles, type DecisionRequest, type ModelProvider } from '@iar/decision';
+import { createIarAgent } from '@iar/agent';
 import { PluginHost } from '@iar/plugins';
 import { allSandboxPlugins, sandboxFunctionIds } from './functions/index.js';
 import { assertSandboxKnowledgeBases } from './knowledge/retrieval.js';
@@ -19,13 +20,7 @@ import type { SandboxDecisionBackend, SandboxMode } from './session-types.js';
  */
 export function createSandboxPluginHost(): PluginHost {
   assertSandboxKnowledgeBases(sandboxFunctionIds);
-  const host = new PluginHost({ functionIds: sandboxFunctionIds });
-  for (const registration of allSandboxPlugins) {
-    // 初始化不完整时立即失败，由会话构造器释放线程。
-    if (!host.install(registration).ok) throw new Error(`插件安装失败: ${registration.manifest.pluginId}`);
-    if (!host.enable(registration.manifest.pluginId).ok) throw new Error(`插件启用失败: ${registration.manifest.pluginId}`);
-  }
-  return host;
+  return createIarAgent({ plugins: allSandboxPlugins }).pluginHost;
 }
 
 /** 从受控配置构建模型网关和两个决策适配器。

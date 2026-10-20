@@ -7,8 +7,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Ajv2020 } from 'ajv/dist/2020.js';
-import type { FunctionPluginManifest, JsonValue } from '@iar/contracts';
-import type { PluginRegistration } from '@iar/plugins';
+import type { JsonValue } from '@iar/contracts';
+import type { PluginPackage } from '@iar/plugin';
 import { createFastifyApp } from '@iar/adapters-fastify';
 import { PluginHost } from '@iar/plugins';
 import { LocalWorkflow } from '@iar/workflow';
@@ -20,8 +20,7 @@ import { humanTransferPlugin } from '../../../examples/plugins/human-transfer/sr
  * 端到端 fixture 只安装三个示例，不依赖真实模型或外部系统。
  * HTTP 只传输 Manifest；本地 Handler 由宿主加载边界绑定。
  */
-type ExampleRegistration = PluginRegistration & { manifest: FunctionPluginManifest };
-const plugins: readonly ExampleRegistration[] = [knowledgeQueryPlugin as ExampleRegistration, ticketCreatePlugin as ExampleRegistration, humanTransferPlugin as ExampleRegistration];
+const plugins: readonly PluginPackage[] = [knowledgeQueryPlugin, ticketCreatePlugin, humanTransferPlugin];
 
 /**
  * 构造隔离的 API/PluginHost 组合。
@@ -29,7 +28,7 @@ const plugins: readonly ExampleRegistration[] = [knowledgeQueryPlugin as Example
  * 测试不启动端口，也不调用任何外部服务。
  */
 function dependencies(): { workflow: LocalWorkflow; pluginHost: PluginHost } {
-  return { workflow: new LocalWorkflow(), pluginHost: new PluginHost({ functionIds: plugins.map(({ manifest }) => manifest.functionId) }) };
+  return { workflow: new LocalWorkflow(), pluginHost: new PluginHost() };
 }
 
 /**
@@ -51,14 +50,13 @@ function inputFor(pluginId: string): JsonValue {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-test('installs every example manifest through the Fastify boundary', async () => {
+test('rejects manifest-only business installation through the Fastify boundary', async () => {
   const { workflow, pluginHost } = dependencies();
   const app = await createFastifyApp({ workflow, pluginHost });
   for (const plugin of plugins) {
     const response = await app.inject({ method: 'POST', url: '/v1/plugins/install', headers: { 'x-trace-id': `trace-install-${plugin.manifest.pluginId}` }, payload: { manifest: plugin.manifest } });
-    assert.equal(response.statusCode, 201);
-    assert.equal(response.json().data.plugin.pluginId, plugin.manifest.pluginId);
-    assert.equal(response.json().data.plugin.version, plugin.manifest.version);
+    assert.equal(response.statusCode, 400);
+    assert.equal(response.json().error.code, 'contract.validation_failed');
   }
   await app.close();
 });
@@ -79,10 +77,11 @@ test('runs every example through host API and deterministic SDK handler', async 
     const enabled = await app.inject({ method: 'POST', url: `/v1/plugins/${plugin.manifest.pluginId}/enable`, headers: { 'x-trace-id': `trace-${plugin.manifest.pluginId}` } });
     assert.equal(enabled.statusCode, 200);
     const record = pluginHost.get(plugin.manifest.pluginId);
-    assert.ok(record?.handler);
-    const result = await record.handler(inputFor(plugin.manifest.pluginId), { pluginId: plugin.manifest.pluginId, functionId: plugin.manifest.functionId, runId: `run-${plugin.manifest.pluginId}`, correlationId: `trace-${plugin.manifest.pluginId}` });
+    const functionRecord = record?.functions.get(plugin.functions[0]!.definition.functionId);
+    assert.ok(functionRecord);
+    const result = await functionRecord.handler(inputFor(plugin.manifest.pluginId), { pluginId: plugin.manifest.pluginId, functionId: plugin.functions[0]!.definition.functionId, runId: `run-${plugin.manifest.pluginId}`, correlationId: `trace-${plugin.manifest.pluginId}` });
     assert.equal(result.status, 'succeeded');
-    assert.equal(new Ajv2020({ strict: false }).compile(plugin.manifest.outputSchema)(result.output), true);
+    assert.equal(new Ajv2020({ strict: false }).compile(plugin.functions[0]!.definition.outputSchema)(result.output), true);
   }
   await app.close();
 });

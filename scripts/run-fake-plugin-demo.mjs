@@ -5,22 +5,22 @@
  * @date 2026-10-17
  */
 import assert from 'node:assert/strict';
+import { createIarAgent } from '@iar/agent';
 import { replayEvents } from '@iar/runtime';
-import { PluginHost } from '@iar/plugins';
 import { fakeStopPlugin } from '../dist/examples/plugins/fake-plugin/src/index.js';
 
 // 演示入口只使用构建产物，避免文档示例依赖不存在的源码 .js 文件。
 // npm run demo:fake-plugin 会先生成 dist，再执行本文件。
-const host = new PluginHost({ functionIds: ['dip.service.stop'] });
-// 安装和启用必须分别通过 Host 生命周期 API 完成。
-assert.equal(host.install(fakeStopPlugin).ok, true);
-assert.equal(host.enable(fakeStopPlugin.manifest.pluginId).ok, true);
+// 统一入口负责校验、安装、启用，并从 Plugin 包派生 Function 索引。
+const host = createIarAgent({ plugins: [fakeStopPlugin] }).pluginHost;
 const candidate = host.resolveCandidate('dip.service.stop', fakeStopPlugin.manifest.pluginId);
 // resolveCandidate 同时检查 Function 归属和 enabled 状态。
 assert.equal(candidate.ok, true);
 if (candidate.ok) {
   // Handler 只模拟成功结果，不触发真实外部副作用。
-  const result = await candidate.value.handler?.(
+  const functionRecord = candidate.value.functions.get('dip.service.stop');
+  assert.ok(functionRecord);
+  const result = await functionRecord.handler(
     { serviceId: 'test1' },
     { pluginId: fakeStopPlugin.manifest.pluginId, functionId: 'dip.service.stop', runId: 'run-demo', correlationId: 'corr-demo' }
   );

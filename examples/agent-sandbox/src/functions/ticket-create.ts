@@ -9,10 +9,10 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { FunctionPluginManifest, JsonValue } from '@iar/contracts';
-import type { PluginHandler, PluginRegistration } from '@iar/plugins';
+import { SCHEMA_VERSIONS, type BusinessPluginManifest, type FunctionDefinition, type JsonValue } from '@iar/contracts';
+import type { FunctionHandler, PluginPackage } from '@iar/plugin';
 import { retrieveKnowledge } from '../knowledge/retrieval.js';
-import { fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
+import { defineSandboxPlugin, fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
 
 /** ticket.create 的确定性工单流转 fixture，按工单号索引。 */
 const TICKET_PROGRESS: Readonly<Record<string, Record<string, JsonValue>>> = {
@@ -55,23 +55,31 @@ export const ticketCreateOperations: readonly SandboxOperation[] = [
 ];
 
 /** ticket.create 的版本化 Function Manifest，policy 声明 high 作为安全上限。 */
-export const ticketCreateManifest: FunctionPluginManifest = {
+export const ticketCreateManifest: BusinessPluginManifest = {
   apiVersion: 'iar.dev/v1',
   schemaVersion: 'iar.plugin-manifest/v1',
   pluginId: 'ticket-create-v1',
-  pluginKind: 'function',
-  scope: 'function',
-  functionId: 'ticket.create',
+  pluginKind: 'business',
+  scope: 'plugin',
   version: '1.0.0',
   description: '工单支持插件，提供工单进度查询与工单创建的确定性模拟',
-  actionTypes: ['query', 'create'],
-  operations: ticketCreateOperations,
   capabilities: ['ticket.read', 'ticket.write'],
-  inputSchema: sandboxInputSchema(),
-  outputSchema: sandboxOutputSchema(),
   lifecycle: { entrypoint: './dist/examples/agent-sandbox/src/functions/ticket-create.js' },
   policy: { riskLevel: 'high', requiresConfirmation: true, allowedCapabilities: ['ticket.read', 'ticket.write'] },
   dependencies: []
+};
+
+export const ticketCreateFunction: FunctionDefinition = {
+  schemaVersion: SCHEMA_VERSIONS.function,
+  functionId: 'ticket.create',
+  version: ticketCreateManifest.version,
+  name: '工单支持',
+  description: ticketCreateManifest.description,
+  actionTypes: ['query', 'create'],
+  inputSchema: sandboxInputSchema(),
+  outputSchema: sandboxOutputSchema(),
+  capabilities: [...ticketCreateManifest.capabilities],
+  riskLevel: ticketCreateManifest.policy.riskLevel
 };
 
 /**
@@ -106,7 +114,7 @@ function isKnowledgeQuery(query: string): boolean {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export const ticketCreateHandler: PluginHandler = async (input) => {
+export const ticketCreateHandler: FunctionHandler = async (input) => {
   const parsed = parseSandboxInput(input);
   if (!parsed) return fail('ticket.invalid_input');
   const operation = parsed.operation ?? (isKnowledgeQuery(parsed.query) ? 'search' : inferOperation(parsed.query));
@@ -150,4 +158,4 @@ export const ticketCreateHandler: PluginHandler = async (input) => {
 };
 
 /** 可直接交给 PluginHost.install 的 ticket.create 注册对象。 */
-export const ticketCreatePlugin: PluginRegistration = { manifest: ticketCreateManifest, handler: ticketCreateHandler };
+export const ticketCreatePlugin: PluginPackage = defineSandboxPlugin(ticketCreateManifest, ticketCreateFunction, ticketCreateOperations, ticketCreateHandler);

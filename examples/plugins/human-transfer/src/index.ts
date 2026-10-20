@@ -7,21 +7,33 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import type { FunctionPluginManifest, JsonValue } from '@iar/contracts';
-import type { PluginHandler, PluginRegistration } from '@iar/plugins';
+import { SCHEMA_VERSIONS, type BusinessPluginManifest, type FunctionDefinition, type JsonValue } from '@iar/contracts';
+import { definePlugin, type FunctionHandler, type PluginPackage } from '@iar/plugin';
 
 /** human transfer 的高风险转交 Manifest。 */
-export const humanTransferManifest: FunctionPluginManifest = {
+export const humanTransferManifest: BusinessPluginManifest = {
   apiVersion: 'iar.dev/v1',
   schemaVersion: 'iar.plugin-manifest/v1',
   pluginId: 'human-transfer-v1',
-  pluginKind: 'function',
-  scope: 'function',
-  functionId: 'human.transfer',
+  pluginKind: 'business',
+  scope: 'plugin',
   version: '1.0.0',
   description: '将行为请求转交人工队列的示例插件',
-  actionTypes: ['query', 'transfer'],
   capabilities: ['human.transfer'],
+  lifecycle: { entrypoint: './dist/examples/plugins/human-transfer/src/index.js' },
+  policy: { riskLevel: 'high', requiresConfirmation: true, allowedCapabilities: ['human.transfer'] },
+  dependencies: []
+};
+
+export const humanTransferFunction: FunctionDefinition = {
+  schemaVersion: SCHEMA_VERSIONS.function,
+  functionId: 'human.transfer',
+  version: humanTransferManifest.version,
+  name: humanTransferManifest.description,
+  description: humanTransferManifest.description,
+  actionTypes: ['query', 'transfer'],
+  capabilities: [...humanTransferManifest.capabilities],
+  riskLevel: humanTransferManifest.policy.riskLevel,
   inputSchema: {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     type: 'object',
@@ -35,10 +47,7 @@ export const humanTransferManifest: FunctionPluginManifest = {
       { type: 'object', properties: { accepted: { const: true }, queue: { const: 'human.support' }, handoffId: { type: 'string', minLength: 1 } }, required: ['accepted', 'queue', 'handoffId'], additionalProperties: false },
       { type: 'object', properties: { accepted: { const: false }, errorCode: { type: 'string', minLength: 1 } }, required: ['accepted', 'errorCode'], additionalProperties: false }
     ]
-  },
-  lifecycle: { entrypoint: './dist/examples/plugins/human-transfer/src/index.js' },
-  policy: { riskLevel: 'high', requiresConfirmation: true, allowedCapabilities: ['human.transfer'] },
-  dependencies: []
+  }
 };
 
 /**
@@ -71,7 +80,7 @@ function transferInput(input: JsonValue): { reason: string; summary: string } | 
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-export const humanTransferHandler: PluginHandler = async (input) => {
+export const humanTransferHandler: FunctionHandler = async (input) => {
   // 输入校验失败只能返回稳定错误码，不能返回转交说明或凭据。
   if (!transferInput(input)) return { output: { accepted: false, errorCode: 'human.invalid_input' }, status: 'failed', errorCode: 'human.invalid_input' };
   return { output: { accepted: true, queue: 'human.support', handoffId: 'handoff-fixture-1' }, status: 'succeeded' };
@@ -84,4 +93,4 @@ export const humanTransferHandler: PluginHandler = async (input) => {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-export const humanTransferPlugin: PluginRegistration = { manifest: humanTransferManifest, handler: humanTransferHandler };
+export const humanTransferPlugin: PluginPackage = definePlugin({ manifest: humanTransferManifest, functions: [{ definition: humanTransferFunction, operations: [{ name: 'transfer', kind: 'action', description: '转交人工服务队列' }], handler: humanTransferHandler }] });

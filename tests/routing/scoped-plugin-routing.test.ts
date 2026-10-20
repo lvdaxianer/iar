@@ -10,37 +10,36 @@ import {
   SCHEMA_VERSIONS,
   validateContract,
   type EventEnvelope,
-  type FunctionPluginManifest
+  type BusinessPluginManifest,
+  type ActionType
 } from '@iar/contracts';
 import { buildIntentDecisionInput, type DecisionRequest } from '@iar/decision';
+import { defineFunction } from '@iar/plugin';
 import { PluginHost } from '@iar/plugins';
 import { BehaviorContextProjector, createInitialContext, PluginFirstRouter, type AsyncDecisionAdapter } from '@iar/runtime';
 import { facts } from './rule-engine-fixtures.js';
+import { pluginPackage } from '../contract/fixtures/plugin-package.js';
 
 const expression = { condition: { field: 'semantic.intent', operator: 'equals', value: 'knowledge.query' } } as const;
 
-function manifest(pluginId: string, functionId: string, actionTypes: FunctionPluginManifest['actionTypes']): FunctionPluginManifest {
-  return {
+function manifest(pluginId: string, functionId: string, actionTypes: ActionType[]) {
+  return pluginPackage({
     apiVersion: 'iar.dev/v1',
     schemaVersion: SCHEMA_VERSIONS.pluginManifest,
     pluginId,
-    pluginKind: 'function',
-    scope: 'function',
-    functionId,
+    pluginKind: 'business',
+    scope: 'plugin',
     version: '1.0.0',
     description: `${pluginId} 查询插件`,
-    actionTypes,
     capabilities: ['knowledge.read'],
-    inputSchema: { type: 'object', additionalProperties: false },
-    outputSchema: { type: 'object', additionalProperties: false },
     lifecycle: { entrypoint: `${pluginId}.entry` },
     policy: { riskLevel: 'low', requiresConfirmation: false, allowedCapabilities: ['knowledge.read'] },
     dependencies: []
-  };
+  }, functionId, { actionTypes });
 }
 
 function createHost(): PluginHost {
-  const host = new PluginHost({ functionIds: ['knowledge.query', 'report.center', 'human.transfer'] });
+  const host = new PluginHost();
   for (const item of [
     manifest('knowledge-a', 'knowledge.query', ['query']),
     manifest('knowledge-b', 'knowledge.query', ['query']),
@@ -104,10 +103,10 @@ function request(overrides: Partial<Parameters<PluginFirstRouter['routeAsync']>[
   return { routerRequest, functionCalls, pluginCalls };
 }
 
-test('FunctionPluginManifest rejects unknown actionTypes', () => {
+test('FunctionDefinition rejects unknown actionTypes', () => {
   const value = manifest('invalid-action', 'knowledge.query', ['query']);
-  const invalid = { ...value, actionTypes: ['query', 'rank'] };
-  const result = validateContract('pluginManifest', invalid);
+  const invalid = { ...value.functions[0]!.definition, actionTypes: ['query', 'rank'] };
+  const result = validateContract('function', invalid);
   assert.equal(result.ok, false);
 });
 
@@ -150,6 +149,34 @@ test('Plugin-first routing stops before Function when Plugin decision needs clar
   assert.equal(result.status, 'needs_clarification');
   assert.equal(functionCalls.length, 0);
   assert.equal(pluginCalls.length, 1);
+});
+
+test('Plugin-first routing selects the matching Function inside a multi-Function Plugin', async () => {
+  const { routerRequest, functionCalls, pluginCalls } = request();
+  const multi = manifest('knowledge-multi', 'knowledge.query', ['query']);
+  const first = multi.functions[0]!;
+  const second = defineFunction({
+    definition: { ...first.definition, functionId: 'report.query', name: '报表查询', description: '报表查询', actionTypes: ['query'] },
+    operations: [{ name: 'search', kind: 'read', description: '查询报表' }],
+    handler: first.handler
+  });
+  const packageWithTwoFunctions = { ...multi, functions: [first, second] };
+  assert.equal(routerRequest.pluginHost.install(packageWithTwoFunctions).ok, true);
+  assert.equal(routerRequest.pluginHost.enable('knowledge-multi').ok, true);
+  routerRequest.pluginRules = [...routerRequest.pluginRules, {
+    pluginId: 'knowledge-multi',
+    functionId: 'report.query',
+    rule: { schemaVersion: SCHEMA_VERSIONS.rule, ruleId: 'rule-knowledge-multi-report', version: '1.0.0', target: 'plugin' as const, priority: 100, specificity: 1, unknownFieldPolicy: 'match_none' as const, expression },
+    requiredCapabilities: ['knowledge.read']
+  }];
+  routerRequest.pluginDecisionAdapter = decisionAdapter(pluginCalls, 'knowledge-multi');
+  routerRequest.functionDecisionAdapter = decisionAdapter(functionCalls, 'report.query');
+  const result = await new PluginFirstRouter().routeAsync(routerRequest);
+
+  assert.equal(result.status, 'matched');
+  assert.equal(result.pluginId, 'knowledge-multi');
+  assert.equal(result.functionId, 'report.query');
+  assert.deepEqual(functionCalls[0]?.candidates.map((candidate) => candidate.candidateId), ['knowledge.query', 'report.query']);
 });
 
 test('Intent Model prompt preserves Plugin descriptions and fixed actionTypes', () => {

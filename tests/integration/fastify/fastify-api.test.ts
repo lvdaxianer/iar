@@ -8,10 +8,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { SCHEMA_VERSIONS, type FunctionPluginManifest, type WorkflowDefinition } from '@iar/contracts';
+import { SCHEMA_VERSIONS, type SystemPluginManifest, type WorkflowDefinition } from '@iar/contracts';
 import { PluginHost } from '@iar/plugins';
 import { LocalWorkflow, confirmationScopeHash } from '@iar/workflow';
 import { createFastifyApp, type FastifyHostOptions } from '@iar/adapters-fastify';
+import { loadBusinessManifest, pluginPackage } from '../../contract/fixtures/plugin-package.js';
 
 /**
  * 创建可供 API contract test 使用的最小状态机。
@@ -27,12 +28,38 @@ function definition(): WorkflowDefinition {
 /**
  * 读取已经通过 contracts 校验的业务插件 fixture。
  *
- * @returns 合法 FunctionPluginManifest
+ * @returns 合法可安装业务 Plugin 包
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function manifest(): FunctionPluginManifest {
-  return JSON.parse(readFileSync(join(process.cwd(), 'tests', 'contract', 'fixtures', 'valid-plugin-manifest.json'), 'utf8')) as FunctionPluginManifest;
+function manifest(): ReturnType<typeof pluginPackage> {
+  return pluginPackage(loadBusinessManifest());
+}
+
+/**
+ * HTTP 生命周期接口只接收可序列化的系统 Plugin Manifest；业务 Plugin 的 Handler
+ * 属于本地包运行时，必须通过 @iar/plugin 和 @iar/agent 注册，不能从 JSON 传输。
+ *
+ * @returns 合法系统 Plugin Manifest
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-21
+ */
+function systemManifest(): SystemPluginManifest {
+  return {
+    apiVersion: 'iar.dev/v1',
+    schemaVersion: SCHEMA_VERSIONS.pluginManifest,
+    pluginId: 'iar.system.audit-v1',
+    version: '1.0.0',
+    description: 'API system plugin lifecycle fixture',
+    pluginKind: 'system',
+    scope: 'runtime',
+    capabilities: ['observability'],
+    inputSchema: { type: 'object', additionalProperties: false },
+    outputSchema: { type: 'object', additionalProperties: false },
+    lifecycle: { entrypoint: 'builtin:iar.system.audit' },
+    policy: { riskLevel: 'low', requiresConfirmation: false, allowedCapabilities: ['observability'] },
+    dependencies: []
+  };
 }
 
 /**
@@ -43,7 +70,7 @@ function manifest(): FunctionPluginManifest {
  * @date 2026-10-17
  */
 function options(): FastifyHostOptions {
-  return { workflow: new LocalWorkflow(), pluginHost: new PluginHost({ functionIds: ['dip.service.stop'] }) };
+  return { workflow: new LocalWorkflow(), pluginHost: new PluginHost() };
 }
 
 /**
@@ -177,11 +204,11 @@ test('returns versioned stable errors for malformed and unknown runs', async () 
  */
 test('delegates plugin install, enable and disable with safe summaries', async () => {
   const app = await createFastifyApp(options());
-  const plugin = manifest();
+  const plugin = systemManifest();
   const installed = await app.inject({ method: 'POST', url: '/v1/plugins/install', headers: { 'x-trace-id': 'trace-plugin' }, payload: { traceId: 'trace-plugin', manifest: plugin } });
   assert.equal(installed.statusCode, 201);
   assertEnvelope(installed.json(), 'trace-plugin', '');
-  assert.deepEqual(installed.json().data.plugin, { pluginId: plugin.pluginId, functionId: plugin.functionId, version: plugin.version, state: 'installed' });
+  assert.deepEqual(installed.json().data.plugin, { pluginId: plugin.pluginId, version: plugin.version, state: 'installed' });
   assertSafe(installed.json());
 
   const enabled = await app.inject({ method: 'POST', url: `/v1/plugins/${plugin.pluginId}/enable`, headers: { 'x-trace-id': 'trace-plugin' } });

@@ -9,10 +9,10 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { FunctionPluginManifest, JsonValue } from '@iar/contracts';
-import type { PluginHandler, PluginRegistration } from '@iar/plugins';
+import { SCHEMA_VERSIONS, type BusinessPluginManifest, type FunctionDefinition, type JsonValue } from '@iar/contracts';
+import type { FunctionHandler, PluginPackage } from '@iar/plugin';
 import { retrieveKnowledge } from '../knowledge/retrieval.js';
-import { fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
+import { defineSandboxPlugin, fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
 
 /** api.gateway 的确定性网关统计 fixture。 */
 const GATEWAY_STATS: Record<string, JsonValue> = {
@@ -36,23 +36,31 @@ export const apiGatewayOperations: readonly SandboxOperation[] = [
 ];
 
 /** api.gateway 的版本化 Function Manifest，policy 声明 high 作为安全上限。 */
-export const apiGatewayManifest: FunctionPluginManifest = {
+export const apiGatewayManifest: BusinessPluginManifest = {
   apiVersion: 'iar.dev/v1',
   schemaVersion: 'iar.plugin-manifest/v1',
   pluginId: 'api-gateway-v1',
-  pluginKind: 'function',
-  scope: 'function',
-  functionId: 'api.gateway',
+  pluginKind: 'business',
+  scope: 'plugin',
   version: '1.0.0',
   description: 'API 网关管理插件，提供调用统计查看与限流调整的确定性模拟',
-  actionTypes: ['query', 'update'],
-  operations: apiGatewayOperations,
   capabilities: ['gateway.read', 'gateway.control'],
-  inputSchema: sandboxInputSchema(),
-  outputSchema: sandboxOutputSchema(),
   lifecycle: { entrypoint: './dist/examples/agent-sandbox/src/functions/api-gateway.js' },
   policy: { riskLevel: 'high', requiresConfirmation: true, allowedCapabilities: ['gateway.read', 'gateway.control'] },
   dependencies: []
+};
+
+export const apiGatewayFunction: FunctionDefinition = {
+  schemaVersion: SCHEMA_VERSIONS.function,
+  functionId: 'api.gateway',
+  version: apiGatewayManifest.version,
+  name: 'API 网关管理',
+  description: apiGatewayManifest.description,
+  actionTypes: ['query', 'update'],
+  inputSchema: sandboxInputSchema(),
+  outputSchema: sandboxOutputSchema(),
+  capabilities: [...apiGatewayManifest.capabilities],
+  riskLevel: apiGatewayManifest.policy.riskLevel
 };
 
 /**
@@ -88,7 +96,7 @@ function isKnowledgeQuery(query: string): boolean {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export const apiGatewayHandler: PluginHandler = async (input) => {
+export const apiGatewayHandler: FunctionHandler = async (input) => {
   const parsed = parseSandboxInput(input);
   if (!parsed) return fail('gateway.invalid_input');
   const operation = parsed.operation ?? (isKnowledgeQuery(parsed.query) ? 'search' : inferOperation(parsed.query));
@@ -114,4 +122,4 @@ export const apiGatewayHandler: PluginHandler = async (input) => {
 };
 
 /** 可直接交给 PluginHost.install 的 api.gateway 注册对象。 */
-export const apiGatewayPlugin: PluginRegistration = { manifest: apiGatewayManifest, handler: apiGatewayHandler };
+export const apiGatewayPlugin: PluginPackage = defineSandboxPlugin(apiGatewayManifest, apiGatewayFunction, apiGatewayOperations, apiGatewayHandler);

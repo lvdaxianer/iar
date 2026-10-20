@@ -84,7 +84,7 @@ test('control-plane error response never echoes raw artifact, signature or bundl
   // Given：ABI 合法外壳携带 malformed artifact 和不应回显的敏感字段。
   const api = createTenantControlPlane({
     trustedSigners: new Map(),
-    hostFactory: () => ({ host: new PluginHost({ functionIds: ['function.drill'] }), compatibility: { hostApiVersion: 'iar.dev/v1', installed: new Map(), availableDependencies: new Set() } }),
+    hostFactory: () => ({ host: new PluginHost(), compatibility: { hostApiVersion: 'iar.dev/v1', installed: new Map(), availableDependencies: new Set() } }),
     authorize: () => ({ allowed: true })
   });
   const response = await api.request({

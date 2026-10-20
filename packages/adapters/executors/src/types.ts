@@ -5,7 +5,6 @@
  * @date 2026-10-17
  */
 import type { JsonValue } from '@iar/contracts';
-import type { PluginHandlerContext, PluginHandlerResult } from '@iar/plugins';
 import type { HookSubscription, SubscriptionRegistry } from '@iar/subscriptions';
 
 /*
@@ -31,7 +30,7 @@ import type { HookSubscription, SubscriptionRegistry } from '@iar/subscriptions'
  * ExecutorError 的 code 是客户端状态机唯一依据。
  * retryable 只由核心根据错误类别设置。
  * ExecutorRequest 的字段顺序不影响 JSON 语义。
- * PluginHandlerContext 由核心重新构造，拒绝调用方注入 registry。
+ * ExecutorHandlerContext 由核心重新构造，拒绝调用方注入 registry。
  * Handler 只接收输入、只读上下文和 signal。
  * CleanupReport 不返回凭据、输入或异常正文。
  * Options callback 由宿主控制，executor 不猜测外部资源。
@@ -71,15 +70,21 @@ export type ExecutorResponse = {
   pluginId: string;
   pluginVersion: string;
   mode: ExecutorMode;
-  data: PluginHandlerResult | null;
+  data: ExecutorHandlerResult | null;
   error: ExecutorError | null;
 };
 
 /** 只向凭据 resolver 暴露非 secret 的绑定范围。 */
 export type CredentialScope = { tenantId: string; pluginId: string; pluginVersion: string };
 
-/** 插件 handler 能看到的最小输入、只读上下文和取消信号。 */
-export type ExecutorHandler = (input: JsonValue, context: PluginHandlerContext, signal: AbortSignal) => Promise<PluginHandlerResult>;
+/** 执行器 handler 的稳定结果。 */
+export type ExecutorHandlerResult = { output: JsonValue; status: 'succeeded' | 'failed'; errorCode?: string };
+
+/** 执行器 handler 能看到的最小输入、只读上下文和取消信号。 */
+export type ExecutorHandlerContext = { pluginId: string; runId: string; correlationId: string };
+
+/** 执行器 handler 的隔离调用签名。 */
+export type ExecutorHandler = (input: JsonValue, context: ExecutorHandlerContext, signal: AbortSignal) => Promise<ExecutorHandlerResult>;
 
 /** 卸载清理报告，字段按稳定 ID 排序。 */
 export type CleanupReport = { cancelledRequestIds: string[]; removedSubscriptionIds: string[] };

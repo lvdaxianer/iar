@@ -9,7 +9,7 @@
  * @date 2026-10-17
  */
 import type { JsonValue } from '@iar/contracts';
-import type { PluginHandlerContext, PluginHandlerResult } from '@iar/plugins';
+import type { FunctionHandlerContext, FunctionHandlerResult } from '@iar/plugin';
 import { parentPort, workerData } from 'node:worker_threads';
 import { sandboxPluginRegistry } from './plugin-registry.js';
 
@@ -22,12 +22,12 @@ type RunnerRequest = {
   /** 插件输入。 */
   input: JsonValue;
   /** 插件执行上下文。 */
-  context: PluginHandlerContext;
+  context: FunctionHandlerContext;
 };
 
 /** worker 回写给主线程的结果联合。 */
 type RunnerResponse =
-  | { ok: true; result: PluginHandlerResult }
+  | { ok: true; result: FunctionHandlerResult }
   | { ok: false; error: string };
 
 /** 主线程与 worker 共享的 SAB 布局：Int32 flag + Uint32 长度 + payload。 */
@@ -54,10 +54,11 @@ async function handle(request: RunnerRequest): Promise<void> {
   let response: RunnerResponse;
   try {
     const registration = sandboxPluginRegistry[request.pluginId];
-    if (!registration || typeof registration.handler !== 'function') {
+    const functionRegistration = registration?.functions.find((item) => item.definition.functionId === request.context.functionId);
+    if (!functionRegistration || typeof functionRegistration.handler !== 'function') {
       response = { ok: false, error: `插件不可用: ${request.pluginId}` };
     } else {
-      const result = await registration.handler(structuredClone(request.input), structuredClone(request.context));
+      const result = await functionRegistration.handler(structuredClone(request.input), structuredClone(request.context));
       response = { ok: true, result };
     }
   } catch (error) {

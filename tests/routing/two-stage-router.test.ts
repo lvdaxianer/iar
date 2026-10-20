@@ -57,12 +57,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import type { FunctionPluginManifest } from '@iar/contracts';
+import type { BusinessPluginManifest } from '@iar/contracts';
 import { SCHEMA_VERSIONS } from '@iar/contracts';
 import { DecisionBackendResolver, IntentModelDecisionAdapter, JevDecisionAdapter, loadModelProfiles, MockDecisionProvider, ModelGateway, ModelProfileRegistry, UnifiedDecisionAdapter, type DecisionRequest, type ModelProvider } from '@iar/decision';
 import { PluginHost } from '@iar/plugins';
 import { TwoStageRouter, type AsyncDecisionAdapter, type RouteRequest } from '@iar/runtime';
 import { facts, functionRule, pluginRule } from './rule-engine-fixtures.js';
+import { loadBusinessManifest, pluginPackage } from '../contract/fixtures/plugin-package.js';
 
 /*
  * 测试断言不仅检查最终状态，也检查阶段顺序和受限输入。
@@ -78,13 +79,12 @@ import { facts, functionRule, pluginRule } from './rule-engine-fixtures.js';
  */
 /**
  * 读取已通过 Phase 1 contract test 的业务插件 Manifest。
- * @returns 可安装的 FunctionPluginManifest
+ * @returns 可安装的 PluginPackage
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function loadManifest(): FunctionPluginManifest {
-  const path = join(process.cwd(), 'tests', 'contract', 'fixtures', 'valid-plugin-manifest.json');
-  return JSON.parse(readFileSync(path, 'utf8')) as FunctionPluginManifest;
+function loadManifest(): ReturnType<typeof pluginPackage> {
+  return pluginPackage(loadBusinessManifest());
 }
 
 /**
@@ -94,9 +94,10 @@ function loadManifest(): FunctionPluginManifest {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function createHost(overrides: Partial<FunctionPluginManifest> = {}): PluginHost {
-  const host = new PluginHost({ functionIds: ['dip.service.stop', 'ticket.create'] });
-  const manifest = { ...loadManifest(), ...overrides };
+function createHost(overrides: Partial<BusinessPluginManifest> & { functionId?: string } = {}): PluginHost {
+  const host = new PluginHost();
+  const { functionId = 'dip.service.stop', ...manifestOverrides } = overrides;
+  const manifest = pluginPackage({ ...loadBusinessManifest(), ...manifestOverrides }, functionId);
   const installed = host.install(manifest);
   assert.equal(installed.ok, true);
   assert.equal(host.enable(manifest.pluginId).ok, true);

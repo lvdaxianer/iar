@@ -7,10 +7,10 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { PluginRegistration } from '@iar/plugins';
+import type { PluginPackage } from '@iar/plugin';
 import { allSandboxPlugins } from '../functions/index.js';
 
 /** pluginId 到插件注册对象的确定性映射。 */
-export const sandboxPluginRegistry: Readonly<Record<string, PluginRegistration>> = Object.fromEntries(
+export const sandboxPluginRegistry: Readonly<Record<string, PluginPackage>> = Object.fromEntries(
   allSandboxPlugins.map((registration) => [registration.manifest.pluginId, registration])
 );

@@ -8,8 +8,8 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import { MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, type JsonValue } from '@iar/contracts';
-import type { PluginHandlerResult } from '@iar/plugins';
+import { MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, type BusinessPluginManifest, type FunctionDefinition, type JsonValue, type PluginOperation } from '@iar/contracts';
+import { definePlugin, type FunctionHandler, type FunctionHandlerResult, type PluginPackage } from '@iar/plugin';
 
 /** Function 操作类型：read 免确认直接执行，action 需走确认流。 */
 export type SandboxOperationKind = 'read' | 'action';
@@ -23,6 +23,11 @@ export type SandboxOperation = {
   /** 操作的中文能力描述。 */
   description: string;
 };
+
+/** 由包级 Manifest、Function 定义和 Handler 组装统一 Plugin 包。 */
+export function defineSandboxPlugin(manifest: BusinessPluginManifest, definition: FunctionDefinition, operations: readonly PluginOperation[], handler: FunctionHandler): PluginPackage {
+  return definePlugin({ manifest, functions: [{ definition, operations, handler }] });
+}
 
 /** 校验通过的统一 Handler 输入。 */
 export type SandboxParsedInput = {
@@ -102,11 +107,11 @@ export function findSandboxOperation(operations: readonly SandboxOperation[], na
  *
  * @param operation - 实际执行的操作名
  * @param payload - 操作相关的确定性结果字段
- * @returns 成功的 PluginHandlerResult
+ * @returns 成功的 FunctionHandlerResult
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function succeed(operation: string, payload: Record<string, JsonValue>, declaredFacts: Record<string, JsonValue> = {}): PluginHandlerResult {
+export function succeed(operation: string, payload: Record<string, JsonValue>, declaredFacts: Record<string, JsonValue> = {}): FunctionHandlerResult {
   const facts = selectTrustedFacts(declaredFacts);
   return { status: 'succeeded', output: { accepted: true, operation, ...payload, facts } };
 }
@@ -130,11 +135,11 @@ function isTrustedFactKey(value: string): boolean {
  * 构造业务拒绝的 Handler 结果，输出统一携带 accepted:false 与稳定 errorCode。
  *
  * @param errorCode - 稳定错误码
- * @returns 失败的 PluginHandlerResult
+ * @returns 失败的 FunctionHandlerResult
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function fail(errorCode: string): PluginHandlerResult {
+export function fail(errorCode: string): FunctionHandlerResult {
   return { status: 'failed', output: { accepted: false, errorCode }, errorCode };
 }
 

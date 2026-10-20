@@ -42,7 +42,7 @@ import { fakeStopPlugin, onDisable, onEnable, onLoad, onUnload } from '../../exa
  */
 function createHost(): PluginHost {
   // Function ID 是 fake plugin 唯一允许归属的静态边界。
-  return new PluginHost({ functionIds: ['dip.service.stop'] });
+  return new PluginHost();
 }
 
 /**
@@ -54,7 +54,7 @@ function createHost(): PluginHost {
  * @date 2026-10-17
  */
 async function assertSuccessfulExecution(record: PluginRecord): Promise<void> {
-  const execution = await record.handler?.(
+  const execution = await record.functions.get('dip.service.stop')?.handler(
     { serviceId: 'test1' },
     { pluginId: fakeStopPlugin.manifest.pluginId, functionId: 'dip.service.stop', runId: 'run-fake', correlationId: 'corr-fake' }
   );
@@ -74,7 +74,7 @@ async function assertSuccessfulExecution(record: PluginRecord): Promise<void> {
  */
 function assertOutputSchema(output: unknown): void {
   const ajv = new Ajv2020({ strict: false });
-  const validate = ajv.compile(fakeStopPlugin.manifest.outputSchema);
+  const validate = ajv.compile(fakeStopPlugin.functions[0]!.definition.outputSchema);
   assert.equal(validate(output), true);
 }
 
@@ -87,14 +87,14 @@ function assertOutputSchema(output: unknown): void {
  * @date 2026-10-17
  */
 async function assertRejectedInputs(record: PluginRecord): Promise<void> {
-  const rejected = await record.handler?.(
+  const rejected = await record.functions.get('dip.service.stop')?.handler(
     { serviceId: '' },
     { pluginId: fakeStopPlugin.manifest.pluginId, functionId: 'dip.service.stop', runId: 'run-fake', correlationId: 'corr-fake' }
   );
   assert.ok(rejected);
   assertOutputSchema(rejected.output);
   assert.deepEqual(rejected?.output, { accepted: false, errorCode: 'fake.invalid_service_id' });
-  const extra = await record.handler?.(
+  const extra = await record.functions.get('dip.service.stop')?.handler(
     { serviceId: 'test1', extra: true },
     { pluginId: fakeStopPlugin.manifest.pluginId, functionId: 'dip.service.stop', runId: 'run-fake', correlationId: 'corr-fake' }
   );

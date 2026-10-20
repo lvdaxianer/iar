@@ -10,12 +10,12 @@
  * @date 2026-10-17
  */
 import type { JsonValue } from '@iar/contracts';
-import type { PluginHandlerContext, PluginHandlerResult } from '@iar/plugins';
+import type { FunctionHandlerContext, FunctionHandlerResult } from '@iar/plugin';
 import { Worker } from 'node:worker_threads';
 
 /** worker 回传结果的联合类型。 */
 type BridgeResponse =
-  | { ok: true; result: PluginHandlerResult }
+  | { ok: true; result: FunctionHandlerResult }
   | { ok: false; error: string };
 
 /** 共享缓冲的头部字节数：Int32 flag + Uint32 长度。 */
@@ -68,7 +68,7 @@ export class SyncPluginBridge {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
-  public run(pluginId: string, input: JsonValue, context: PluginHandlerContext, timeoutMs = 10_000): PluginHandlerResult {
+  public run(pluginId: string, input: JsonValue, context: FunctionHandlerContext, timeoutMs = 10_000): FunctionHandlerResult {
     if (this.disposed) throw new Error('插件执行桥已关闭');
     const requestSeq = this.seq + 1;
     this.worker.postMessage({ seq: requestSeq, pluginId, input, context });

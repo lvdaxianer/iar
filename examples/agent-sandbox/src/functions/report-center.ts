@@ -9,10 +9,10 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { FunctionPluginManifest, JsonValue } from '@iar/contracts';
-import type { PluginHandler, PluginRegistration } from '@iar/plugins';
+import { SCHEMA_VERSIONS, type BusinessPluginManifest, type FunctionDefinition, type JsonValue } from '@iar/contracts';
+import type { FunctionHandler, PluginPackage } from '@iar/plugin';
 import { retrieveKnowledge } from '../knowledge/retrieval.js';
-import { fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
+import { defineSandboxPlugin, fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
 
 /** report.center 的确定性报表目录 fixture。 */
 const REPORTS: ReadonlyArray<Record<string, JsonValue>> = [
@@ -30,23 +30,31 @@ export const reportCenterOperations: readonly SandboxOperation[] = [
 ];
 
 /** report.center 的版本化 Function Manifest，policy 声明 high 作为安全上限。 */
-export const reportCenterManifest: FunctionPluginManifest = {
+export const reportCenterManifest: BusinessPluginManifest = {
   apiVersion: 'iar.dev/v1',
   schemaVersion: 'iar.plugin-manifest/v1',
   pluginId: 'report-center-v1',
-  pluginKind: 'function',
-  scope: 'function',
-  functionId: 'report.center',
+  pluginKind: 'business',
+  scope: 'plugin',
   version: '1.0.0',
   description: '报表中心插件，提供报表目录查看与受控导出的确定性模拟',
-  actionTypes: ['query', 'execute'],
-  operations: reportCenterOperations,
   capabilities: ['report.read', 'report.export'],
-  inputSchema: sandboxInputSchema(),
-  outputSchema: sandboxOutputSchema(),
   lifecycle: { entrypoint: './dist/examples/agent-sandbox/src/functions/report-center.js' },
   policy: { riskLevel: 'high', requiresConfirmation: true, allowedCapabilities: ['report.read', 'report.export'] },
   dependencies: []
+};
+
+export const reportCenterFunction: FunctionDefinition = {
+  schemaVersion: SCHEMA_VERSIONS.function,
+  functionId: 'report.center',
+  version: reportCenterManifest.version,
+  name: '报表中心',
+  description: reportCenterManifest.description,
+  actionTypes: ['query', 'execute'],
+  inputSchema: sandboxInputSchema(),
+  outputSchema: sandboxOutputSchema(),
+  capabilities: [...reportCenterManifest.capabilities],
+  riskLevel: reportCenterManifest.policy.riskLevel
 };
 
 /**
@@ -86,7 +94,7 @@ function isKnowledgeQuery(query: string): boolean {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export const reportCenterHandler: PluginHandler = async (input) => {
+export const reportCenterHandler: FunctionHandler = async (input) => {
   const parsed = parseSandboxInput(input);
   if (!parsed) return fail('report.invalid_input');
   const operation = parsed.operation ?? (isKnowledgeQuery(parsed.query) ? 'search' : 'list');
@@ -114,4 +122,4 @@ export const reportCenterHandler: PluginHandler = async (input) => {
 };
 
 /** 可直接交给 PluginHost.install 的 report.center 注册对象。 */
-export const reportCenterPlugin: PluginRegistration = { manifest: reportCenterManifest, handler: reportCenterHandler };
+export const reportCenterPlugin: PluginPackage = defineSandboxPlugin(reportCenterManifest, reportCenterFunction, reportCenterOperations, reportCenterHandler);

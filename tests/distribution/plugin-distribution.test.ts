@@ -20,12 +20,10 @@ function manifest(overrides: Partial<PluginManifest> = {}): PluginManifest {
     apiVersion: 'iar.dev/v1',
     schemaVersion: SCHEMA_VERSIONS.pluginManifest,
     pluginId: 'remote-plugin',
-    pluginKind: 'function',
-    scope: 'function',
-    functionId: 'function.remote',
+    pluginKind: 'system',
+    scope: 'runtime',
     version: '1.0.0',
     description: 'remote distribution fixture',
-    actionTypes: ['query'],
     capabilities: ['remote.read'],
     inputSchema: { type: 'object', additionalProperties: false },
     outputSchema: { type: 'object', additionalProperties: false },
@@ -133,7 +131,7 @@ test('approved capability expansion is bound to exact old and new sets', () => {
 
 test('distributor blocks capability expansion until exact approval is supplied', () => {
   // Given：当前版本只有 remote.read，新版本增加 remote.write。
-  const host = new PluginHost({ functionIds: ['function.remote'] });
+  const host = new PluginHost();
   const distributor = new RemotePluginDistributor({ host, trustedSigners, compatibility: compatibility() });
   assert.equal(distributor.install(artifact()).ok, true);
   const expanded = manifest({ version: '2.0.0', capabilities: ['remote.read', 'remote.write'], policy: { riskLevel: 'medium', requiresConfirmation: true, allowedCapabilities: ['remote.read', 'remote.write'] } });
@@ -154,7 +152,7 @@ test('distributor blocks capability expansion until exact approval is supplied',
 
 test('distributor installs and upgrades only after verification', () => {
   // Given：PluginHost 只开放显式的 Function ownership，distributor 使用可信 signer。
-  const host = new PluginHost({ functionIds: ['function.remote'] });
+  const host = new PluginHost();
   const distributor = new RemotePluginDistributor({ host, trustedSigners, compatibility: compatibility() });
   // When：安装一个签名 artifact，再升级到新版本。
   const installed = distributor.install(artifact());
@@ -174,7 +172,7 @@ test('distributor installs and upgrades only after verification', () => {
 
 test('failed upgrade preserves previous plugin and rollback restores exact version', () => {
   // Given：旧版本已经安装，下一版本的签名有效但依赖不可用。
-  const host = new PluginHost({ functionIds: ['function.remote'] });
+  const host = new PluginHost();
   const distributor = new RemotePluginDistributor({ host, trustedSigners, compatibility: compatibility() });
   assert.equal(distributor.install(artifact()).ok, true);
   assert.equal(distributor.upgrade(artifact(manifest({ version: '2.0.0' }))).ok, true);
@@ -193,7 +191,7 @@ test('failed upgrade preserves previous plugin and rollback restores exact versi
 
 test('malformed public input and audit output fail closed without raw signature', () => {
   // Given：调用方传入 revoked Proxy 或未知 artifact 形状。
-  const host = new PluginHost({ functionIds: ['function.remote'] });
+  const host = new PluginHost();
   const distributor = new RemotePluginDistributor({ host, trustedSigners, compatibility: compatibility() });
   const revoked = Proxy.revocable(artifact(), {});
   revoked.revoke();
@@ -220,7 +218,7 @@ test('unknown artifact fields are rejected before they can enter records', () =>
 
 test('failed enable restores the prior Host version and distribution record', () => {
   // Given：旧版本已启用，下一次升级在新版本 enable 阶段失败。
-  const host = new FailNextEnableHost({ functionIds: ['function.remote'] });
+  const host = new FailNextEnableHost();
   const distributor = new RemotePluginDistributor({ host, trustedSigners, compatibility: compatibility() });
   assert.equal(distributor.install(artifact()).ok, true);
   host.failNextEnable = true;

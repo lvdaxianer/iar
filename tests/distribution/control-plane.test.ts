@@ -18,7 +18,7 @@ const trustedSigners = new Map([['test-signer', signer.publicKey]]);
 /** 创建 control-plane 使用的最小合法 Manifest。 */
 function manifest(overrides: Partial<PluginManifest> = {}): PluginManifest {
   return {
-    apiVersion: 'iar.dev/v1', schemaVersion: SCHEMA_VERSIONS.pluginManifest, pluginId: 'tenant-plugin', pluginKind: 'function', scope: 'function', functionId: 'function.remote', version: '1.0.0', description: 'tenant control plane fixture', actionTypes: ['query'], capabilities: ['remote.read'], inputSchema: { type: 'object', additionalProperties: false }, outputSchema: { type: 'object', additionalProperties: false }, lifecycle: { entrypoint: 'tenant.entry' }, policy: { riskLevel: 'low', requiresConfirmation: false, allowedCapabilities: ['remote.read'] }, dependencies: [], ...overrides
+    apiVersion: 'iar.dev/v1', schemaVersion: SCHEMA_VERSIONS.pluginManifest, pluginId: 'tenant-plugin', pluginKind: 'system', scope: 'runtime', version: '1.0.0', description: 'tenant control plane fixture', capabilities: ['remote.read'], inputSchema: { type: 'object', additionalProperties: false }, outputSchema: { type: 'object', additionalProperties: false }, lifecycle: { entrypoint: 'tenant.entry' }, policy: { riskLevel: 'low', requiresConfirmation: false, allowedCapabilities: ['remote.read'] }, dependencies: [], ...overrides
   } as PluginManifest;
 }
 
@@ -42,7 +42,7 @@ function errorCode<T>(response: { error: { code: string } | null; data: T | null
 test('control plane installs and inspects a plugin inside one tenant', async () => {
   // Given：每个 tenant 都获得独立 PluginHost，授权器允许显式操作。
   const hosts = new Map<string, PluginHost>();
-  const api = createTenantControlPlane({ trustedSigners, hostFactory: (tenantId) => { const host = new PluginHost({ functionIds: ['function.remote'] }); hosts.set(tenantId, host); return { host, compatibility: { hostApiVersion: 'iar.dev/v1', installed: new Map(), availableDependencies: new Set() } }; }, authorize: () => ({ allowed: true }) });
+  const api = createTenantControlPlane({ trustedSigners, hostFactory: (tenantId) => { const host = new PluginHost(); hosts.set(tenantId, host); return { host, compatibility: { hostApiVersion: 'iar.dev/v1', installed: new Map(), availableDependencies: new Set() } }; }, authorize: () => ({ allowed: true }) });
   // When：tenant-a 通过 ABI 安装并 inspect 同一个 artifact。
   const installed = await api.request(request('tenant-a', 'plugin.install', { artifact: artifact() }));
   const inspected = await api.request(request('tenant-a', 'plugin.inspect', { pluginId: 'tenant-plugin' }));
@@ -57,7 +57,7 @@ test('control plane installs and inspects a plugin inside one tenant', async () 
 test('foreign tenant cannot inspect or mutate another tenant plugin', async () => {
   // Given：tenant-a 已注册 plugin，tenant-b 尚未创建 Host。
   let created = 0;
-  const api = createTenantControlPlane({ trustedSigners, hostFactory: () => { created += 1; return { host: new PluginHost({ functionIds: ['function.remote'] }), compatibility: { hostApiVersion: 'iar.dev/v1', installed: new Map(), availableDependencies: new Set() } }; }, authorize: () => ({ allowed: true }) });
+  const api = createTenantControlPlane({ trustedSigners, hostFactory: () => { created += 1; return { host: new PluginHost(), compatibility: { hostApiVersion: 'iar.dev/v1', installed: new Map(), availableDependencies: new Set() } }; }, authorize: () => ({ allowed: true }) });
   await api.request(request('tenant-a', 'plugin.install', { artifact: artifact() }));
   // When：tenant-b 请求 tenant-a 的 pluginId。
   const response = await api.request(request('tenant-b', 'plugin.inspect', { pluginId: 'tenant-plugin' }));
@@ -69,7 +69,7 @@ test('foreign tenant cannot inspect or mutate another tenant plugin', async () =
 test('foreign tenant upgrade is denied before target Host creation', async () => {
   // Given：tenant-a 拥有 plugin，tenant-b 尚未创建 runtime。
   let created = 0;
-  const api = createTenantControlPlane({ trustedSigners, hostFactory: () => { created += 1; return { host: new PluginHost({ functionIds: ['function.remote'] }), compatibility: { hostApiVersion: 'iar.dev/v1', installed: new Map(), availableDependencies: new Set() } }; }, authorize: () => ({ allowed: true }) });
+  const api = createTenantControlPlane({ trustedSigners, hostFactory: () => { created += 1; return { host: new PluginHost(), compatibility: { hostApiVersion: 'iar.dev/v1', installed: new Map(), availableDependencies: new Set() } }; }, authorize: () => ({ allowed: true }) });
   await api.request(request('tenant-a', 'plugin.install', { artifact: artifact() }));
   // When：tenant-b 尝试升级 tenant-a 的 plugin。
   const response = await api.request(request('tenant-b', 'plugin.upgrade', { artifact: artifact(manifest({ version: '2.0.0' })) }));
@@ -82,7 +82,7 @@ test('policy denial happens before tenant Host access', async () => {
   // Given：策略拒绝 install，Host factory 记录是否被调用。
   let created = 0;
   const policy: ControlPlanePolicyDecision = { allowed: false, reasonCode: 'policy_denied' };
-  const api = createTenantControlPlane({ trustedSigners, hostFactory: () => { created += 1; return { host: new PluginHost({ functionIds: ['function.remote'] }), compatibility: { hostApiVersion: 'iar.dev/v1', installed: new Map(), availableDependencies: new Set() } }; }, authorize: () => policy });
+  const api = createTenantControlPlane({ trustedSigners, hostFactory: () => { created += 1; return { host: new PluginHost(), compatibility: { hostApiVersion: 'iar.dev/v1', installed: new Map(), availableDependencies: new Set() } }; }, authorize: () => policy });
   // When：请求进入 control-plane。
   const response = await api.request(request('tenant-a', 'plugin.install', { artifact: artifact() }));
   // Then：策略拒绝先于租户 Host 创建。
@@ -92,7 +92,7 @@ test('policy denial happens before tenant Host access', async () => {
 
 test('upgrade, disable, enable, rollback and audit preserve lifecycle parity', async () => {
   // Given：策略允许生命周期操作和 capability approval。
-  const api = createTenantControlPlane({ trustedSigners, hostFactory: () => ({ host: new PluginHost({ functionIds: ['function.remote'] }), compatibility: { hostApiVersion: 'iar.dev/v1', installed: new Map(), availableDependencies: new Set() } }), authorize: () => ({ allowed: true }) });
+  const api = createTenantControlPlane({ trustedSigners, hostFactory: () => ({ host: new PluginHost(), compatibility: { hostApiVersion: 'iar.dev/v1', installed: new Map(), availableDependencies: new Set() } }), authorize: () => ({ allowed: true }) });
   await api.request(request('tenant-a', 'plugin.install', { artifact: artifact() }));
   // When：升级、禁用、启用、回滚按公开 control-plane 操作执行。
   const upgraded = await api.request(request('tenant-a', 'plugin.upgrade', { artifact: artifact(manifest({ version: '2.0.0' })) }));
@@ -114,7 +114,7 @@ test('upgrade, disable, enable, rollback and audit preserve lifecycle parity', a
 
 test('malformed ABI and missing plugin return stable safe responses', async () => {
   // Given：请求缺少协议字段，或引用不存在的 tenant plugin。
-  const api = createTenantControlPlane({ trustedSigners, hostFactory: () => ({ host: new PluginHost({ functionIds: ['function.remote'] }), compatibility: { hostApiVersion: 'iar.dev/v1', installed: new Map(), availableDependencies: new Set() } }), authorize: () => ({ allowed: true }) });
+  const api = createTenantControlPlane({ trustedSigners, hostFactory: () => ({ host: new PluginHost(), compatibility: { hostApiVersion: 'iar.dev/v1', installed: new Map(), availableDependencies: new Set() } }), authorize: () => ({ allowed: true }) });
   // When：输入进入公开异步边界。
   const malformed = await api.request({});
   const missing = await api.request(request('tenant-a', 'plugin.inspect', { pluginId: 'missing' }));

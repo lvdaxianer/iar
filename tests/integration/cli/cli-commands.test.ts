@@ -56,7 +56,7 @@ function client(): { calls: unknown[]; api: CliServiceClient } {
 /** install/enable/disable/inspect/replay 都必须映射为受限 operation。 */
 test('CLI dispatches install enable disable inspect and replay commands', async () => {
   const fixture = client();
-  const manifest = JSON.stringify({ pluginId: 'plugin-cli-v1', pluginKind: 'function' });
+  const manifest = JSON.stringify({ pluginId: 'plugin-cli-v1', pluginKind: 'business' });
   for (const args of [
     ['install', '--tenant', 'tenant-a', '--actor', 'actor-a', '--manifest', manifest],
     ['enable', '--tenant', 'tenant-a', '--actor', 'actor-a', '--plugin', 'plugin-cli-v1'],

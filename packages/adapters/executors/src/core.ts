@@ -71,7 +71,7 @@ type NormalizedOptions = ReturnType<typeof normalizeOptions>;
  * resolver ref 按请求声明逐个解析。
  * resolver 不返回 secret 给 handler，防止 accidental echo。
  * request context 的 runId 使用 requestId 形成稳定关联。
- * traceId 原样传递到 PluginHandlerContext。
+ * traceId 原样传递到 ExecutorHandlerContext。
  * timer 和 abort race 共享同一个 entry。
  * handler promise 的 late settlement 被忽略。
  * output data 经过 schema 和 bytes 两次边界检查。

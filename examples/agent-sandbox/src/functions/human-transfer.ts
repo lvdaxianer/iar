@@ -9,10 +9,10 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { FunctionPluginManifest, JsonValue } from '@iar/contracts';
-import type { PluginHandler, PluginRegistration } from '@iar/plugins';
+import { SCHEMA_VERSIONS, type BusinessPluginManifest, type FunctionDefinition, type JsonValue } from '@iar/contracts';
+import type { FunctionHandler, PluginPackage } from '@iar/plugin';
 import { retrieveKnowledge } from '../knowledge/retrieval.js';
-import { fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
+import { defineSandboxPlugin, fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
 
 /** human.transfer 的显式操作目录。 */
 export const humanTransferOperations: readonly SandboxOperation[] = [
@@ -21,23 +21,31 @@ export const humanTransferOperations: readonly SandboxOperation[] = [
 ];
 
 /** human.transfer 的版本化 Function Manifest，policy 声明 high 作为安全上限。 */
-export const humanTransferManifest: FunctionPluginManifest = {
+export const humanTransferManifest: BusinessPluginManifest = {
   apiVersion: 'iar.dev/v1',
   schemaVersion: 'iar.plugin-manifest/v1',
   pluginId: 'human-transfer-v1',
-  pluginKind: 'function',
-  scope: 'function',
-  functionId: 'human.transfer',
+  pluginKind: 'business',
+  scope: 'plugin',
   version: '1.0.0',
   description: '人工服务插件，提供转接人工客服队列的确定性模拟',
-  actionTypes: ['query', 'transfer'],
-  operations: humanTransferOperations,
   capabilities: ['human.transfer'],
-  inputSchema: sandboxInputSchema(),
-  outputSchema: sandboxOutputSchema(),
   lifecycle: { entrypoint: './dist/examples/agent-sandbox/src/functions/human-transfer.js' },
   policy: { riskLevel: 'high', requiresConfirmation: true, allowedCapabilities: ['human.transfer'] },
   dependencies: []
+};
+
+export const humanTransferFunction: FunctionDefinition = {
+  schemaVersion: SCHEMA_VERSIONS.function,
+  functionId: 'human.transfer',
+  version: humanTransferManifest.version,
+  name: '人工服务',
+  description: humanTransferManifest.description,
+  actionTypes: ['query', 'transfer'],
+  inputSchema: sandboxInputSchema(),
+  outputSchema: sandboxOutputSchema(),
+  capabilities: [...humanTransferManifest.capabilities],
+  riskLevel: humanTransferManifest.policy.riskLevel
 };
 
 /**
@@ -60,7 +68,7 @@ function isKnowledgeQuery(query: string): boolean {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export const humanTransferHandler: PluginHandler = async (input) => {
+export const humanTransferHandler: FunctionHandler = async (input) => {
   const parsed = parseSandboxInput(input);
   if (!parsed) return fail('human.invalid_input');
   const operation = parsed.operation ?? (isKnowledgeQuery(parsed.query) ? 'search' : 'transfer');
@@ -82,4 +90,4 @@ export const humanTransferHandler: PluginHandler = async (input) => {
 };
 
 /** 可直接交给 PluginHost.install 的 human.transfer 注册对象。 */
-export const humanTransferPlugin: PluginRegistration = { manifest: humanTransferManifest, handler: humanTransferHandler };
+export const humanTransferPlugin: PluginPackage = defineSandboxPlugin(humanTransferManifest, humanTransferFunction, humanTransferOperations, humanTransferHandler);
