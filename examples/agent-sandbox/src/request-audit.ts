@@ -14,7 +14,8 @@ type AuditContext = { requestId: string; traceId: string; startTime: number; isE
 /** 固定路由集合避免未知路径携带自由文本进入日志。 */
 const SAFE_PATHS = new Set(['/', '/api/chat', '/api/confirm', '/api/compact', '/api/state', '/api/reset',
   '/api/sessions', '/api/sessions/:sessionId', '/api/sessions/:sessionId/chat', '/api/sessions/:sessionId/confirm',
-  '/api/sessions/:sessionId/compact', '/api/sessions/:sessionId/state', '/api/sessions/:sessionId/reset']);
+  '/api/sessions/:sessionId/compact', '/api/sessions/:sessionId/state', '/api/sessions/:sessionId/reset',
+  '/api/bridge/v1/sessions', '/api/bridge/v1/sessions/:sessionId/input', '/api/bridge/v1/sessions/:sessionId/confirm', '/api/bridge/v1/sessions/:sessionId/state']);
 /** 仅允许输出标准方法名称。 */
 const SAFE_METHODS = new Set(['GET', 'POST', 'HEAD', 'OPTIONS', 'PUT', 'PATCH', 'DELETE']);
 /** 客户端断开时的审计状态，表示未完成的响应。 */

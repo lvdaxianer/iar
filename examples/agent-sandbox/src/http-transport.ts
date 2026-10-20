@@ -3,6 +3,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { SandboxSessionManager, type Operation } from './session-manager.js';
 import { registerSessionLifecycleRoutes } from './http-lifecycle-routes.js';
 import { registerSessionRoutes } from './http-session-routes.js';
+import { registerPiBridgeRoutes } from './http-pi-bridge-routes.js';
 import { createReservationState, registerReservationHooks, type RunOperation } from './http-reservation.js';
 import type { IarSandboxSession } from './session.js';
 
@@ -37,4 +38,5 @@ export function registerSandboxRoutes(app: FastifyInstance, manager: SandboxSess
   registerSessionLifecycleRoutes(app, { manager, run, indexHtml });
   registerSessionRoutes(app, run, '/api');
   registerSessionRoutes(app, run, '/api/sessions/:sessionId');
+  registerPiBridgeRoutes(app, manager, run);
 }

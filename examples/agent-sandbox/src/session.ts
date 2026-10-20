@@ -130,11 +130,36 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @date 2026-10-18
    */
   public async turn(text: string): Promise<TurnResult> {
+    return this.turnInternal(text, false);
+  }
+
+  /**
+   * 执行一轮供 Pi bridge 使用的输入。
+   * IAR 明确没有业务路由时返回 pass_through；待确认状态不会被普通输入取消。
+   * @param text - Pi 用户输入
+   * @returns IAR bridge 处置结果
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-20
+   */
+  public async bridgeTurn(text: string): Promise<TurnResult> {
+    return this.turnInternal(text, true);
+  }
+
+  /**
+   * 编排普通或 bridge 模式的单轮输入。
+   * @param text - 用户输入文本
+   * @param bridgeMode - 是否使用 pass_through 语义
+   * @returns 单轮处理结果
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-20
+   */
+  private async turnInternal(text: string, bridgeMode: boolean): Promise<TurnResult> {
     await this.whenReady();
     const userText = text.trim();
     // 新一轮输入会结束上一轮未处理的确认，避免旧动作占用当前语义上下文。
     // 本方法只编排当前轮次，事件投影和回复组件负责各自的状态边界。
-    await this.cancelStalePending();
+    if (bridgeMode && this.pending) return pendingBridgeResult();
+    if (!bridgeMode) await this.cancelStalePending();
     this.turnCount += 1;
     const traceId = resolveSandboxTraceId(`trace-sandbox-${String(this.turnCount)}`);
     const behaviorContext = this.projector.current();
@@ -147,7 +172,7 @@ export class IarSandboxSession extends SandboxSessionCore {
       this.replies.pushMessages(userText, extracted.reply);
       return { status: 'failed', reply: extracted.reply, route: extracted.route, reasonCode: extracted.reasonCode };
     }
-    return this.routeNormalTurn({ userText, traceId, behaviorContext, extracted, ...(selection.descriptor === undefined ? {} : { selectedDescriptor: selection.descriptor }) });
+    return this.routeNormalTurn({ userText, traceId, behaviorContext, extracted, passThroughOnNoMatch: bridgeMode, ...(selection.descriptor === undefined ? {} : { selectedDescriptor: selection.descriptor }) });
   }
   /**
    * 执行普通对话的路由并分派未命中或动作路径。
@@ -156,8 +181,8 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected async routeNormalTurn(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }>; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
-    const { userText, traceId, behaviorContext, extracted, selectedDescriptor } = context;
+  protected async routeNormalTurn(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }>; passThroughOnNoMatch: boolean; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
+    const { userText, traceId, behaviorContext, extracted, passThroughOnNoMatch, selectedDescriptor } = context;
     const references = this.routing.resolveReferences(extracted.frame, behaviorContext);
     if (!references.ok) return this.finishNormalFallback({ userText, traceId, behaviorContext, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: extracted.frame.intent, semanticConfidence: extracted.frame.confidence }, ...(references.pendingReference === undefined ? {} : { pendingReference: references.pendingReference }), ...(references.candidates === undefined ? {} : { referenceCandidates: references.candidates }) });
     if (behaviorContext.pendingReference !== undefined) await this.resetClarification();
@@ -167,6 +192,7 @@ export class IarSandboxSession extends SandboxSessionCore {
     // 抽取降级须保留在返回的路由证据中。
     if (extracted.semanticFallback) evidence.semanticFallback = true;
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
+      if (passThroughOnNoMatch && route.status === 'noul' && canPassThrough(behaviorContext, evidence, selectedDescriptor)) return { status: 'pass_through', route: evidence };
       return this.finishNormalFallback({ userText, traceId, behaviorContext: routeContext, evidence, resolvedReferences: references.references });
     }
     const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame: extracted.frame, route, behaviorContext: routeContext });
@@ -347,4 +373,27 @@ export class IarSandboxSession extends SandboxSessionCore {
     return { status: 'executed', reply, actionResult };
   }
 
+}
+
+/**
+ * 构造待确认期间的 bridge 澄清结果。
+ * @returns 不改变 pending 的安全澄清结果
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-20
+ */
+function pendingBridgeResult(): TurnResult {
+  return { status: 'clarification', reply: '当前有待确认的 IAR 操作，请使用 /iar-confirm 或 /iar-cancel。', route: { status: 'rejected', reasonCode: 'pending_confirmation', semanticIntent: 'unknown', semanticConfidence: 0 }, reasonCode: 'pending_confirmation' };
+}
+
+/**
+ * 判断路由未命中是否真的是普通 Pi 输入。
+ * @param context - 当前结构化行为上下文
+ * @param evidence - 当前轮路由证据
+ * @param selectedDescriptor - 澄清选择绑定的 Plugin
+ * @returns 是否允许交回 Pi Agent
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-20
+ */
+function canPassThrough(context: BehaviorContext, evidence: RouteEvidence, selectedDescriptor: PluginDescriptor | undefined): boolean {
+  return selectedDescriptor === undefined && evidence.semanticIntent === 'unknown' && context.pending.status !== 'required' && !hasVerifiedFactsForFollowUp(context, evidence);
 }

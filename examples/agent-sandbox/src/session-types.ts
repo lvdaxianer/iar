@@ -60,6 +60,7 @@ export type PendingActionSummary = {
 
 /** 单轮对话结果联合。 */
 export type TurnResult =
+  | { status: 'pass_through'; route: RouteEvidence }
   | { status: 'executed'; reply: string; route: RouteEvidence; actionResult: ActionResult; reasonCode?: string }
   | { status: 'awaiting_confirmation'; reply: string; route: RouteEvidence; pending: PendingActionSummary }
   | { status: 'clarification'; reply: string; route: RouteEvidence; reasonCode: string }
