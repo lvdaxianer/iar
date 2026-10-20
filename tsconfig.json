@@ -6,6 +6,9 @@
     "rootDir": ".",
     "outDir": "dist",
     "paths": {
+      "@iar/pi-bridge": [
+        "./packages/adapters/pi/src/index.ts"
+      ],
       "@iar/adapters-*/http-boundary": [
         "./packages/adapters/*/src/http-boundary.ts"
       ],

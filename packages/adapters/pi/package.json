@@ -1,0 +1,21 @@
+{
+  "name": "@iar/pi-bridge",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./pi-extension": {
+      "types": "./dist/pi-extension.d.ts",
+      "import": "./dist/pi-extension.js"
+    }
+  },
+  "files": ["dist"],
+  "pi": {
+    "extensions": ["./dist/pi-extension.js"]
+  }
+}

@@ -3,7 +3,10 @@
   "compilerOptions": {
     "rootDir": ".",
     "outDir": "./dist",
-    "tsBuildInfoFile": "./dist/tsconfig.tests.tsbuildinfo"
+    "tsBuildInfoFile": "./dist/tsconfig.tests.tsbuildinfo",
+    "paths": {
+      "@iar/pi-bridge": ["./packages/adapters/pi/dist/index.d.ts"]
+    }
   },
   "include": [
     "tests/**/*.ts",

@@ -1,0 +1,54 @@
+/**
+ * 定义 IAR 与 Pi 扩展之间的版本化 HTTP 契约。
+ * 协议类型只描述公开 JSON，不携带 IAR 内部会话或 Pi 运行时对象。
+ *
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-20
+ */
+
+/** Pi bridge 协议版本。 */
+export const PI_BRIDGE_VERSION = 'iar.pi-bridge/v1' as const;
+
+/** Pi 输入在 IAR 边界上的唯一处置结果。 */
+export type BridgeDisposition = 'pass_through' | 'handled' | 'clarification' | 'awaiting_confirmation';
+
+/** Pi 会话标识的有界字符串类型。 */
+export type PiSessionId = string;
+
+/** IAR 会话标识的有界字符串类型。 */
+export type IarSessionId = string;
+
+/** 打开或恢复桥接会话的请求。 */
+export type BridgeOpenRequest = { piSessionId: PiSessionId; iarSessionId?: IarSessionId };
+
+/** 打开或恢复桥接会话的响应。 */
+export type BridgeOpenResponse = { version: typeof PI_BRIDGE_VERSION; piSessionId: PiSessionId; iarSessionId: IarSessionId; resumed: boolean };
+
+/** 路由公开证据，不包含模型原文、权限或敏感输入。 */
+export type BridgeRouteEvidence = { status: string; reasonCode: string; semanticIntent: string; semanticConfidence: number; functionId?: string; pluginId?: string };
+
+/** 待确认动作的公开摘要。 */
+export type BridgePendingAction = { actionId: string; runId: string; functionId: string; pluginId: string; riskLevel: string; confirmationRequired: boolean };
+
+/** 输入请求。 */
+export type BridgeInputRequest = { text: string; requestId?: string };
+
+/** 输入响应。 */
+export type BridgeInputResponse = { version: typeof PI_BRIDGE_VERSION; iarSessionId: IarSessionId; disposition: BridgeDisposition; reply?: string; reasonCode?: string; route?: BridgeRouteEvidence; pending?: BridgePendingAction };
+
+/** 确认或取消请求。 */
+export type BridgeConfirmRequest = { actionId: string; accepted: boolean; requestId?: string };
+
+/** 确认或取消响应。 */
+export type BridgeConfirmResponse = { version: typeof PI_BRIDGE_VERSION; iarSessionId: IarSessionId; disposition: 'handled'; reply: string; reasonCode?: string; pending?: BridgePendingAction };
+
+/** 状态响应只返回扩展驱动下一步所需的最小字段。 */
+export type BridgeStateResponse = { version: typeof PI_BRIDGE_VERSION; iarSessionId: IarSessionId; pending?: BridgePendingAction };
+
+/** Bridge HTTP 失败的稳定公开结构。 */
+export type BridgeErrorResponse = { version: typeof PI_BRIDGE_VERSION; code: string; message: string; retryable: boolean };
+
+/** 判断未知值是否为合法桥接 disposition。 */
+export function isBridgeDisposition(value: unknown): value is BridgeDisposition {
+  return value === 'pass_through' || value === 'handled' || value === 'clarification' || value === 'awaiting_confirmation';
+}
