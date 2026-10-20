@@ -31,6 +31,14 @@ export const MAX_CANDIDATE_VERSION_LENGTH = 200;
 export const MAX_CANDIDATE_KEY_LENGTH = 60;
 export const MAX_CLARIFICATION_LABEL_LENGTH = 200;
 
+/** 待解析引用原文和候选记录的边界。 */
+export const MAX_PENDING_REFERENCE_TEXT_LENGTH = 300;
+export const MAX_PENDING_REFERENCE_CANDIDATES = MAX_CLARIFICATION_OPTIONS;
+export const MAX_PENDING_REFERENCE_OFFSET = 64;
+
+/** 模型可声明的通用事实链关系。 */
+export type PendingReferenceRelation = 'current' | 'previous' | 'next' | 'first' | 'last' | 'offset';
+
 /** 待执行的副作用 Action。 */
 export type ActionDefinition = {
   // Action Schema 版本用于结果解析。
@@ -154,6 +162,20 @@ export type PendingInput = {
   options?: Array<{ key: string; label: string }>;
 };
 
+/** 可随快照恢复、但不能授予执行权限的待解析事实引用。 */
+export type PendingReference = {
+  /** 用户原文中的指代片段。 */
+  text: string;
+  /** 模型归一化后的有序关系。 */
+  relation: PendingReferenceRelation;
+  /** 模型显式提供的不透明锚点。 */
+  anchorRecordId?: string;
+  /** offset 关系的有界相对位置。 */
+  offset?: number;
+  /** 运行时生成的有限候选记录 ID。 */
+  candidateRecordIds: string[];
+};
+
 /** 最近消息窗口的有界策略，不保存消息原文。 */
 export type RecentMessagePolicy = {
   /** 模型最多接收的最近消息数量。 */
@@ -265,6 +287,8 @@ export type BehaviorContext = {
   recentMessagePolicy?: RecentMessagePolicy;
   // clarification 保存连续未解决和待选择候选的结构化状态。
   clarification?: ClarificationState;
+  // pendingReference 保存事实关系消歧所需的有限候选，不包含执行授权。
+  pendingReference?: PendingReference;
   // confirmation 记录确认范围和状态。
   confirmation: ConfirmationState;
   // factHistory 保存成功输出中的有限、可追溯有序事实。

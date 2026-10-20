@@ -255,6 +255,15 @@ The system SHALL allow the semantic model to express a historical reference usin
 - **WHEN** a valid historical relation resolves to a prior record
 - **THEN** the runtime may answer or prepare a read-only interpretation, but it still requires the normal route, policy and confirmation gates for any side effect
 
+### Requirement: Ambiguous historical references are supplied as bounded model data
+
+The system SHALL provide pending generic reference metadata and its bounded verified candidate records to semantic extraction and response generation, while keeping recent raw messages separate and non-authoritative.
+
+#### Scenario: Ambiguity is clarified without a side effect
+
+- **WHEN** the runtime cannot select one historical record
+- **THEN** the model receives the candidate records and current message, and the runtime does not prepare or execute a Function
+
 ### Requirement: Unresolved historical references receive bounded dynamic clarification
 
 The system SHALL fail closed when a historical reference has no valid anchor, no target, or multiple valid interpretations, and SHALL generate bounded clarification options from current runtime data or Plugin descriptors without hardcoded business choices.

@@ -6,9 +6,9 @@
  * @date 2026-10-18
  */
 import { randomUUID } from 'node:crypto';
-import { SCHEMA_VERSIONS, type ActionDefinition, type ActionType, type BehaviorContext, type EventEnvelope, type JsonValue, type PluginOperation, type PluginPolicyMetadata, type RuleExpression } from '@iar/contracts';
+import { SCHEMA_VERSIONS, type ActionDefinition, type ActionType, type BehaviorContext, type EventEnvelope, type JsonValue, type PendingReference, type PluginOperation, type PluginPolicyMetadata, type RuleExpression, type VerifiedFactRecord } from '@iar/contracts';
 import { ModelGateway, SemanticExtractorAdapter, type HistoricalSemanticReference, type ModelGatewayResult, type ModelProfileRegistry, type SemanticFrame } from '@iar/decision';
-import { PluginFirstRouter, resolveFactRelation, type AsyncDecisionAdapter, type RouteResult } from '@iar/runtime';
+import { PluginFirstRouter, resolveFactRelationCandidates, type AsyncDecisionAdapter, type FactRelationCandidateReference, type RouteResult } from '@iar/runtime';
 import type { FunctionRule, PluginRule } from '@iar/rule-engine';
 import type { PluginDescriptor, PluginHost } from '@iar/plugin-host';
 import type { ActionExecutor, LocalWorkflow } from '@iar/workflow';
@@ -16,7 +16,7 @@ import { ScriptedModelProvider } from './models/scripted-provider.js';
 import { SESSION_RUN_ID, SESSION_CORRELATION_ID, TURN_DEFINITION } from './session-core.js';
 import type { CompactionContext } from './session-compaction.js';
 import { buildActionInput, buildFacts, describeAction, sandboxOperationKind, toSlotMap } from './session-helpers.js';
-import type { ExecuteTurnOutcome, ExtractFrameOutcome, ResolvedFactReference, RouteEvidence, SandboxMode } from './session-types.js';
+import type { ExecuteTurnOutcome, ExtractFrameOutcome, ReferenceResolution, ResolvedFactReference, RouteEvidence, SandboxMode } from './session-types.js';
 
 /** 路由读取和更新当前会话的状态，不拥有独立生命周期。 */
 export type SessionRoutingContext = Pick<CompactionContext, 'eventStore' | 'projector' | 'gateway'> & {
@@ -132,16 +132,21 @@ export class SandboxSessionRouting {
   }
 
   /** 解析模型声明的历史关系，只返回事实链中已存在的记录。 */
-  public resolveReferences(frame: SemanticFrame, behaviorContext: BehaviorContext): { ok: true; references: ResolvedFactReference[] } | { ok: false; reasonCode: string } {
+  public resolveReferences(frame: SemanticFrame, behaviorContext: BehaviorContext): ReferenceResolution {
     const references = frame.references.filter(isHistoricalReference);
     if (references.length === 0) return { ok: true, references: [] };
     const history = behaviorContext.factHistory;
     if (!history) return { ok: false, reasonCode: 'reference_unresolved' };
     const resolved: ResolvedFactReference[] = [];
     for (const reference of references) {
-      const result = resolveFactRelation(history, reference);
-      if (!result.ok) return { ok: false, reasonCode: 'reference_unresolved' };
-      resolved.push({ text: reference.text, record: result.record });
+      const scopedHistory = restrictToPendingCandidates(history, behaviorContext.pendingReference);
+      const result = resolveFactRelationCandidates(scopedHistory, reference as FactRelationCandidateReference);
+      if (result.status === 'resolved') {
+        resolved.push({ text: reference.text, record: result.record });
+        continue;
+      }
+      if (result.status === 'ambiguous') return ambiguousReference(reference, result.candidates);
+      return { ok: false, reasonCode: 'reference_unresolved' };
     }
     return { ok: true, references: resolved };
   }
@@ -292,6 +297,27 @@ export class SandboxSessionRouting {
 /** 判断引用是否为新版不透明历史关系。 */
 function isHistoricalReference(reference: SemanticFrame['references'][number]): reference is HistoricalSemanticReference {
   return 'relation' in reference;
+}
+
+/** 将待解析引用限制在上一次运行时确认的候选集合内。 */
+function restrictToPendingCandidates(history: NonNullable<BehaviorContext['factHistory']>, pendingReference: PendingReference | undefined): NonNullable<BehaviorContext['factHistory']> {
+  if (pendingReference === undefined) return history;
+  const candidateIds = new Set(pendingReference.candidateRecordIds);
+  const records = history.records.filter((record) => candidateIds.has(record.recordId));
+  const focusRecordId = pendingReference.anchorRecordId && candidateIds.has(pendingReference.anchorRecordId) ? pendingReference.anchorRecordId : undefined;
+  return focusRecordId === undefined ? { records } : { records, focusRecordId };
+}
+
+/** 把有限候选转换为可持久化的通用待解析引用。 */
+function ambiguousReference(reference: HistoricalSemanticReference, candidates: VerifiedFactRecord[]): ReferenceResolution {
+  const pendingReference: PendingReference = {
+    text: reference.text,
+    relation: reference.relation,
+    candidateRecordIds: candidates.map((candidate) => candidate.recordId),
+    ...(reference.anchorRecordId === undefined ? {} : { anchorRecordId: reference.anchorRecordId }),
+    ...(reference.offset === undefined ? {} : { offset: reference.offset })
+  };
+  return { ok: false, reasonCode: 'reference_ambiguous', pendingReference, candidates };
 }
 
 /** 根据当前启用 Plugin 描述构造无业务目录的 Function/Plugin 规则。 */

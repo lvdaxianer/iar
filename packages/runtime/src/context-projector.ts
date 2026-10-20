@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import { createHash } from 'node:crypto';
-import { ERROR_CODES, MAX_CANDIDATE_KEY_LENGTH, MAX_CANDIDATE_VERSION_LENGTH, MAX_CLARIFICATION_REASON_LENGTH, MAX_CLARIFICATION_OPTIONS, MAX_FACT_RECORD_ID_LENGTH, MAX_FACT_RECORD_VALUES, MAX_UNRESOLVED_STREAK, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, validateContract, type BehaviorContext, type ClarificationState, type ContractErrorResult, type EventEnvelope, type RoutingScope, type VerifiedFactHistory, type TrustedFactValue, type VerifiedFactRecord } from '@iar/contracts';
+import { ERROR_CODES, MAX_CANDIDATE_KEY_LENGTH, MAX_CANDIDATE_VERSION_LENGTH, MAX_CLARIFICATION_REASON_LENGTH, MAX_CLARIFICATION_OPTIONS, MAX_FACT_RECORD_ID_LENGTH, MAX_FACT_RECORD_VALUES, MAX_PENDING_REFERENCE_CANDIDATES, MAX_PENDING_REFERENCE_OFFSET, MAX_PENDING_REFERENCE_TEXT_LENGTH, MAX_UNRESOLVED_STREAK, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, validateContract, type BehaviorContext, type ClarificationState, type ContractErrorResult, type EventEnvelope, type PendingReference, type RoutingScope, type VerifiedFactHistory, type TrustedFactValue, type VerifiedFactRecord } from '@iar/contracts';
 
 /** 关键字段哈希固定使用 SHA-256，避免实现更换导致快照不可恢复。 */
 const HASH_ALGORITHM = 'sha256';
@@ -59,6 +59,7 @@ export function criticalFieldHash(context: BehaviorContext): string {
     workflow: context.workflow,
     pending: context.pending,
     ...(context.clarification ? { clarification: context.clarification } : {}),
+    ...(context.pendingReference ? { pendingReference: context.pendingReference } : {}),
     confirmation: context.confirmation,
     idempotencyKey: context.idempotencyKey,
     ...(context.factHistory ? { factHistory: context.factHistory } : {}),
@@ -180,7 +181,7 @@ export class BehaviorContextProjector {
       this.applyCompactedState(payload);
       return;
     }
-    if (event.eventName === 'context.clarification.updated' && (!isPendingInput(payload.pending) || (payload.clarification !== undefined && !isClarificationState(payload.clarification)))) {
+    if (event.eventName === 'context.clarification.updated' && (!isPendingInput(payload.pending) || (payload.clarification !== undefined && !isClarificationState(payload.clarification)) || (payload.pendingReference !== undefined && payload.pendingReference !== null && !isPendingReference(payload.pendingReference)))) {
       throw new Error('澄清 pending 状态无效');
     }
     // workflow.started 固定主语、意图和运行状态。
@@ -234,6 +235,8 @@ export class BehaviorContextProjector {
     if (isSlotMap(payload.slots)) this.state.slots = structuredClone(payload.slots);
     if (isPendingInput(payload.pending)) this.state.pending = { ...payload.pending };
     if (isClarificationState(payload.clarification)) this.state.clarification = structuredClone(payload.clarification);
+    if (isPendingReference(payload.pendingReference)) this.state.pendingReference = structuredClone(payload.pendingReference);
+    if (payload.pendingReference === null) delete this.state.pendingReference;
     if (isConfirmationState(payload.confirmation)) this.state.confirmation = { ...payload.confirmation };
     if (isRoutingScope(payload.routingScope)) this.state.routingScope = structuredClone(payload.routingScope);
   }
@@ -385,6 +388,17 @@ function isPendingInput(value: unknown): value is BehaviorContext['pending'] {
     keys.add(option.key);
     return true;
   });
+}
+
+/** 判断待解析事实引用是否为有限且不透明的状态。 */
+function isPendingReference(value: unknown): value is PendingReference {
+  if (!isRecord(value) || typeof value.text !== 'string' || value.text.length === 0 || value.text.length > MAX_PENDING_REFERENCE_TEXT_LENGTH) return false;
+  if (!['current', 'previous', 'next', 'first', 'last', 'offset'].includes(String(value.relation))) return false;
+  if (value.anchorRecordId !== undefined && (typeof value.anchorRecordId !== 'string' || value.anchorRecordId.length === 0 || value.anchorRecordId.length > MAX_FACT_RECORD_ID_LENGTH)) return false;
+  if (value.offset !== undefined && (!Number.isSafeInteger(value.offset) || Math.abs(Number(value.offset)) > MAX_PENDING_REFERENCE_OFFSET)) return false;
+  if (!Array.isArray(value.candidateRecordIds) || value.candidateRecordIds.length === 0 || value.candidateRecordIds.length > MAX_PENDING_REFERENCE_CANDIDATES) return false;
+  const recordIds = new Set<string>();
+  return value.candidateRecordIds.every((recordId) => typeof recordId === 'string' && recordId.length > 0 && recordId.length <= MAX_FACT_RECORD_ID_LENGTH && !recordIds.has(recordId) && (recordIds.add(recordId), true));
 }
 
 /** 判断事件中的连续澄清状态是否满足通用契约边界。 */

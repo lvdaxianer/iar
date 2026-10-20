@@ -11,6 +11,10 @@ import {
   MAX_CLARIFICATION_LABEL_LENGTH,
   MAX_CLARIFICATION_OPTIONS,
   MAX_CLARIFICATION_REASON_LENGTH,
+  MAX_FACT_RECORD_ID_LENGTH,
+  MAX_PENDING_REFERENCE_CANDIDATES,
+  MAX_PENDING_REFERENCE_OFFSET,
+  MAX_PENDING_REFERENCE_TEXT_LENGTH,
   MAX_UNRESOLVED_STREAK,
   REQUIRED_PRESERVED_FACTS,
   validateContract,
@@ -233,7 +237,20 @@ export function normalizeCompactionState(state: Record<string, unknown>, current
   mergeObject(next.confirmation, recordValue(state.confirmation), ['state', 'scopeHash', 'confirmedAt']);
   const clarification = recordValue(state.clarification);
   if (clarification && isClarificationState(clarification)) next.clarification = clarification;
+  const pendingReference = recordValue(state.pendingReference);
+  if (pendingReference && isPendingReference(pendingReference)) next.pendingReference = pendingReference;
   return next;
+}
+
+/** 只接受压缩结果中的通用待解析引用，避免模型扩展候选边界。 */
+function isPendingReference(value: Record<string, unknown>): value is NonNullable<BehaviorContext['pendingReference']> {
+  if (typeof value.text !== 'string' || value.text.length === 0 || value.text.length > MAX_PENDING_REFERENCE_TEXT_LENGTH) return false;
+  if (!['current', 'previous', 'next', 'first', 'last', 'offset'].includes(String(value.relation))) return false;
+  if (value.anchorRecordId !== undefined && (typeof value.anchorRecordId !== 'string' || value.anchorRecordId.length === 0 || value.anchorRecordId.length > MAX_FACT_RECORD_ID_LENGTH)) return false;
+  if (value.offset !== undefined && (!Number.isSafeInteger(value.offset) || Math.abs(Number(value.offset)) > MAX_PENDING_REFERENCE_OFFSET)) return false;
+  if (!Array.isArray(value.candidateRecordIds) || value.candidateRecordIds.length === 0 || value.candidateRecordIds.length > MAX_PENDING_REFERENCE_CANDIDATES) return false;
+  return value.candidateRecordIds.every((id) => typeof id === 'string' && id.length > 0 && id.length <= MAX_FACT_RECORD_ID_LENGTH)
+    && new Set(value.candidateRecordIds).size === value.candidateRecordIds.length;
 }
 
 /** 压缩候选只允许有限且去重的澄清选项进入可信旧状态。 */

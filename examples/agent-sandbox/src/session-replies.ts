@@ -3,7 +3,7 @@
  * @date 2026-10-18
  */
 import { randomUUID } from 'node:crypto';
-import type { ActionDefinition, ActionResult, BehaviorContext, JsonValue, PendingInput } from '@iar/contracts';
+import type { ActionDefinition, ActionResult, BehaviorContext, JsonValue, PendingInput, VerifiedFactRecord } from '@iar/contracts';
 import { ResponseGeneratorAdapter, type ClarificationMetadata, type ModelGateway, type ModelProfileRegistry } from '@iar/decision';
 import type { SessionMessage } from '@iar/persistence-spi';
 import type { PluginDescriptor } from '@iar/plugin-host';
@@ -19,7 +19,7 @@ import { streamModelReply } from './session-model-stream.js';
  * 所有回复路径共享同一个输入形状，避免普通和流式入口漂移。
  */
 type ReplyContext = { traceId: string; runId: string; userText: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[] };
-type FallbackContext = ReplyContext & { reasonCode: string; resolvedReferences?: ResolvedFactReference[] };
+type FallbackContext = ReplyContext & { reasonCode: string; resolvedReferences?: ResolvedFactReference[]; referenceCandidates?: VerifiedFactRecord[] };
 type ActionReplyContext = ReplyContext & { action: ActionDefinition; actionResult: ActionResult };
 
 /** 回复及压缩只访问宿主状态，重置后所有访问器指向当前会话。 */
@@ -73,7 +73,7 @@ export class SandboxSessionReplies {
    * @date 2026-10-18
    */
   public async fallbackReply(context: FallbackContext): Promise<string> {
-    const { traceId, runId, userText, behaviorContext, recentMessages, functionDescriptors, reasonCode, resolvedReferences } = context;
+    const { traceId, runId, userText, behaviorContext, recentMessages, functionDescriptors, reasonCode, resolvedReferences, referenceCandidates } = context;
     if (this.context.mode === 'brain') {
       const generated = await new ResponseGeneratorAdapter(this.context.gateway).generate({
         traceId,
@@ -85,7 +85,8 @@ export class SandboxSessionReplies {
           availableFunctions: functionDescriptors,
           functionDescriptors,
           reasonCode,
-          ...(resolvedReferences === undefined ? {} : { resolvedReferences })
+          ...(resolvedReferences === undefined ? {} : { resolvedReferences }),
+          ...(referenceCandidates === undefined ? {} : { referenceCandidates })
         }
       });
       // 只有生成失败才回退固定话术。
@@ -95,7 +96,7 @@ export class SandboxSessionReplies {
       }
       return FALLBACK_REPLY_TEXT;
     }
-    const scripted = this.scriptedFallbackResponse(userText, behaviorContext, functionDescriptors, resolvedReferences, reasonCode);
+    const scripted = this.scriptedFallbackResponse(userText, behaviorContext, functionDescriptors, resolvedReferences, reasonCode, referenceCandidates);
     await this.persistClarification(behaviorContext, scripted?.clarification);
     return scripted?.text ?? FALLBACK_REPLY_TEXT;
   }
@@ -121,7 +122,7 @@ export class SandboxSessionReplies {
    * @date 2026-10-18
    */
   public async fallbackReplyStreamed(context: FallbackContext, onDelta: (delta: string) => void): Promise<string> {
-    const { traceId, runId, userText, behaviorContext, recentMessages, functionDescriptors, reasonCode, resolvedReferences } = context;
+    const { traceId, runId, userText, behaviorContext, recentMessages, functionDescriptors, reasonCode, resolvedReferences, referenceCandidates } = context;
     if (this.context.mode !== 'brain' || !(this.context.brainProvider instanceof OpenAICompatibleModelProvider)) {
       const reply = await this.fallbackReply(context);
       onDelta(reply);
@@ -134,7 +135,8 @@ export class SandboxSessionReplies {
       availableFunctions: functionDescriptors,
       functionDescriptors,
       reasonCode,
-      ...(resolvedReferences === undefined ? {} : { resolvedReferences })
+      ...(resolvedReferences === undefined ? {} : { resolvedReferences }),
+      ...(referenceCandidates === undefined ? {} : { referenceCandidates })
     };
     const fallback = () => this.fallbackReply(context);
     return streamModelReply({ provider: this.context.brainProvider, profile: this.context.registry.forRole('response.generate'), traceId, runId, input, onDelta, onClarification: (clarification) => this.persistClarification(behaviorContext, clarification), onInvalid: fallback, onFailure: fallback });
@@ -154,13 +156,14 @@ export class SandboxSessionReplies {
   }
 
   /** 离线模型的通用结构化上下文兜底，不按业务关键词解释事实。 */
-  protected scriptedFallbackResponse(userText: string, behaviorContext: BehaviorContext, functionDescriptors: PluginDescriptor[] = this.context.functionDescriptors, resolvedReferences: ResolvedFactReference[] = [], reasonCode = 'unknown'): ScriptedReply | undefined {
+  protected scriptedFallbackResponse(userText: string, behaviorContext: BehaviorContext, functionDescriptors: PluginDescriptor[] = this.context.functionDescriptors, resolvedReferences: ResolvedFactReference[] = [], reasonCode = 'unknown', referenceCandidates: VerifiedFactRecord[] = []): ScriptedReply | undefined {
     const text = userText.trim();
     const pending = behaviorContext.pending;
     if (pending.status === 'required' && pending.kind === 'selection' && pending.options && text.length <= 60) {
       const selected = pending.options.find((option) => option.key === text);
       if (selected) return { text: `已记录你的选择「${selected.label}」。如果还需要继续处理，请告诉我下一步需求。` };
     }
+    if (reasonCode === 'reference_ambiguous' && referenceCandidates.length > 0) return { text: `我找到多个可能的记录，请明确选择第 ${referenceCandidates.map((record) => record.sequence).join('、')} 条中的哪一条。` };
     if (isFactFollowUp(text)) {
       const records = resolvedReferences.length > 0 ? resolvedReferences.map((item) => item.record) : reasonCode === 'reference_unresolved' ? [] : currentFactRecords(behaviorContext);
       if (records.length > 0) return { text: `根据当前会话已确认的信息：${records.flatMap((record) => Object.entries(record.values).map(([field, value]) => `${field}=${String(value ?? '空')}`)).join('、')}。` };

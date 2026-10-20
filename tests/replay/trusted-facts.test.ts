@@ -134,3 +134,21 @@ test('澄清选项通过事件投影进入 pending，非法重复选项不会污
   assert.throws(() => projector.apply({ ...pendingEvent, eventId: 'evt-invalid', payload: { pending: { kind: 'selection', status: 'required', options: [{ key: '1', label: '第一项' }, { key: '1', label: '重复项' }] } } }));
   assert.deepEqual(projector.current().pending.options, [{ key: '1', label: '第一项' }, { key: '2', label: '第二项' }]);
 });
+
+test('待解析引用通过澄清事件恢复且不改变执行权限', () => {
+  const projector = new BehaviorContextProjector();
+  const pendingEvent: EventEnvelope = {
+    schemaVersion: SCHEMA_VERSIONS.event, eventId: 'evt-reference-pending', eventName: 'context.clarification.updated',
+    occurredAt: '2026-10-19T00:00:02.000Z', runId: 'run-facts', correlationId: 'corr-facts',
+    payload: {
+      pending: { kind: 'input', status: 'required' },
+      pendingReference: { text: 'relative', relation: 'previous', candidateRecordIds: ['record-a', 'record-b'] }
+    }
+  };
+  projector.apply(pendingEvent);
+  const context = projector.current();
+  const restored = context as typeof context & { pendingReference?: unknown };
+  assert.deepEqual(restored.pendingReference, { text: 'relative', relation: 'previous', candidateRecordIds: ['record-a', 'record-b'] });
+  assert.equal(context.action.status, 'proposed');
+  assert.equal(context.route.functionId, undefined);
+});
