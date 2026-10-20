@@ -8,13 +8,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import type { FunctionPluginManifest, JsonValue } from '@iar/contracts';
-import type { PluginRegistration } from '@iar/plugin-sdk';
+import type { PluginRegistration } from '@iar/plugins';
 import { createFastifyApp } from '@iar/adapters-fastify';
-import { PluginHost } from '@iar/plugin-host';
+import { PluginHost } from '@iar/plugins';
 import { LocalWorkflow } from '@iar/workflow';
-import { knowledgeQueryPlugin } from '../../../examples/knowledge-query/src/index.js';
-import { ticketCreatePlugin } from '../../../examples/ticket-create/src/index.js';
-import { humanTransferPlugin } from '../../../examples/human-transfer/src/index.js';
+import { knowledgeQueryPlugin } from '../../../examples/plugins/knowledge-query/src/index.js';
+import { ticketCreatePlugin } from '../../../examples/plugins/ticket-create/src/index.js';
+import { humanTransferPlugin } from '../../../examples/plugins/human-transfer/src/index.js';
 
 /**
  * 端到端 fixture 只安装三个示例，不依赖真实模型或外部系统。

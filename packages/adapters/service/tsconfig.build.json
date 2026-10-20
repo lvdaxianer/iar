@@ -5,7 +5,7 @@
   "references": [
     { "path": "../fastify/tsconfig.build.json" },
     { "path": "../../contracts/tsconfig.build.json" },
-    { "path": "../../plugin-host/tsconfig.build.json" },
+    { "path": "../../plugins/tsconfig.build.json" },
     { "path": "../../runtime/tsconfig.build.json" },
     { "path": "../../storage/tsconfig.build.json" }
   ]

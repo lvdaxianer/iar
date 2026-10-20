@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { AsyncResource } from 'node:async_hooks';
 import { IarSandboxSession, type SandboxMode } from './session.js';
 import type { SnapshotStore } from '@iar/storage';
-import type { SessionListPage, SessionListQuery, SessionPersistenceProvider } from '@iar/persistence-spi';
+import type { SessionListPage, SessionListQuery, SessionPersistenceProvider } from '@iar/storage';
 
 /** 会话管理可配置上限；包含正在执行的请求。 */
 /** 每个节点单独记录开始和取消状态，避免重复释放容量。 */

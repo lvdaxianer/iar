@@ -22,20 +22,14 @@ importers:
         specifier: ^7.0.2
         version: 7.0.2
 
-  packages/abi:
-    dependencies:
-      '@iar/contracts':
-        specifier: 0.1.0
-        version: link:../contracts
-
   packages/adapters/executors:
     dependencies:
       '@iar/contracts':
         specifier: 0.1.0
         version: link:../../contracts
-      '@iar/plugin-sdk':
+      '@iar/plugins':
         specifier: 0.1.0
-        version: link:../../plugin-sdk
+        version: link:../../plugins
       '@iar/subscriptions':
         specifier: 0.1.0
         version: link:../../subscriptions
@@ -45,9 +39,9 @@ importers:
       '@iar/contracts':
         specifier: 0.1.0
         version: link:../../contracts
-      '@iar/plugin-host':
+      '@iar/plugins':
         specifier: 0.1.0
-        version: link:../../plugin-host
+        version: link:../../plugins
       '@iar/workflow':
         specifier: 0.1.0
         version: link:../../workflow
@@ -69,9 +63,9 @@ importers:
       '@iar/contracts':
         specifier: 0.1.0
         version: link:../../contracts
-      '@iar/plugin-host':
+      '@iar/plugins':
         specifier: 0.1.0
-        version: link:../../plugin-host
+        version: link:../../plugins
       '@iar/runtime':
         specifier: 0.1.0
         version: link:../../runtime
@@ -91,18 +85,6 @@ importers:
         specifier: 0.1.0
         version: link:../../workflow
 
-  packages/built-in-plugins:
-    dependencies:
-      '@iar/contracts':
-        specifier: 0.1.0
-        version: link:../contracts
-      '@iar/observability':
-        specifier: 0.1.0
-        version: link:../observability
-      '@iar/subscriptions':
-        specifier: 0.1.0
-        version: link:../subscriptions
-
   packages/cli:
     dependencies:
       '@iar/adapters-service':
@@ -120,15 +102,12 @@ importers:
 
   packages/control-plane:
     dependencies:
-      '@iar/abi':
+      '@iar/contracts':
         specifier: 0.1.0
-        version: link:../abi
-      '@iar/plugin-distribution':
+        version: link:../contracts
+      '@iar/plugins':
         specifier: 0.1.0
-        version: link:../plugin-distribution
-      '@iar/plugin-host':
-        specifier: 0.1.0
-        version: link:../plugin-host
+        version: link:../plugins
 
   packages/decision:
     dependencies:
@@ -141,50 +120,11 @@ importers:
       '@iar/contracts':
         specifier: 0.1.0
         version: link:../contracts
-
-  packages/persistence-runtime:
-    dependencies:
-      '@iar/persistence-spi':
-        specifier: 0.1.0
-        version: link:../persistence-spi
       '@iar/subscriptions':
         specifier: 0.1.0
         version: link:../subscriptions
 
-  packages/persistence-spi:
-    dependencies:
-      '@iar/contracts':
-        specifier: 0.1.0
-        version: link:../contracts
-
-  packages/persistence-sqlite:
-    dependencies:
-      '@iar/contracts':
-        specifier: 0.1.0
-        version: link:../contracts
-      '@iar/persistence-spi':
-        specifier: 0.1.0
-        version: link:../persistence-spi
-
-  packages/plugin-distribution:
-    dependencies:
-      '@iar/contracts':
-        specifier: 0.1.0
-        version: link:../contracts
-      '@iar/plugin-host':
-        specifier: 0.1.0
-        version: link:../plugin-host
-
-  packages/plugin-host:
-    dependencies:
-      '@iar/contracts':
-        specifier: 0.1.0
-        version: link:../contracts
-      '@iar/plugin-sdk':
-        specifier: 0.1.0
-        version: link:../plugin-sdk
-
-  packages/plugin-sdk:
+  packages/plugins:
     dependencies:
       '@iar/contracts':
         specifier: 0.1.0
@@ -204,9 +144,9 @@ importers:
       '@iar/decision':
         specifier: 0.1.0
         version: link:../decision
-      '@iar/plugin-host':
+      '@iar/plugins':
         specifier: 0.1.0
-        version: link:../plugin-host
+        version: link:../plugins
       '@iar/rule-engine':
         specifier: 0.1.0
         version: link:../rule-engine
@@ -216,6 +156,9 @@ importers:
       '@iar/contracts':
         specifier: 0.1.0
         version: link:../contracts
+      '@iar/subscriptions':
+        specifier: 0.1.0
+        version: link:../subscriptions
 
   packages/subscriptions:
     dependencies:

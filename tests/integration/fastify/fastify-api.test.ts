@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { SCHEMA_VERSIONS, type FunctionPluginManifest, type WorkflowDefinition } from '@iar/contracts';
-import { PluginHost } from '@iar/plugin-host';
+import { PluginHost } from '@iar/plugins';
 import { LocalWorkflow, confirmationScopeHash } from '@iar/workflow';
 import { createFastifyApp, type FastifyHostOptions } from '@iar/adapters-fastify';
 

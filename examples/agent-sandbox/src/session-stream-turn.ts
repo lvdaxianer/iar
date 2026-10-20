@@ -4,7 +4,7 @@ import { buildEvidence, summarizeAction } from './session-helpers.js';
 import type { ActionDefinition, ActionResult, BehaviorContext, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/decision';
 import type { RouteResult } from '@iar/runtime';
-import type { PluginDescriptor } from '@iar/plugin-host';
+import type { PluginDescriptor } from '@iar/plugins';
 import type { ExecuteTurnOutcome, ExtractFrameOutcome, ReferenceResolution, ResolvedFactReference, RouteEvidence, StreamEvent, TurnResult } from './session-types.js';
 
 /** 流式编排所需的会话能力，状态和资源仍由宿主唯一持有。 */

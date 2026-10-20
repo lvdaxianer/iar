@@ -6,9 +6,9 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { checkAbiCompatibility, validateControlPlaneRequest, type ControlPlaneRequest } from '@iar/abi';
+import { checkAbiCompatibility, validateControlPlaneRequest, type ControlPlaneRequest } from '@iar/contracts';
 import { createTenantControlPlane } from '@iar/control-plane';
-import { PluginHost } from '@iar/plugin-host';
+import { PluginHost } from '@iar/plugins';
 
 /**
  * 创建跨语言 ABI 使用的稳定请求 fixture。

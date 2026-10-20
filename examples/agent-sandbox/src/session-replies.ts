@@ -5,8 +5,8 @@
 import { randomUUID } from 'node:crypto';
 import type { ActionDefinition, ActionResult, BehaviorContext, JsonValue, PendingInput, VerifiedFactRecord } from '@iar/contracts';
 import { ResponseGeneratorAdapter, type ClarificationMetadata, type ModelGateway, type ModelProfileRegistry } from '@iar/decision';
-import type { SessionMessage } from '@iar/persistence-spi';
-import type { PluginDescriptor } from '@iar/plugin-host';
+import type { SessionMessage } from '@iar/storage';
+import type { PluginDescriptor } from '@iar/plugins';
 import { OpenAICompatibleModelProvider, type BrainModelProvider } from './models/llm-provider.js';
 import type { ScriptedModelProvider } from './models/scripted-provider.js';
 import { SandboxSessionCompaction, type CompactionContext } from './session-compaction.js';

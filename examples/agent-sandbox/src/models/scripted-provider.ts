@@ -12,7 +12,7 @@
  * @date 2026-10-18
  */
 import type { JsonValue } from '@iar/contracts';
-import type { PluginDescriptor } from '@iar/plugin-host';
+import type { PluginDescriptor } from '@iar/plugins';
 import { REQUIRED_PRESERVED_FACTS } from '@iar/contracts';
 import type { ModelProvider, ModelProviderRequest } from '@iar/decision';
 

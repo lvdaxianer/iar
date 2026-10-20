@@ -13,7 +13,7 @@ import {
   type FunctionPluginManifest
 } from '@iar/contracts';
 import { buildIntentDecisionInput, type DecisionRequest } from '@iar/decision';
-import { PluginHost } from '@iar/plugin-host';
+import { PluginHost } from '@iar/plugins';
 import { BehaviorContextProjector, createInitialContext, PluginFirstRouter, type AsyncDecisionAdapter } from '@iar/runtime';
 import { facts } from './rule-engine-fixtures.js';
 

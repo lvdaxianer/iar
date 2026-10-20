@@ -15,9 +15,9 @@ import {
   PersistenceProviderLoadError,
   PersistenceProviderRegistry,
   type PersistenceProviderConfig
-} from '@iar/persistence-runtime';
-import { sqlitePersistenceProviderModule, SqlitePersistenceError } from '@iar/persistence-sqlite';
-import { MAX_RECENT_MESSAGE_QUERY_LIMIT, type RecentMessageQuery, type SessionIdentity, type SessionMessage, type SessionSnapshotRecord } from '@iar/persistence-spi';
+} from '@iar/storage';
+import { sqlitePersistenceProviderModule, SqlitePersistenceError } from '@iar/storage';
+import { MAX_RECENT_MESSAGE_QUERY_LIMIT, type RecentMessageQuery, type SessionIdentity, type SessionMessage, type SessionSnapshotRecord } from '@iar/storage';
 
 const identity: SessionIdentity = { sessionId: 'session-sqlite-1', runId: 'run-1', traceId: 'trace-1', messageId: 'message-1' };
 const message: SessionMessage = { messageId: 'message-1', role: 'user', content: '查询当前状态', occurredAt: '2026-10-19T00:00:00.000Z' };

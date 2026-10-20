@@ -10,9 +10,9 @@
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_RECENT_MESSAGE_LIMIT, MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGE_LIMIT, SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type ClarificationState, type EventName, type JsonValue, type PendingInput, type PendingReference, type WorkflowDefinition } from '@iar/contracts';
 import { ModelGateway, ModelProfileRegistry } from '@iar/decision';
-import { PersistenceSubscriptionBridge } from '@iar/persistence-runtime';
-import type { SessionMessage, SessionPersistenceProvider } from '@iar/persistence-spi';
-import { PluginHost } from '@iar/plugin-host';
+import { PersistenceSubscriptionBridge } from '@iar/storage';
+import type { SessionMessage, SessionPersistenceProvider } from '@iar/storage';
+import { PluginHost } from '@iar/plugins';
 import { BehaviorContextProjector, type AsyncDecisionAdapter } from '@iar/runtime';
 import { SubscriptionDispatcher, SubscriptionRegistry, type DispatchEvent } from '@iar/subscriptions';
 import { InMemoryEventStore, type SnapshotStore } from '@iar/storage';

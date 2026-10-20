@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import type { JsonValue } from '@iar/contracts';
-import type { PluginHandlerContext, PluginHandlerResult } from '@iar/plugin-sdk';
+import type { PluginHandlerContext, PluginHandlerResult } from '@iar/plugins';
 import type { HookSubscription, SubscriptionRegistry } from '@iar/subscriptions';
 
 /*

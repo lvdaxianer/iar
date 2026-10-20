@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { SCHEMA_VERSIONS, type FunctionPluginManifest, type WorkflowDefinition } from '@iar/contracts';
 import { MockDecisionProvider } from '@iar/decision';
-import { PluginHost } from '@iar/plugin-host';
+import { PluginHost } from '@iar/plugins';
 import { createServiceApi, type ServiceApiRequest } from '@iar/adapters-service';
 import { TwoStageRouter } from '@iar/runtime';
 import { LocalWorkflow } from '@iar/workflow';

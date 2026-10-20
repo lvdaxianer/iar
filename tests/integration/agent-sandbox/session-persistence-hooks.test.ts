@@ -17,7 +17,7 @@ import type {
   SessionMessage,
   SessionPersistenceProvider,
   SessionSnapshotRecord
-} from '@iar/persistence-spi';
+} from '@iar/storage';
 import { IarSandboxSession } from '../../../examples/agent-sandbox/src/session.js';
 
 const manifest: PersistenceProviderManifest = {

@@ -9,7 +9,7 @@
  * @date 2026-10-18
  */
 import { MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, type JsonValue } from '@iar/contracts';
-import type { PluginHandlerResult } from '@iar/plugin-sdk';
+import type { PluginHandlerResult } from '@iar/plugins';
 
 /** Function 操作类型：read 免确认直接执行，action 需走确认流。 */
 export type SandboxOperationKind = 'read' | 'action';

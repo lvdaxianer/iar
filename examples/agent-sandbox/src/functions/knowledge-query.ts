@@ -8,7 +8,7 @@
  * @date 2026-10-18
  */
 import type { FunctionPluginManifest } from '@iar/contracts';
-import type { PluginHandler, PluginRegistration } from '@iar/plugin-sdk';
+import type { PluginHandler, PluginRegistration } from '@iar/plugins';
 import { retrieveKnowledge } from '../knowledge/retrieval.js';
 import { fail, findSandboxOperation, parseSandboxInput, sandboxInputSchema, sandboxOutputSchema, succeed, type SandboxOperation } from './common.js';
 

@@ -5,6 +5,7 @@
  * @date 2026-10-17
  */
 export * from './errors.js';
+export * from './abi/index.js';
 export * from './schemas.js';
 export * from './types.js';
 export * from './validation.js';

@@ -766,7 +766,7 @@ IarRuntime
 | 事件总线 | 进程内 typed event bus | MVP 降低依赖；跨服务时再增加消息适配器 |
 | 工作流 | 本地确定性状态机；可选 Temporal Adapter | 短动作简单可控，长流程再引入 durable execution |
 | 观测 | OpenTelemetry + Pino | 统一 trace、metric、structured log，并避免默认记录原始敏感文本 |
-| 包管理 | npm workspace / pnpm workspace | 便于拆分 contracts、runtime、plugin-sdk、adapters 和 CLI |
+| 包管理 | npm workspace / pnpm workspace | 核心包按稳定职责收敛；adapters 保持独立，examples 作为根级组合根和示例，不进入 workspace 发布 |
 | 测试 | Vitest + contract tests + replay tests | 验证插件契约、路由重放、压缩前后等价性和幂等行为 |
 
 ### 11.1 推荐包结构
@@ -778,10 +778,11 @@ config/
   routing/                # Function、Rule 和阈值配置
 packages/
   contracts/          # JSON Schema、TypeScript 类型、错误码和版本
+  plugins/            # SDK、Host、注册、依赖排序与生命周期
   runtime/            # IAR 主循环、BehaviorContext、路由与策略
-  plugin-host/        # 插件发现、注册、生命周期和依赖排序
-  plugin-sdk/         # 插件开发接口、Manifest 校验和测试工具
-  built-in-plugins/   # 日志、指标、审计等 system plugins
+  control-plane/      # tenant control-plane 与远程插件分发
+  observability/      # trace、metric、structured log、audit 与 system plugin
+  storage/            # EventStore、持久化 SPI/Runtime、SQLite Provider
   subscriptions/      # HookDefinition、StateEvent、Subscription Registry、Dispatcher
   rule-engine/        # 复合规则与候选 Function 生成
   decision/           # JEV、通用模型和 Mock Adapter
@@ -790,15 +791,16 @@ packages/
   adapters/           # Fastify、PostgreSQL、SQLite、Temporal、Sidecar
   cli/                # install、enable、disable、inspect、replay
 examples/
-  knowledge-query/
-  ticket-create/
-  human-transfer/
+  agent-sandbox/      # 根级组合根与交互演示
+  plugins/            # fake-plugin、knowledge-query、ticket-create、human-transfer
 tests/
   contract/
   replay/
   routing/
   compaction/
 ```
+
+`plugins/sdk` 和 `plugins/host` 先作为一个内部 package 边界共同演进，避免只有目录差异却产生两个 workspace 包。只有需要独立发布、独立语义化版本或外部插件作者单独安装 SDK 时，才重新拆出 SDK 包；`examples/` 始终不加入 workspace glob。
 
 ## 12. 可靠性、安全与观测
 
@@ -839,7 +841,7 @@ tests/
 
 ### 12.2.2 会话持久化 Provider 接入规范
 
-运行时只依赖 `@iar/persistence-spi` 的 `SessionPersistenceProvider`，不扫描、不注入具体数据库实现。Provider 必须声明 `iar.persistence/v1` Manifest，并实现 `open`、消息/事件追加、快照读写、`flush` 和 `close`；每次调用都接收 canonical `sessionId`，不能从用户文本或模型输出推导。
+运行时只依赖 `@iar/storage` 的 `SessionPersistenceProvider`，不扫描、不注入具体数据库实现。Provider 必须声明 `iar.persistence/v1` Manifest，并实现 `open`、消息/事件追加、快照读写、`flush` 和 `close`；每次调用都接收 canonical `sessionId`，不能从用户文本或模型输出推导。
 
 沙箱默认通过 `PersistenceProviderLoader` 加载内置 `sqlite` Provider。`IAR_PERSISTENCE_PROVIDER` 指定 `providerId`，`IAR_PERSISTENCE_MODULE` 指定外部模块入口，`IAR_PERSISTENCE_OPTIONS_JSON` 传递 JSON 对象；模块需导出 `{ manifest, createProvider }`，Manifest 的 `providerId` 必须与配置一致。外部 Provider 在启动时完成 SPI 校验和 `open`，不符合版本或接口要求时服务拒绝启动，不静默切换到其他存储。
 
@@ -882,7 +884,7 @@ SSE 写入故障先于断开事件出现时，入口结束审计使用 `status: 
 
 ### Phase 1：契约与嵌入式 MVP
 
-- 建立 `contracts`、`plugin-host`、`plugin-sdk`、`storage`；
+- 建立 `contracts`、`plugins`、`storage`；
 - 完成 Manifest 校验、Function/Plugin Registry 和生命周期事件；
 - 完成内存/SQLite EventStore、BehaviorContext 投影和压缩校验；
 - 用 Mock Decision Provider 跑通路由、确认、执行和恢复。

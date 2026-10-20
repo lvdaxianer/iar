@@ -5,7 +5,7 @@
   "references": [
     { "path": "../contracts/tsconfig.build.json" },
     { "path": "../decision/tsconfig.build.json" },
-    { "path": "../plugin-host/tsconfig.build.json" },
+    { "path": "../plugins/tsconfig.build.json" },
     { "path": "../rule-engine/tsconfig.build.json" }
   ]
 }

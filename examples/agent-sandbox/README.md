@@ -70,7 +70,7 @@ IAR_SANDBOX_PORT=8788 npm run demo:sandbox
 
 ## 会话恢复与 Provider
 
-每个 `POST /api/sessions` 都会返回 32 位随机 `sessionId`。请求使用 `/api/sessions/{sessionId}/...`，服务重启后先调用 `POST /api/sessions/{sessionId}/resume`，恢复完成后再继续聊天、确认或压缩。默认内置 SQLite Provider 异步保存消息、事件和结构化上下文快照；外部 Provider 只需实现 `@iar/persistence-spi` 并通过上表的三个 Provider 变量接入。
+每个 `POST /api/sessions` 都会返回 32 位随机 `sessionId`。请求使用 `/api/sessions/{sessionId}/...`，服务重启后先调用 `POST /api/sessions/{sessionId}/resume`，恢复完成后再继续聊天、确认或压缩。默认内置 SQLite Provider 异步保存消息、事件和结构化上下文快照；外部 Provider 只需实现 `@iar/storage` 并通过上表的三个 Provider 变量接入。
 
 ## 模型配置
 

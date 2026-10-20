@@ -60,7 +60,7 @@ import test from 'node:test';
 import type { FunctionPluginManifest } from '@iar/contracts';
 import { SCHEMA_VERSIONS } from '@iar/contracts';
 import { DecisionBackendResolver, IntentModelDecisionAdapter, JevDecisionAdapter, loadModelProfiles, MockDecisionProvider, ModelGateway, ModelProfileRegistry, UnifiedDecisionAdapter, type DecisionRequest, type ModelProvider } from '@iar/decision';
-import { PluginHost } from '@iar/plugin-host';
+import { PluginHost } from '@iar/plugins';
 import { TwoStageRouter, type AsyncDecisionAdapter, type RouteRequest } from '@iar/runtime';
 import { facts, functionRule, pluginRule } from './rule-engine-fixtures.js';
 

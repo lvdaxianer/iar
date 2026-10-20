@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { validatePluginManifest } from '@iar/contracts';
-import { createSystemLoggingPlugin, installSystemLoggingPlugin, SYSTEM_LOGGING_PLUGIN_MANIFEST, SYSTEM_LOGGING_SUBSCRIPTIONS } from '@iar/built-in-plugins';
+import { createSystemLoggingPlugin, installSystemLoggingPlugin, SYSTEM_LOGGING_PLUGIN_MANIFEST, SYSTEM_LOGGING_SUBSCRIPTIONS } from '@iar/observability';
 import { ObservabilityRecorder, type ObservabilityRecord } from '@iar/observability';
 import { SubscriptionDispatcher, SubscriptionRegistry, type DispatchEvent } from '@iar/subscriptions';
 

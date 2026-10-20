@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
 import { ERROR_CODES, type FunctionPluginManifest } from '@iar/contracts';
-import { PluginHost, type PluginState } from '@iar/plugin-host';
+import { PluginHost, type PluginState } from '@iar/plugins';
 
 /*
  * 本文件只验证生命周期，不重复安装事务测试。

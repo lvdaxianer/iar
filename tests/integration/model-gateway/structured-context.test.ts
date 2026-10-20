@@ -13,7 +13,7 @@ import {
 } from '@iar/decision';
 import { buildFallbackUserPrompt, buildResponseUserPrompt, buildSemanticUserPrompt } from '../../../examples/agent-sandbox/src/models/model-input-transport.js';
 import { ResponseGeneratorAdapter } from '@iar/decision';
-import { PluginHost } from '@iar/plugin-host';
+import { PluginHost } from '@iar/plugins';
 import type { FunctionPluginManifest } from '@iar/contracts';
 import { SEMANTIC_SYSTEM_PROMPT } from '../../../examples/agent-sandbox/src/models/model-input-transport.js';
 
