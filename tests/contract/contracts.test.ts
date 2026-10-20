@@ -86,6 +86,23 @@ function assertInvalidFunctionSchema(): void {
   if (!result.ok) assert.equal(result.error.code, ERROR_CODES.INVALID_EMBEDDED_SCHEMA);
 }
 
+/** 构造最小合法 BehaviorContext，供上下文演进测试复用。 */
+function createBehaviorContextFixture(): Record<string, unknown> {
+  return {
+    schemaVersion: SCHEMA_VERSIONS.behaviorContext,
+    subject: { type: 'session', id: 'session-001', status: 'unresolved', source: 'input' },
+    intent: 'unknown',
+    action: { name: 'unknown', status: 'proposed' },
+    route: {},
+    slots: {},
+    workflow: { currentStep: 'input', status: 'waiting' },
+    pending: { kind: 'input', status: 'none' },
+    confirmation: { state: 'not_required' },
+    idempotencyKey: 'idem-001',
+    integrity: { criticalFieldHash: 'hash-001', lastEventId: 'event-001' }
+  };
+}
+
 /** 读取合法插件 Manifest 并断言其可被解析为强类型对象。 */
 test('valid plugin manifest passes versioned contract validation', () => {
   // 合法 fixture 应被解析成强类型业务插件。
@@ -151,6 +168,76 @@ test('generic contract validation rejects incompatible behavior context', () => 
   const result = validateContract('behaviorContext', { schemaVersion: 'iar.behavior-context/v0' });
 
   // 不兼容投影不能进入 replay 或 runtime state。
+  assert.equal(result.ok, false);
+});
+
+/** 旧快照缺少新增可选字段时仍必须保持可恢复。 */
+test('behavior context remains backward compatible without recent-message state', () => {
+  // 旧快照不包含新版本的窗口和澄清字段。
+  const result = validateContract('behaviorContext', createBehaviorContextFixture());
+
+  // 缺少可选字段不能阻断已有会话恢复。
+  assert.equal(result.ok, true);
+});
+
+/** 最近消息窗口策略必须被限制在运行时允许的边界内。 */
+test('behavior context accepts a bounded recent-message policy', () => {
+  // 最近消息策略只描述窗口边界，不把原文复制进可信快照。
+  const result = validateContract('behaviorContext', {
+    ...createBehaviorContextFixture(),
+    recentMessagePolicy: { recentMessageLimit: 5, maxMessageChars: 2000 }
+  });
+
+  // 合法策略应能随快照恢复并供 Runtime 读取。
+  assert.equal(result.ok, true);
+});
+
+/** 连续未解决和待选择候选必须能作为结构化状态恢复。 */
+test('behavior context accepts persisted unresolved selection state', () => {
+  // 候选键只代表当前注册表快照中的不透明引用。
+  const result = validateContract('behaviorContext', {
+    ...createBehaviorContextFixture(),
+    clarification: {
+      mode: 'selection',
+      unresolvedStreak: 2,
+      reasonCode: 'routing_unresolved',
+      candidateVersion: 'registry-001',
+      candidateKeys: ['candidate-a', 'candidate-b']
+    }
+  });
+
+  // 澄清状态是数据，不应直接改变执行权限。
+  assert.equal(result.ok, true);
+});
+
+/** 最近消息策略超出边界时必须在契约层拒绝。 */
+test('behavior context rejects an oversized recent-message policy', () => {
+  // 超过运行时窗口上限会造成不可控的模型输入增长。
+  const result = validateContract('behaviorContext', {
+    ...createBehaviorContextFixture(),
+    recentMessagePolicy: { recentMessageLimit: 21, maxMessageChars: 2001 }
+  });
+
+  // 非法策略不能进入持久化或模型调用路径。
+  assert.equal(result.ok, false);
+});
+
+/** 同一候选键不能映射到多个展示选项，避免选择歧义。 */
+test('behavior context rejects duplicated pending selection keys', () => {
+  // 不同标签复用同一键会让用户选择无法确定唯一候选。
+  const result = validateContract('behaviorContext', {
+    ...createBehaviorContextFixture(),
+    pending: {
+      kind: 'selection',
+      status: 'required',
+      options: [
+        { key: 'candidate-a', label: '候选 A' },
+        { key: 'candidate-a', label: '候选 A（重复键）' }
+      ]
+    }
+  });
+
+  // 运行时必须在授权和执行前拒绝歧义选择元数据。
   assert.equal(result.ok, false);
 });
 
