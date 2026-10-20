@@ -13,7 +13,7 @@
 
 ## Design decisions
 
-1. 每个示例导出单独的 `PluginRegistration`，Manifest 只声明一个 Function ID，Handler 不读取宿主注册表或动态扩展 capability。
+1. 每个示例导出一个 `PluginPackage`，由 `definePlugin` 绑定一个或多个 Function，Handler 不读取宿主注册表或动态扩展 capability。
 2. Handler 只接收 JSON 输入并返回确定性 JSON；错误输出使用稳定 example error code，不回显原始输入。
 3. knowledge query 是低风险只读能力；ticket create 和 human transfer 是高风险写入/转交能力，必须声明 confirmation policy 和对应 capability。
 4. contract tests 通过 Ajv/PluginHost 共同验证 Manifest，避免只测静态字段而漏掉真实安装和 Function ownership 约束。

@@ -1,6 +1,6 @@
 # Phase 1 fake plugin 演示
 
-`examples/plugins/fake-plugin/src/index.ts` 提供一个不产生真实外部副作用的 `dip.service.stop` 插件。它使用与真实插件相同的 Manifest、输入输出 Schema、能力声明和高风险确认策略，但 Handler 只返回确定性 JSON 结果。
+`examples/plugins/fake-plugin/src/index.ts` 提供一个不产生真实外部副作用的 `dip.service.stop` Plugin 包。它使用 `Plugin > Function > Operation` 注册模型声明输入输出 Schema、能力和高风险确认策略，但 Handler 只返回确定性 JSON 结果。
 
 从仓库根目录执行 `npm run demo:fake-plugin` 可直接运行构建后的演示；对应自动化断言见 [`tests/contract/fake-plugin-demo.test.ts`](../../../tests/contract/fake-plugin-demo.test.ts)。
 
@@ -8,17 +8,15 @@
 
 ```ts
 // 该片段对应 scripts/run-fake-plugin-demo.mjs；请从仓库根目录运行 npm run demo:fake-plugin。
+import { createIarAgent } from '../../dist/packages/agent/src/index.js';
 import { replayEvents } from '../../dist/packages/runtime/src/index.js';
-import { PluginHost } from '../../dist/packages/plugin-host/src/index.js';
 import { fakeStopPlugin } from '../../dist/examples/plugins/fake-plugin/src/index.js';
 
-const host = new PluginHost({ functionIds: ['dip.service.stop'] });
-host.install(fakeStopPlugin);
-host.enable('fake-dip-stop-v1');
+const host = createIarAgent({ plugins: [fakeStopPlugin] }).pluginHost;
 
 const plugin = host.resolveCandidate('dip.service.stop', 'fake-dip-stop-v1');
 if (plugin.ok) {
-  await plugin.value.handler?.(
+  await plugin.value.handler(
     { serviceId: 'test1' },
     {
       pluginId: 'fake-dip-stop-v1',

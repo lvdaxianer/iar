@@ -4,7 +4,7 @@
 
 IAR 采用 `Plugin > Function > Operation` 的公共模型：Plugin 是可独立分发和管理的能力包，Function 是包内的一项业务能力，Operation 是 Function 支持的具体动作。应用通过 `@iar/agent` 统一启动，插件作者通过 `@iar/plugin` 定义和注册能力。
 
-本次是未发布项目的破坏性切换，不保留旧的 `FunctionPluginManifest`、`PluginRegistration.handler` 和 `PluginHost({ functionIds })` API。
+本次是未发布项目的破坏性切换，不保留旧的单 Function Manifest、旧注册对象 Handler 字段或宿主 Function 白名单参数。
 
 ## 包边界
 

@@ -90,7 +90,7 @@ export type PluginPackage = {
 
 - [ ] **Step 2: 更新 TypeBox Schema 和验证关系**
 
-`FunctionPluginManifestSchema` 改名为 `BusinessPluginManifestSchema`，`PluginManifestSchema` 的业务分支不再接受旧字段；`validatePluginManifestRelations` 只校验包级 capability/policy。新增 `validateFunctionDefinition`，并在 SDK 的 `validatePluginPackage` 中逐项校验 Function definition、operations、Handler 和 Function 能力必须属于 Plugin capability 集合。
+旧的单 Function Manifest Schema 改为 `BusinessPluginManifestSchema`，`PluginManifestSchema` 的业务分支不再接受旧字段；`validatePluginManifestRelations` 只校验包级 capability/policy。新增 Function definition 校验，并在 SDK 的 `validatePluginPackage` 中逐项校验 Function definition、operations、Handler 和 Function 能力必须属于 Plugin capability 集合。
 
 - [ ] **Step 3: 实现 `@iar/plugin` 构造器**
 
@@ -186,7 +186,7 @@ git commit -m "✨ feat(插件): 从插件包派生 Function 索引\n\n让 Host 
 
 - [ ] **Step 3: 迁移 Fastify 和 sandbox 执行读取**
 
-所有 `record.manifest.functionId/actionTypes/operations/inputSchema/outputSchema` 改为 `record.functions.get(functionId)` 的 Function 记录。所有失败路径继续返回稳定错误，不把 Handler、输入或模型原文写入公开结果。
+所有旧的 Manifest 顶层 Function 字段改为 `record.functions.get(functionId)` 的 Function 记录。所有失败路径继续返回稳定错误，不把 Handler、输入或模型原文写入公开结果。
 
 - [ ] **Step 4: 运行路由和集成测试**
 
@@ -258,7 +258,7 @@ assert.throws(() => createIarAgent({ plugins: [invalidPlugin] }), /plugin.*valid
 
 - [ ] **Step 3: 批量迁移测试 fixture**
 
-用 `definePlugin`/`defineFunction` 替换所有 `FunctionPluginManifest`、`PluginRegistration.handler` 和 `new PluginHost({ functionIds })`；所有 `manifest.functionId` 读取改为 selected Function record。运行 `rg` 确认旧 API 只在 OpenSpec/归档历史中出现，不在源码、示例、测试或 docs 中出现。
+用 `definePlugin`/`defineFunction` 替换所有旧的单 Function 注册形状；所有 Manifest 顶层 Function 读取改为 selected Function record。运行文本扫描确认旧 API 只在 OpenSpec/归档历史中出现，不在源码、示例、测试或公开 docs 中出现。
 
 - [ ] **Step 4: 运行 examples 和全部测试**
 
@@ -295,7 +295,7 @@ npm run verify:packages
 npm run demo:fake-plugin
 npm run demo:sandbox
 openspec validate unify-plugin-function-entry --type change --strict
-rg -n "FunctionPluginManifest|PluginRegistration|functionIds|manifest\\.functionId" packages examples tests docs scripts
+rg -n "旧单 Function 注册|PluginHost.*白名单|Manifest.*Function 字段" packages examples tests docs scripts
 ```
 
 预期 TypeScript、测试、分发检查、两个 demo 和 OpenSpec 全部退出码为 0，最后一次 `rg` 不匹配旧公共 API。

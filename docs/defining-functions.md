@@ -1,119 +1,102 @@
 # 定义 Function
 
-Function 是 IAR 两阶段路由的**第一阶段边界**：语义抽取把用户输入归一到某个 `functionId`，路由先选 Function、再在其内部选择 Plugin。本文说明 Function 的契约结构、它与 Plugin 的关系，以及在 agent sandbox 中新增一个 Function 的完整步骤。
+Function 是 IAR 意图识别和路由的能力单元。它回答“用户想使用哪项能力”，Plugin 则回答“由哪个已启用实现提供这项能力”。Function 必须嵌套在 Plugin 包中，不能作为全局孤立注册项存在。
 
-## 1. Function 在链路中的位置
+## 1. Function 在路由中的位置
 
-```
+```text
 用户输入
-  → 语义抽取（intent 即 functionId，如 ticket.create）
-  → 阶段一：Function 路由（规则过滤 + 决策模型从候选 Function 中选择）
-  → 阶段二：Plugin 路由（在该 Function 已启用的插件中选择）
-  → 策略/确认 → Workflow 执行 → 事件投影
+  → 意图识别得到 functionId
+  → Function 规则和模型选择
+  → 读取该 Function 的 Plugin providers
+  → Plugin 规则和模型选择
+  → ownership / capability / policy 重验证
+  → Operation / confirmation / Handler
 ```
 
-Function 回答的问题是「**这是哪个业务能力域**」，而不是「具体执行什么」。同一句话如果涉及多个 Function，由路由规则或模型决策收敛到一个。
+因此新包模型是 `Plugin > Function > Operation`，但默认决策顺序仍然是 `Function → Plugin`。这是层级归属和运行时路由顺序的明确区分。
 
-## 2. 契约定义（`@iar/contracts`）
+## 2. FunctionDefinition
 
-`FunctionDefinition` 描述 Function 的路由与数据边界：
+Function definition 通过 `@iar/plugin` 注册：
 
-| 字段 | 说明 |
+```ts
+const knowledgeQuery = defineFunction({
+  definition: {
+    schemaVersion: 'iar.function/v1',
+    functionId: 'knowledge.query',
+    version: '1.0.0',
+    name: '知识查询',
+    description: '查询当前 Plugin 提供的知识库',
+    actionTypes: ['query'],
+    capabilities: ['knowledge.read'],
+    riskLevel: 'low',
+    inputSchema: { type: 'object', additionalProperties: false },
+    outputSchema: { type: 'object', additionalProperties: false }
+  },
+  operations: [
+    { name: 'search', kind: 'read', description: '检索知识库并返回摘要' }
+  ],
+  handler: async () => ({ output: { found: true }, status: 'succeeded' })
+});
+```
+
+关键字段含义：
+
+| 字段 | 作用 |
 | --- | --- |
-| `schemaVersion` | 契约版本（`iar.function/v1`） |
-| `functionId` | 稳定标识，插件归属与路由的硬边界，如 `ticket.create` |
-| `version` | Function 字段的解释版本 |
-| `name` | 宿主展示名 |
-| `description` | 供有限候选解释用的描述 |
-| `actionTypes` | 该 Function 可承载的固定动作集合，只能是 `query`/`create`/`update`/`delete`/`transfer`/`execute` 的子集，模型不能动态创造动作类型 |
-| `inputSchema` / `outputSchema` | Function 数据边界的 JSON Schema |
-| `capabilities` | 路由与策略过滤使用的能力标签 |
-| `riskLevel` | `low` / `medium` / `high` / `critical` |
+| `functionId` | 意图、规则、路由和最终 ownership 校验使用的稳定标识 |
+| `actionTypes` | 允许的固定语义动作集合，模型不能创造新动作 |
+| `inputSchema` / `outputSchema` | Handler 输入和输出的 JSON 边界 |
+| `capabilities` | 路由与策略使用的能力标签，必须是 Plugin capability 的子集 |
+| `riskLevel` | 当前 Function 的风险等级，供策略和确认流程使用 |
+| `operations` | Function 能执行的有限动作目录 |
 
-## 3. Function 与 Plugin 的关系
-
-- **一个 Function 挂一个或多个 Plugin**。多插件共存支持同域内的实现替换（灰度、版本升级、回滚）；sandbox 演示环境是 1:1。
-- Plugin 通过 manifest 的 `functionId` 字段声明归属（`scope: 'function'` 强制这一边界）。
-- Function 的候选插件集由 `PluginHost.candidates(functionId)` 给出，只有已安装的插件才会进入阶段二候选。
-
-## 4. sandbox 中的落地：新增 Function 的四步
-
-以十个子系统之一 `ticket.create`（工单支持）为例。
-
-### 第 1 步：声明 Function 标识
-
-在 `examples/agent-sandbox/src/functions/index.ts` 的 `sandboxFunctionIds` 中加入 `ticket.create`。该列表在创建宿主时传入：
+## 3. 一个 Plugin 多个 Function
 
 ```ts
-const host = new PluginHost({ functionIds: sandboxFunctionIds });
+export const supportPlugin = definePlugin({
+  manifest: supportManifest,
+  functions: [knowledgeQuery, ticketCreate, ticketProgress]
+});
 ```
 
-未在 `functionIds` 中声明的标识不会被路由候选。
+安装时会拒绝同一 Plugin 内重复的 `functionId`，也会拒绝 Function capability 超出 Plugin capability 上界的情况。不同 Plugin 可以提供同一个 Function，例如两个 `knowledge.query` provider；Function 阶段看到一个有界能力，Plugin 阶段再选择具体 provider。
 
-### 第 2 步：编写宿主侧能力描述（catalog）
+## 4. Operation 和确认策略
 
-在同一个文件的 `sandboxFunctionCatalog` 中登记 `SandboxFunctionDescriptor`：
+Operation 是 Function 内的动作目录：
 
 ```ts
-'ticket.create': {
-  functionId: 'ticket.create',
-  name: '工单支持',
-  pluginId: 'ticket-create-v1',
-  description: '工单进度查询与工单创建',
-  operations: ticketCreateOperations,
-  defaultOperation: 'create'
-}
+[
+  { name: 'search', kind: 'read', description: '检索知识库' },
+  { name: 'create', kind: 'action', description: '创建工单' }
+]
 ```
 
-catalog 是宿主侧元数据，供四处消费：
+`read` 表示只读能力；`action` 表示可能产生副作用，必须进入既有 Policy/confirmation 流程。Operation 名称不能重复，目录只用于当前 Function 的候选解释、策略判断和执行边界。
 
-- **确认策略**：`session-helpers.ts` 按 `operations[].kind` 判定 `read` 免确认、`action` 沿用插件 policy；
-- **语义提示词**：操作目录会进入模型上下文，约束可抽取的 `slots.operation` 范围；
-- **兜底回复**：描述能力边界；
-- **调试面板**：中文名与操作展示。
+## 5. 意图识别和动态路由
 
-### 第 3 步：定义操作目录
+意图识别输出的 `intent` 使用 Function ID，例如 `ticket.create`。模型只能从当前路由请求提供的有限候选中选择，不能发明 Function 或 Plugin。
 
-每个 Function 显式声明操作目录（`PluginOperation` 形状）：
+动态路由仍遵守以下约束：
 
-```ts
-export const ticketCreateOperations: readonly SandboxOperation[] = [
-  { name: 'search', kind: 'read', description: '检索工单支持知识库，返回相关度最高的 3 条说明' },
-  { name: 'progress', kind: 'read', description: '按工单号查询工单的流转节点与处理进展' },
-  { name: 'create', kind: 'action', description: '提交新工单并返回工单编号' }
-];
-```
+- 连续无法解析达到阈值后，只生成当前 enabled 且授权的候选。
+- Function 候选由 PluginHost 当前包派生，系统 Plugin 和 disabled Plugin 不进入候选。
+- Plugin 选择后，Host 会重新验证 Plugin 状态、Function ownership、capability 和 policy。
+- 候选在等待确认期间失效时拒绝执行，不自动切换到其他 Plugin。
+- 普通入口、流式入口、会话恢复和 Pi Bridge 共用同一个会话状态机。
 
-`kind` 是安全开关：`read` 直接执行，`action` 必须走确认流。`defaultOperation` 是模型未给出 operation 时的回落点。
+## 6. 新增 Function 检查清单
 
-### 第 4 步：实现并注册归属插件
+- [ ] 在已有业务 Plugin 包中用 `defineFunction` 定义 Function。
+- [ ] `functionId`、动作类型、输入输出 Schema 和 Operation 目录完整且稳定。
+- [ ] Function capability 是 Plugin capability 的子集。
+- [ ] 所有有副作用的 Operation 都标记为 `action`。
+- [ ] Handler 只接收 JSON 输入和只读执行上下文。
+- [ ] 将 Function 放入 Plugin 的 `functions` 数组，再通过 `createIarAgent` 注册。
+- [ ] 为正常路由、动态候选、确认、恢复和 Handler ownership 增加测试。
+- [ ] 确认模型输入中只出现当前有限候选，不把注册表或原始消息直接交给模型。
 
-见 [定义 Plugin](./defining-plugins.md)。插件 manifest 的 `functionId` 必须与 catalog 键一致，然后追加进 `allSandboxPlugins` 列表完成安装。
-
-## 5. 让模型认识这个 Function
-
-`sandbox` 的语义提示词（`model-input-transport.ts` 的 `SEMANTIC_SYSTEM_PROMPT`）按 catalog 生成 intent 清单：每个 Function 一段「intent 名 + 操作与槽位说明」。新增 Function 后要同步提示词（或如当前实现一样从 catalog 动态注入 Function 描述），否则模型抽不出这个 intent，路由永远到不了它。
-
-语义抽取的固定约定：
-
-- `intent` 取值即 `functionId`，语义层不允许发明清单之外的 intent；
-- `action` 只能是 `query`/`create`/`update`/`delete`/`transfer`/`execute`/`unknown` 之一；
-- 咨询类问题不给 `slots.operation`，动作请求才给。
-
-## 6. 检查清单
-
-新增 Function 时逐项确认：
-
-- [ ] `sandboxFunctionIds` 已加入新标识
-- [ ] `sandboxFunctionCatalog` 已登记描述（name/description/operations/defaultOperation）
-- [ ] 操作目录的 `kind` 标注正确（read 还是 action）
-- [ ] 归属插件 manifest 的 `functionId` 一致，且已加入 `allSandboxPlugins`
-- [ ] 语义提示词的 intent 清单已覆盖（静态或动态注入）
-- [ ] 知识库（如有）在 `knowledge/bases/<functionId>.json` 就位并被检索函数引用
-- [ ] 单轮单意图验证：一句典型话术能路由到该 Function；一句咨询话术不被误判为 action
-
-## 7. 常见陷阱
-
-- **intent 拼写不一致**：提示词里的 intent 名、catalog 键、manifest `functionId` 三处必须完全相同，一处漂移即路由失效。
-- **操作 kind 标错**：把 `create` 标成 `read` 会绕过确认直接执行副作用——这是最危险的一类错误。
-- **defaultOperation 指向 action**：operation 缺失时回落到写操作会让咨询类问法误入确认流（当前实现已要求模型必须给出 operation）。
+不要再维护 `functionIds` 宿主白名单，也不要把 `functionId` 写回 Plugin Manifest 顶层；Function 的存在和归属由 Plugin 包本身定义。
