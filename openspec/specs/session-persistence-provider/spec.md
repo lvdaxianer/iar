@@ -25,15 +25,15 @@ The runtime SHALL depend on a versioned persistence provider interface that supp
 - **WHEN** the runtime requests the latest N messages for a session
 - **THEN** the Provider returns no more than N valid messages in deterministic chronological order
 
-#### Scenario: Provider returns a bounded session-summary page
-
-- **WHEN** the runtime requests a bounded session-summary page
-- **THEN** the Provider returns no more than the requested bound in deterministic order and excludes full messages, events, structured context and trusted facts
-
 #### Scenario: External provider implements session listing
 
 - **WHEN** an external package implements the declared Provider SPI
 - **THEN** the runtime can request a bounded session-summary page without changing model-routing code
+
+#### Scenario: Provider returns a bounded session-summary page
+
+- **WHEN** the runtime requests a bounded session-summary page
+- **THEN** the Provider returns no more than the requested bound in deterministic order and excludes full messages, events, structured context and trusted facts
 
 ### Requirement: Provider loading is explicit and validated
 
