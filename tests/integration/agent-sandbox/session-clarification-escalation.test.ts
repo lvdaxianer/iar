@@ -78,6 +78,28 @@ test('等待确认期间不会增加 unresolved streak', async () => {
   }
 });
 
+test('历史关系无法解析时不会误答当前记录，并按次数进入动态选择兜底', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    assert.equal((await session.turn('帮我创建工单，网络很慢')).status, 'awaiting_confirmation');
+    assert.equal((await session.confirm(true)).status, 'executed');
+
+    const first = await session.turn('告诉我上一个工单编号');
+    assert.equal(first.status, 'clarification');
+    assert.equal((await session.state()).context.clarification?.unresolvedStreak, 1);
+    assert.doesNotMatch(first.reply, /ticket-20261018/);
+
+    const second = await session.turn('还是告诉我上一个工单编号');
+    const state = await session.state();
+    assert.equal(second.status, 'clarification');
+    assert.equal(state.context.clarification?.mode, 'selection');
+    assert.ok((state.context.pending.options?.length ?? 0) > 0);
+    assert.doesNotMatch(second.reply, /ticket-20261018/);
+  } finally {
+    session.dispose();
+  }
+});
+
 test('有效动态候选重新进入正常路由和执行门禁', async () => {
   const session = new IarSandboxSession({ mode: 'scripted' });
   try {

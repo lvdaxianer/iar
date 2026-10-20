@@ -95,7 +95,8 @@ function validateMetadata(request: CompactionRequest): ContractIssue[] {
   const preserved = new Set(request.result.preservedFacts);
   // 必保留字段由集中式常量定义，禁止调用方遗漏。
   for (const fact of REQUIRED_PRESERVED_FACTS) {
-    if (!preserved.has(fact)) issues.push(issue('/preservedFacts', 'contains', `缺少必保留事实 ${fact}`));
+    const legacyFactMarker = fact === 'factHistory' && preserved.has('facts') && request.current.facts !== undefined;
+    if (!preserved.has(fact) && !legacyFactMarker) issues.push(issue('/preservedFacts', 'contains', `缺少必保留事实 ${fact}`));
   }
   return issues;
 }

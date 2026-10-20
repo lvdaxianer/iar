@@ -50,7 +50,7 @@ function buildResult(state: ReturnType<typeof createInitialContext>): Compaction
       confirmation: state.confirmation
     },
     references: [{ text: '第一个服务', resolvedTo: 'test1', sourceEventId: sourceEvent.eventId }],
-    preservedFacts: ['subject', 'action', 'functionId', 'pluginId', 'slots', 'workflow.currentStep', 'pending', 'confirmation', 'intent', 'idempotencyKey', 'facts'],
+    preservedFacts: ['subject', 'action', 'functionId', 'pluginId', 'slots', 'workflow.currentStep', 'pending', 'confirmation', 'intent', 'idempotencyKey', 'factHistory'],
     warnings: []
   };
 }
@@ -162,7 +162,22 @@ test('context events use dedicated payload schemas', () => {
 });
 
 test('compression contract requires the trusted facts provenance marker', () => {
-  assert.ok(REQUIRED_PRESERVED_FACTS.includes('facts'));
+  assert.ok(REQUIRED_PRESERVED_FACTS.includes('factHistory'));
+});
+
+test('successful compaction preserves the ordered fact history and focus', () => {
+  const context = createInitialContext('run-compact');
+  context.factHistory = {
+    records: [{ recordId: 'record-a', sequence: 1, sourceEventId: 'evt-a', functionId: 'capability.alpha', pluginId: 'provider.alpha-v1', values: { resultKey: 'value-a' }, createdAt: '2026-10-17T00:00:00.000Z' }, { recordId: 'record-b', sequence: 2, sourceEventId: 'evt-b', functionId: 'capability.alpha', pluginId: 'provider.alpha-v1', values: { resultKey: 'value-b' }, createdAt: '2026-10-17T00:00:01.000Z' }],
+    focusRecordId: 'record-b'
+  };
+  context.integrity.criticalFieldHash = criticalFieldHash(context);
+  const outcome = new ContextCompactionService().compact(buildRequest(buildResult(context), { current: context }));
+  assert.equal(outcome.ok, true);
+  if (outcome.ok) {
+    assert.deepEqual(outcome.context.factHistory, context.factHistory);
+    assert.deepEqual(outcome.event.payload.state.factHistory, context.factHistory);
+  }
 });
 
 test('successful compaction keeps trusted facts and their source metadata', () => {

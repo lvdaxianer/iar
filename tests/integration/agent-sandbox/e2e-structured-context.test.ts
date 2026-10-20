@@ -61,15 +61,15 @@ test('自由追问可从结构化事实回答并在压缩重启后继续，同�
     });
     assert.equal(confirmed.body.status, 'executed');
 
-    const stateA = await requestJson<{ context: { facts?: Record<string, { value: unknown }> }; events: unknown[] }>(`${base}/api/sessions/${sessionA}/state`, { method: 'GET' });
-    const ticketId = String(stateA.body.context.facts?.['ticket.create.ticketId']?.value ?? '');
+    const stateA = await requestJson<{ context: { factHistory?: { records: Array<{ values: Record<string, unknown> }> } }; events: unknown[] }>(`${base}/api/sessions/${sessionA}/state`, { method: 'GET' });
+    const ticketId = String(stateA.body.context.factHistory?.records.at(-1)?.values.ticketId ?? '');
     assert.match(ticketId, /^ticket-20261018-\d{3}$/);
     const otherBusiness = await requestJson<{ status: string }>(`${base}/api/sessions/${sessionB}/chat`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: '查询服务状态' })
     });
     assert.equal(otherBusiness.body.status, 'executed');
-    const stateB = await requestJson<{ context: { facts?: Record<string, unknown> } }>(`${base}/api/sessions/${sessionB}/state`, { method: 'GET' });
-    assert.equal(stateB.body.context.facts?.['ticket.create.ticketId'], undefined);
+    const stateB = await requestJson<{ context: { factHistory?: { records: Array<{ values: Record<string, unknown> }> } } }>(`${base}/api/sessions/${sessionB}/state`, { method: 'GET' });
+    assert.equal(stateB.body.context.factHistory?.records.some((record) => record.values.ticketId !== undefined), false);
 
     const freeFollowUp = await requestJson<{ status: string; reply: string }>(`${base}/api/sessions/${sessionA}/chat`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: '将这个工单单号告诉我下' })
@@ -87,9 +87,9 @@ test('自由追问可从结构化事实回答并在压缩重启后继续，同�
     const resumed = await requestJson<{ resumed: boolean }>(`${base}/api/sessions/${sessionA}/resume`, { method: 'POST' });
     assert.equal(resumed.response.status, 200);
     assert.equal(resumed.body.resumed, true);
-    const restored = await requestJson<{ context: { summary?: { text: string }; facts?: Record<string, { value: unknown }> } }>(`${base}/api/sessions/${sessionA}/state`, { method: 'GET' });
+    const restored = await requestJson<{ context: { summary?: { text: string }; factHistory?: { records: Array<{ values: Record<string, unknown> }> } } }>(`${base}/api/sessions/${sessionA}/state`, { method: 'GET' });
     assert.equal(restored.body.context.summary?.text, compacted.body.summary);
-    assert.equal(restored.body.context.facts?.['ticket.create.ticketId']?.value, ticketId);
+    assert.equal(restored.body.context.factHistory?.records.at(-1)?.values.ticketId, ticketId);
     const restoredFollowUp = await requestJson<{ status: string; reply: string }>(`${base}/api/sessions/${sessionA}/chat`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message: '这个工单编号是多少' })
     });

@@ -67,10 +67,9 @@ function decisionResult(input: unknown): Record<string, unknown> {
 
 test('语义与回复模型接收当前问题、结构化上下文和有界最近消息', () => {
   const context = createInitialContext('run-context');
-  context.facts = {
-    'ticket.create.ticketId': {
-      value: 'ticket-001', status: 'verified', sourceEventId: 'event-001', functionId: 'ticket.create', pluginId: 'ticket-create-v1', field: 'ticketId'
-    }
+  context.factHistory = {
+    records: [{ recordId: 'fact-001', sequence: 1, sourceEventId: 'event-001', functionId: 'function.visible', pluginId: 'plugin.visible', values: { ticketId: 'ticket-001' }, createdAt: '2026-10-20T00:00:00.000Z' }],
+    focusRecordId: 'fact-001'
   };
   const semantic = buildSemanticUserPrompt({ text: '告诉我刚才的编号', behaviorContext: context });
   const functionDescriptors = [{ candidateKey: 'candidate-opaque', functionId: 'function.visible', pluginId: 'plugin.visible', description: '动态能力描述', actionTypes: ['query'] }];
@@ -84,6 +83,34 @@ test('语义与回复模型接收当前问题、结构化上下文和有界最�
   assert.match(semantic, /告诉我刚才的编号/);
   assert.match(response, /动态能力描述/);
   assert.match(fallback, /candidate-opaque/);
+});
+
+test('历史关系使用不透明记录并与动态能力和最近消息同时进入模型输入', () => {
+  const context = createInitialContext('run-relation-prompt');
+  context.factHistory = {
+    records: [{ recordId: 'opaque-record-1', sequence: 1, sourceEventId: 'event-1', functionId: 'function.dynamic', pluginId: 'plugin.dynamic', values: { dynamicField: 'trusted-value' }, createdAt: '2026-10-20T00:00:00.000Z' }],
+    focusRecordId: 'opaque-record-1'
+  };
+  const input = {
+    userMessage: '告诉我上一个',
+    text: '告诉我上一个',
+    behaviorContext: context,
+    recentMessages: [{ role: 'user', text: '上一条原文' }],
+    resolvedReferences: [{ text: '上一个', record: context.factHistory.records[0] }],
+    functionDescriptors: [{ candidateKey: 'candidate-dynamic', functionId: 'function.dynamic', pluginId: 'plugin.dynamic', description: '动态能力', actionTypes: ['query'] }]
+  };
+  const semantic = buildSemanticUserPrompt(input);
+  const response = buildResponseUserPrompt(input);
+  const fallback = buildFallbackUserPrompt({ ...input, reasonCode: 'reference_unresolved', availableFunctions: input.functionDescriptors }, input.functionDescriptors);
+  for (const prompt of [semantic, response, fallback]) {
+    assert.match(prompt, /opaque-record-1/);
+    assert.match(prompt, /trusted-value/);
+    assert.match(prompt, /上一条原文/);
+    assert.match(prompt, /candidate-dynamic/);
+  }
+  assert.match(SEMANTIC_SYSTEM_PROMPT, /iar\.semantic-frame\/v2/);
+  assert.match(SEMANTIC_SYSTEM_PROMPT, /previous/);
+  assert.doesNotMatch(SEMANTIC_SYSTEM_PROMPT, /resolvedTo/);
 });
 
 test('PluginHost 只投影当前启用且授权的通用描述，并使用不透明候选键', () => {
@@ -114,10 +141,9 @@ test('共享语义系统提示词不内置业务功能目录，描述由调用�
 
 test('JEV and Intent Model receive the same structured context without changing the decision contract', async () => {
   const context = createInitialContext('run-context');
-  context.facts = {
-    'ticket.create.ticketId': {
-      value: 'ticket-002', status: 'verified', sourceEventId: 'event-002', functionId: 'ticket.create', pluginId: 'ticket-create-v1', field: 'ticketId'
-    }
+  context.factHistory = {
+    records: [{ recordId: 'fact-002', sequence: 1, sourceEventId: 'event-002', functionId: 'function.visible', pluginId: 'plugin.visible', values: { ticketId: 'ticket-002' }, createdAt: '2026-10-20T00:00:00.000Z' }],
+    focusRecordId: 'fact-002'
   };
   const calls: Array<{ backend: string; input: Record<string, unknown> }> = [];
   const provider: ModelProvider = { complete: async (input) => {
@@ -189,7 +215,7 @@ test('normal and streaming session calls use the live structured context after a
     assert.equal((await session.turn('帮我创建工单，网络很慢')).status, 'awaiting_confirmation');
     assert.equal((await session.confirm(true)).status, 'executed');
     const state = await session.state();
-    const ticketId = state.context.facts?.['ticket.create.ticketId']?.value;
+    const ticketId = state.context.factHistory?.records.at(-1)?.values.ticketId;
     assert.equal(typeof ticketId, 'string');
     assert.equal((await session.turn('告诉我刚才的工单编号')).status, 'clarification');
     assert.equal((await session.turnStreamed('还是告诉我这个编号', () => {})).status, 'clarification');
@@ -213,7 +239,7 @@ test('scripted semantic fallback answers a verified follow-up without repeating 
     assert.equal((await session.turn('帮我创建工单，网络很慢')).status, 'awaiting_confirmation');
     assert.equal((await session.confirm(true)).status, 'executed');
     const before = await session.state();
-    const ticketId = before.context.facts?.['ticket.create.ticketId']?.value;
+    const ticketId = before.context.factHistory?.records.at(-1)?.values.ticketId;
     assert.equal(typeof ticketId, 'string');
     const followUp = await session.turn('告诉我刚才的工单单号');
     const after = await session.state();
@@ -221,6 +247,32 @@ test('scripted semantic fallback answers a verified follow-up without repeating 
     assert.match(followUp.reply, new RegExp(String(ticketId)));
     assert.equal(after.stats.eventCount, before.stats.eventCount);
     assert.equal(after.pending, null);
+  } finally {
+    session.dispose();
+  }
+});
+
+test('scripted fallback resolves the previous fact record instead of returning the whole chain', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    assert.equal((await session.turn('帮我创建工单，网络很慢')).status, 'awaiting_confirmation');
+    assert.equal((await session.confirm(true)).status, 'executed');
+    assert.equal((await session.turn('再帮我创建一张工单，邮箱收不到邮件')).status, 'awaiting_confirmation');
+    assert.equal((await session.confirm(true)).status, 'executed');
+
+    const state = await session.state();
+    const records = state.context.factHistory?.records ?? [];
+    assert.equal(records.length, 2);
+    const first = records[0]?.values.ticketId;
+    const second = records[1]?.values.ticketId;
+    assert.equal(typeof first, 'string');
+    assert.equal(typeof second, 'string');
+    assert.notEqual(first, second);
+
+    const followUp = await session.turn('告诉我这个的上一个工单编号');
+    assert.equal(followUp.status, 'clarification');
+    assert.match(followUp.reply, new RegExp(String(first)));
+    assert.doesNotMatch(followUp.reply, new RegExp(String(second)));
   } finally {
     session.dispose();
   }

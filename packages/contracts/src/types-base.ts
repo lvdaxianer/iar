@@ -24,6 +24,15 @@ export const MAX_TRUSTED_FACT_KEY_LENGTH = 320;
 /** 单个 BehaviorContext 允许保存的事实数量。 */
 export const MAX_TRUSTED_FACTS = 64;
 
+/** 事实记录 ID、来源事件和动态标识的长度上限。 */
+export const MAX_FACT_RECORD_ID_LENGTH = 200;
+
+/** 单条事实记录允许保存的动态字段数量上限。 */
+export const MAX_FACT_RECORD_VALUES = 32;
+
+/** 事实链序号的安全整数上限。 */
+export const MAX_FACT_SEQUENCE = 2147483647;
+
 /** 单次路由上下文允许保留的 Plugin 候选数量。 */
 export const MAX_ROUTING_SCOPE_PLUGINS = 32;
 

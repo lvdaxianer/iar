@@ -169,11 +169,34 @@ function validateRelationIssues(name: ContractName, input: unknown): ContractIss
 
 /** 拒绝 pending 选项中复用同一不透明键的歧义数据。 */
 function validateBehaviorContextRelations(input: unknown): ContractIssue[] {
-  if (!isRecord(input) || !isRecord(input.pending) || !Array.isArray(input.pending.options)) return [];
+  if (!isRecord(input)) return [];
+  const issues = validatePendingOptionKeys(input);
+  if (isRecord(input.factHistory)) issues.push(...validateFactHistoryRelations(input.factHistory));
+  return issues;
+}
+
+/** 校验 pending 选项的动态键唯一性。 */
+function validatePendingOptionKeys(input: Record<string, unknown>): ContractIssue[] {
+  if (!isRecord(input.pending) || !Array.isArray(input.pending.options)) return [];
   const keys = input.pending.options.map((option) => isRecord(option) && typeof option.key === 'string' ? option.key : undefined);
   const validKeys = keys.filter((key): key is string => key !== undefined);
-  if (new Set(validKeys).size === validKeys.length) return [];
-  return [{ path: '/pending/options', keyword: 'uniqueKeys', message: '澄清选项键必须唯一' }];
+  return new Set(validKeys).size === validKeys.length ? [] : [{ path: '/pending/options', keyword: 'uniqueKeys', message: '澄清选项键必须唯一' }];
+}
+
+/** 校验事实链中的 ID、焦点和严格递增顺序。 */
+function validateFactHistoryRelations(history: Record<string, unknown>): ContractIssue[] {
+  if (!Array.isArray(history.records)) return [];
+  const records = history.records.filter(isRecord);
+  const issues: ContractIssue[] = [];
+  const ids = records.map((record) => record.recordId).filter((id): id is string => typeof id === 'string');
+  if (new Set(ids).size !== ids.length) issues.push({ path: '/factHistory/records', keyword: 'uniqueRecordIds', message: '事实记录 ID 必须唯一' });
+  if (typeof history.focusRecordId === 'string' && !ids.includes(history.focusRecordId)) issues.push({ path: '/factHistory/focusRecordId', keyword: 'reference', message: '事实焦点必须指向已有记录' });
+  const sequences = records.map((record) => record.sequence).filter((sequence): sequence is number => typeof sequence === 'number');
+  if (sequences.some((sequence, index) => {
+    const previous = sequences[index - 1];
+    return index > 0 && previous !== undefined && sequence <= previous;
+  })) issues.push({ path: '/factHistory/records', keyword: 'ordered', message: '事实记录必须按 sequence 升序排列' });
+  return issues;
 }
 
 /**

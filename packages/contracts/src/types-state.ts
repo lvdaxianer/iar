@@ -205,6 +205,32 @@ export type TrustedFact = {
   field: string;
 };
 
+/** 一次成功结果产生的有序可信事实记录。 */
+export type VerifiedFactRecord = {
+  /** 由运行时生成且不表达业务含义的稳定记录标识。 */
+  recordId: string;
+  /** 当前会话事实链中的单调序号。 */
+  sequence: number;
+  /** 产生该记录的不可变成功事件。 */
+  sourceEventId: string;
+  /** 事实所属 Function，只作为动态标识处理。 */
+  functionId: string;
+  /** 事实所属 Plugin，只作为动态标识处理。 */
+  pluginId: string;
+  /** Plugin 事实信封声明的有界原子值。 */
+  values: Record<string, TrustedFactValue>;
+  /** 来源事件发生时间。 */
+  createdAt: string;
+};
+
+/** 可随 BehaviorContext 恢复的有界事实链。 */
+export type VerifiedFactHistory = {
+  /** 事实记录按 sequence 升序保存。 */
+  records: VerifiedFactRecord[];
+  /** 当前自然语言指代“这个”时使用的受信锚点。 */
+  focusRecordId?: string;
+};
+
 /** 已校验、可恢复但不可执行的上下文摘要。 */
 export type ContextSummary = {
   /** 摘要正文，长度由 BehaviorContext Schema 限制。 */
@@ -241,7 +267,9 @@ export type BehaviorContext = {
   clarification?: ClarificationState;
   // confirmation 记录确认范围和状态。
   confirmation: ConfirmationState;
-  // facts 只保存成功输出中的有限、可追溯事实。
+  // factHistory 保存成功输出中的有限、可追溯有序事实。
+  factHistory?: VerifiedFactHistory;
+  // facts 仅为旧快照读取兼容保留，新投影不再写入该 map。
   facts?: Record<string, TrustedFact>;
   // summary 只用于辅助理解和恢复，不授予模型执行权限。
   summary?: ContextSummary;

@@ -47,8 +47,8 @@ export const REQUIRED_PRESERVED_FACTS = [
   'intent',
   // 幂等键用于防止重复副作用。
   'idempotencyKey',
-  // 可信事实及来源必须从旧视图完整保留。
-  'facts'
+  // 有序可信事实及来源必须从旧视图完整保留。
+  'factHistory'
 ] as const;
 // 该清单同时服务于模型提示、运行时校验和审计报告。
 

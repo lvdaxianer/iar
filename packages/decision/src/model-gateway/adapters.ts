@@ -15,7 +15,7 @@ import { buildIntentDecisionInput, canonicalizeDecisionRequest } from './intent-
 /** Semantic Extractor 的最小结构化返回。 */
 export type SemanticFrame = {
   /** SemanticFrame schema 版本。 */
-  schemaVersion: 'iar.semantic-frame/v1';
+  schemaVersion: 'iar.semantic-frame/v1' | 'iar.semantic-frame/v2';
   /** 可供 FunctionRule 使用的主语片段。 */
   subject?: { type?: string; id?: string; source?: 'input' | 'context' | 'event' | 'plugin' };
   /** 结构化意图。 */
@@ -24,11 +24,29 @@ export type SemanticFrame = {
   action: SemanticActionType;
   /** 只承载 JSON-safe 槽位事实。 */
   slots: Record<string, JsonValue>;
-  /** 输入文本中的引用解析。 */
-  references: Array<{ text: string; resolvedTo: string }>;
+  /** 输入文本中的通用历史关系。 */
+  references: Array<LegacySemanticReference | HistoricalSemanticReference>;
   /** 0 到 1 的模型置信度。 */
   confidence: number;
 };
+
+/** 旧版引用结构，仅用于兼容 v1 空间。 */
+export type LegacySemanticReference = { text: string; resolvedTo: string };
+
+/** 新版引用结构，只表达不透明记录与顺序关系。 */
+export type HistoricalSemanticReference = {
+  text: string;
+  anchorRecordId?: string;
+  relation: 'current' | 'previous' | 'next' | 'first' | 'last' | 'offset';
+  scope?: 'same_fact_chain';
+  offset?: number;
+};
+
+/** 历史关系的有限运行时集合。 */
+const REFERENCE_RELATIONS = new Set(['current', 'previous', 'next', 'first', 'last', 'offset']);
+
+/** offset 关系允许的相对位置边界。 */
+const MAX_REFERENCE_OFFSET = 64;
 
 /** Semantic Extractor 可以表达的固定动作集合。 */
 export type SemanticActionType = ActionType | 'unknown';
@@ -235,7 +253,9 @@ export type ClarificationMetadata = {
 /** 校验 SemanticFrame 输出。 @param raw - provider 原始输出 @returns 结构化验证结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function validateSemanticFrame(raw: unknown): ModelOutputValidation<SemanticFrame> {
   // SemanticFrame 只允许抽取字段，未知字段不能进入规则引擎。
-  if (!isRecord(raw) || !hasOnlyKeys(raw, ['schemaVersion', 'subject', 'intent', 'action', 'slots', 'references', 'confidence']) || raw.schemaVersion !== 'iar.semantic-frame/v1' || !isNonEmptyString(raw.intent) || !isRecord(raw.slots) || !isJsonValue(raw.slots) || !Array.isArray(raw.references) || !raw.references.every(isReference) || typeof raw.confidence !== 'number' || !Number.isFinite(raw.confidence) || raw.confidence < 0 || raw.confidence > 1 || (raw.subject !== undefined && !isSubject(raw.subject)) || (raw.action !== undefined && !isSemanticActionType(raw.action))) return { ok: false, message: 'SemanticFrame Schema 无效' };
+  if (!isRecord(raw) || !hasOnlyKeys(raw, ['schemaVersion', 'subject', 'intent', 'action', 'slots', 'references', 'confidence'])) return { ok: false, message: 'SemanticFrame Schema 无效' };
+  const schemaVersion = raw.schemaVersion;
+  if (!isSemanticFrameVersion(schemaVersion) || !isNonEmptyString(raw.intent) || !isRecord(raw.slots) || !isJsonValue(raw.slots) || !Array.isArray(raw.references) || !raw.references.every((reference) => isReference(reference, schemaVersion)) || typeof raw.confidence !== 'number' || !Number.isFinite(raw.confidence) || raw.confidence < 0 || raw.confidence > 1 || (raw.subject !== undefined && !isSubject(raw.subject)) || (raw.action !== undefined && !isSemanticActionType(raw.action))) return { ok: false, message: 'SemanticFrame Schema 无效' };
   return { ok: true, value: { ...structuredClone(raw) as Omit<SemanticFrame, 'action'> & { action?: SemanticActionType }, action: raw.action ?? 'unknown' } };
 }
 
@@ -292,9 +312,18 @@ function isSubject(value: unknown): boolean {
 
 /** 校验引用只包含展示文本和稳定目标。 */
 /** 校验 SemanticFrame reference。 @param value - 未知引用 @returns 是否合法 @author lvdaxianer@yeah.net @date 2026-10-17 */
-function isReference(value: unknown): boolean {
-  // 引用目标必须是非空稳定字符串，不能嵌入任意 JSON。
-  return isRecord(value) && hasOnlyKeys(value, ['text', 'resolvedTo']) && isNonEmptyString(value.text) && isNonEmptyString(value.resolvedTo);
+function isReference(value: unknown, schemaVersion: SemanticFrame['schemaVersion']): boolean {
+  if (schemaVersion === 'iar.semantic-frame/v1') return isRecord(value) && hasOnlyKeys(value, ['text', 'resolvedTo']) && isNonEmptyString(value.text) && isNonEmptyString(value.resolvedTo);
+  if (!isRecord(value) || !hasOnlyKeys(value, ['text', 'anchorRecordId', 'relation', 'scope', 'offset']) || !isNonEmptyString(value.text) || typeof value.relation !== 'string' || !REFERENCE_RELATIONS.has(value.relation)) return false;
+  if (value.anchorRecordId !== undefined && !isNonEmptyString(value.anchorRecordId)) return false;
+  if (value.scope !== undefined && value.scope !== 'same_fact_chain') return false;
+  if (value.relation === 'offset') return typeof value.offset === 'number' && Number.isSafeInteger(value.offset) && Math.abs(value.offset) <= MAX_REFERENCE_OFFSET;
+  return value.offset === undefined;
+}
+
+/** 判断 SemanticFrame 是否使用当前支持的版本。 */
+function isSemanticFrameVersion(value: unknown): value is SemanticFrame['schemaVersion'] {
+  return value === 'iar.semantic-frame/v1' || value === 'iar.semantic-frame/v2';
 }
 
 /** 判断对象是否只有声明字段。 */

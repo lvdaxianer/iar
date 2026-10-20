@@ -33,10 +33,10 @@ test('成功 Action 只投影有限公开字段并保留来源', () => {
     output: { accepted: true, operation: 'create', ticketId: 'ticket-001', receipt: 'ticket-001', title: '网络故障', secretToken: 'must-not-enter', facts: { operation: 'create', ticketId: 'ticket-001', receipt: 'ticket-001' } }
   }));
   const context = projector.current();
-  assert.equal(context.facts?.['ticket.create.ticketId']?.value, 'ticket-001');
-  assert.equal(context.facts?.['ticket.create.receipt']?.sourceEventId, 'evt-ticket-created');
-  assert.equal(context.facts?.['ticket.create.receipt']?.status, 'verified');
-  assert.equal(context.facts?.['ticket.create.secretToken'], undefined);
+  assert.equal(context.factHistory?.records[0]?.values.ticketId, 'ticket-001');
+  assert.equal(context.factHistory?.records[0]?.sourceEventId, 'evt-ticket-created');
+  assert.equal(context.factHistory?.records[0]?.values.receipt, 'ticket-001');
+  assert.equal(context.factHistory?.records[0]?.values.secretToken, undefined);
   assert.equal(context.integrity.criticalFieldHash, criticalFieldHash(context));
 });
 
@@ -49,9 +49,9 @@ test('失败或待确认路径不产生成功事实，旧事实保持可追溯',
   projector.apply(actionEvent('evt-failed', 'action.failed', {
     functionId: 'ticket.create', pluginId: 'ticket-create-v1', errorCode: 'ticket.failed'
   }));
-  const facts = projector.current().facts ?? {};
-  assert.equal(facts['job.monitor.jobName']?.value, '订单汇总日报');
-  assert.equal(facts['ticket.create.ticketId'], undefined);
+  const records = projector.current().factHistory?.records ?? [];
+  assert.equal(records[0]?.values.jobName, '订单汇总日报');
+  assert.equal(records.some((record) => record.values.ticketId !== undefined), false);
 });
 
 test('每个投影器只维护自己的事实集合', () => {
@@ -61,8 +61,8 @@ test('每个投影器只维护自己的事实集合', () => {
     functionId: 'ticket.create', pluginId: 'ticket-create-v1', resultStatus: 'succeeded',
     output: { accepted: true, operation: 'create', ticketId: 'ticket-first', facts: { operation: 'create', ticketId: 'ticket-first' } }
   }));
-  assert.equal(first.current().facts?.['ticket.create.ticketId']?.value, 'ticket-first');
-  assert.equal(second.current().facts?.['ticket.create.ticketId'], undefined);
+  assert.equal(first.current().factHistory?.records[0]?.values.ticketId, 'ticket-first');
+  assert.equal(second.current().factHistory?.records.length, 0);
 });
 
 test('真实多业务 Handler 只把显式事实信封投影到上下文', async () => {
@@ -71,10 +71,10 @@ test('真实多业务 Handler 只把显式事实信封投影到上下文', async
   projector.apply(actionEvent('evt-job-status', 'action.completed', {
     functionId: 'job.monitor', pluginId: 'job-monitor-v1', resultStatus: 'succeeded', output: result.output
   }));
-  const facts = projector.current().facts ?? {};
-  assert.equal(facts['job.monitor.jobName']?.value, '订单汇总日报');
-  assert.equal(facts['job.monitor.status']?.value, 'success');
-  assert.equal(facts['job.monitor.job'], undefined);
+  const record = projector.current().factHistory?.records[0];
+  assert.equal(record?.values.jobName, '订单汇总日报');
+  assert.equal(record?.values.status, 'success');
+  assert.equal(record?.values.job, undefined);
 });
 
 test('工单自由文本和描述不会进入可信事实信封', async () => {

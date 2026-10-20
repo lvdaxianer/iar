@@ -12,7 +12,7 @@ export function createSelectionState(descriptors: readonly PluginDescriptor[], u
 
 /** 有可信事实的追问交给回复模型处理，不把正常事实回答计入 unresolved。 */
 export function hasVerifiedFactsForFollowUp(context: BehaviorContext, evidence: RouteEvidence): boolean {
-  return evidence.semanticIntent === 'unknown' && Object.values(context.facts ?? {}).some((fact) => fact.status === 'verified');
+  return evidence.semanticIntent === 'unknown' && evidence.reasonCode !== 'reference_unresolved' && (context.factHistory?.records.length ?? 0) > 0;
 }
 
 /** 用户正在回答已有澄清选项时视为进展，不增加新的 unresolved 次数。 */

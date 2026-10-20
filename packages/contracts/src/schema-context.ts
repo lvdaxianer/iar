@@ -6,7 +6,7 @@
  */
 import { Type } from '@sinclair/typebox';
 import { ActionTypeSchema, JsonValueSchema } from './schema-primitives.js';
-import { MAX_ROUTING_SCOPE_PLUGINS, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN } from './types-base.js';
+import { MAX_FACT_RECORD_ID_LENGTH, MAX_FACT_RECORD_VALUES, MAX_FACT_SEQUENCE, MAX_ROUTING_SCOPE_PLUGINS, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN } from './types-base.js';
 import {
   MAX_CANDIDATE_KEY_LENGTH,
   MAX_CANDIDATE_VERSION_LENGTH,
@@ -176,6 +176,32 @@ export const TrustedFactSchema = Type.Object({
   field: Type.String({ minLength: 1, maxLength: MAX_TRUSTED_FACT_KEY_LENGTH, pattern: TRUSTED_FACT_KEY_PATTERN })
 }, { additionalProperties: false });
 
+/** 单条有序可信事实记录 Schema。 */
+export const VerifiedFactRecordSchema = Type.Object({
+  // recordId 是运行时生成的不透明稳定标识。
+  recordId: Type.String({ minLength: 1, maxLength: MAX_FACT_RECORD_ID_LENGTH }),
+  // sequence 决定历史关系的顺序解析。
+  sequence: Type.Integer({ minimum: 1, maximum: MAX_FACT_SEQUENCE }),
+  // sourceEventId 绑定不可变成功事件。
+  sourceEventId: Type.String({ minLength: 1, maxLength: MAX_FACT_RECORD_ID_LENGTH }),
+  // functionId 只作为动态能力标识保存。
+  functionId: Type.String({ minLength: 1, maxLength: MAX_TRUSTED_FACT_STRING_LENGTH }),
+  // pluginId 只作为动态实现标识保存。
+  pluginId: Type.String({ minLength: 1, maxLength: MAX_TRUSTED_FACT_STRING_LENGTH }),
+  // values 只允许 Plugin 显式声明的有限原子值。
+  values: Type.Record(Type.String({ minLength: 1, maxLength: MAX_TRUSTED_FACT_KEY_LENGTH, pattern: TRUSTED_FACT_KEY_PATTERN }), Type.Union([Type.String({ maxLength: MAX_TRUSTED_FACT_STRING_LENGTH }), Type.Number(), Type.Boolean(), Type.Null()]), { maxProperties: MAX_FACT_RECORD_VALUES }),
+  // createdAt 保留来源事件发生时间。
+  createdAt: Type.String({ minLength: 1, maxLength: MAX_FACT_RECORD_ID_LENGTH })
+}, { additionalProperties: false });
+
+/** 有序可信事实历史 Schema。 */
+export const VerifiedFactHistorySchema = Type.Object({
+  // records 按 sequence 升序保存且数量有界。
+  records: Type.Array(VerifiedFactRecordSchema, { maxItems: MAX_TRUSTED_FACTS }),
+  // focusRecordId 只允许指向当前历史中的不透明记录。
+  focusRecordId: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_FACT_RECORD_ID_LENGTH }))
+}, { additionalProperties: false });
+
 /** 已通过压缩契约校验、可随会话恢复的摘要。 */
 export const ContextSummarySchema = Type.Object({
   // text 只承载已校验的辅助摘要，不授予执行权限。
@@ -227,7 +253,9 @@ export const BehaviorContextSchema = Type.Object({
   clarification: Type.Optional(ClarificationStateSchema),
   // confirmation 记录确认范围和状态。
   confirmation: ConfirmationStateSchema,
-  // facts 只保存成功输出中的有限、可追溯事实。
+  // factHistory 保存成功输出中的有限、可追溯有序事实。
+  factHistory: Type.Optional(VerifiedFactHistorySchema),
+  // facts 仅用于旧快照兼容读取，新投影不再写入。
   facts: Type.Optional(Type.Record(Type.String({ minLength: 1, maxLength: MAX_TRUSTED_FACT_KEY_LENGTH, pattern: TRUSTED_FACT_KEY_PATTERN }), TrustedFactSchema, { maxProperties: MAX_TRUSTED_FACTS })),
   // summary 是已校验的辅助视图，不进入关键执行字段哈希。
   summary: Type.Optional(ContextSummarySchema),

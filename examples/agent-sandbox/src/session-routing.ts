@@ -7,8 +7,8 @@
  */
 import { randomUUID } from 'node:crypto';
 import { SCHEMA_VERSIONS, type ActionDefinition, type ActionType, type BehaviorContext, type EventEnvelope, type JsonValue, type PluginOperation, type PluginPolicyMetadata, type RuleExpression } from '@iar/contracts';
-import { ModelGateway, SemanticExtractorAdapter, type ModelGatewayResult, type ModelProfileRegistry, type SemanticFrame } from '@iar/decision';
-import { PluginFirstRouter, type AsyncDecisionAdapter, type RouteResult } from '@iar/runtime';
+import { ModelGateway, SemanticExtractorAdapter, type HistoricalSemanticReference, type ModelGatewayResult, type ModelProfileRegistry, type SemanticFrame } from '@iar/decision';
+import { PluginFirstRouter, resolveFactRelation, type AsyncDecisionAdapter, type RouteResult } from '@iar/runtime';
 import type { FunctionRule, PluginRule } from '@iar/rule-engine';
 import type { PluginDescriptor, PluginHost } from '@iar/plugin-host';
 import type { ActionExecutor, LocalWorkflow } from '@iar/workflow';
@@ -16,7 +16,7 @@ import { ScriptedModelProvider } from './models/scripted-provider.js';
 import { SESSION_RUN_ID, SESSION_CORRELATION_ID, TURN_DEFINITION } from './session-core.js';
 import type { CompactionContext } from './session-compaction.js';
 import { buildActionInput, buildFacts, describeAction, sandboxOperationKind, toSlotMap } from './session-helpers.js';
-import type { ExecuteTurnOutcome, ExtractFrameOutcome, RouteEvidence, SandboxMode } from './session-types.js';
+import type { ExecuteTurnOutcome, ExtractFrameOutcome, ResolvedFactReference, RouteEvidence, SandboxMode } from './session-types.js';
 
 /** 路由读取和更新当前会话的状态，不拥有独立生命周期。 */
 export type SessionRoutingContext = Pick<CompactionContext, 'eventStore' | 'projector' | 'gateway'> & {
@@ -129,6 +129,21 @@ export class SandboxSessionRouting {
       pluginDecisionAdapter: this.context.pluginDecisionAdapter,
       authorizePlugin: () => true
     });
+  }
+
+  /** 解析模型声明的历史关系，只返回事实链中已存在的记录。 */
+  public resolveReferences(frame: SemanticFrame, behaviorContext: BehaviorContext): { ok: true; references: ResolvedFactReference[] } | { ok: false; reasonCode: string } {
+    const references = frame.references.filter(isHistoricalReference);
+    if (references.length === 0) return { ok: true, references: [] };
+    const history = behaviorContext.factHistory;
+    if (!history) return { ok: false, reasonCode: 'reference_unresolved' };
+    const resolved: ResolvedFactReference[] = [];
+    for (const reference of references) {
+      const result = resolveFactRelation(history, reference);
+      if (!result.ok) return { ok: false, reasonCode: 'reference_unresolved' };
+      resolved.push({ text: reference.text, record: result.record });
+    }
+    return { ok: true, references: resolved };
   }
 
 
@@ -272,6 +287,11 @@ export class SandboxSessionRouting {
     return payload;
   }
 
+}
+
+/** 判断引用是否为新版不透明历史关系。 */
+function isHistoricalReference(reference: SemanticFrame['references'][number]): reference is HistoricalSemanticReference {
+  return 'relation' in reference;
 }
 
 /** 根据当前启用 Plugin 描述构造无业务目录的 Function/Plugin 规则。 */

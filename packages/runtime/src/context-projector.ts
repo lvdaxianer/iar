@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import { createHash } from 'node:crypto';
-import { ERROR_CODES, MAX_CANDIDATE_KEY_LENGTH, MAX_CANDIDATE_VERSION_LENGTH, MAX_CLARIFICATION_REASON_LENGTH, MAX_CLARIFICATION_OPTIONS, MAX_UNRESOLVED_STREAK, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, validateContract, type BehaviorContext, type ClarificationState, type ContractErrorResult, type EventEnvelope, type RoutingScope, type TrustedFact, type TrustedFactValue } from '@iar/contracts';
+import { ERROR_CODES, MAX_CANDIDATE_KEY_LENGTH, MAX_CANDIDATE_VERSION_LENGTH, MAX_CLARIFICATION_REASON_LENGTH, MAX_CLARIFICATION_OPTIONS, MAX_FACT_RECORD_ID_LENGTH, MAX_FACT_RECORD_VALUES, MAX_UNRESOLVED_STREAK, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, validateContract, type BehaviorContext, type ClarificationState, type ContractErrorResult, type EventEnvelope, type RoutingScope, type VerifiedFactHistory, type TrustedFactValue, type VerifiedFactRecord } from '@iar/contracts';
 
 /** 关键字段哈希固定使用 SHA-256，避免实现更换导致快照不可恢复。 */
 const HASH_ALGORITHM = 'sha256';
@@ -61,6 +61,7 @@ export function criticalFieldHash(context: BehaviorContext): string {
     ...(context.clarification ? { clarification: context.clarification } : {}),
     confirmation: context.confirmation,
     idempotencyKey: context.idempotencyKey,
+    ...(context.factHistory ? { factHistory: context.factHistory } : {}),
     ...(context.facts ? { facts: context.facts } : {})
   };
   return createHash(HASH_ALGORITHM).update(JSON.stringify(canonicalize(critical))).digest('hex');
@@ -87,7 +88,7 @@ export function createInitialContext(runId = 'unknown-run'): BehaviorContext {
     pending: { kind: 'input', status: 'none' },
     clarification: { mode: 'none', unresolvedStreak: 0 },
     confirmation: { state: 'not_required' },
-    facts: {},
+    factHistory: { records: [] },
     idempotencyKey: `run:${runId}`,
     integrity: { criticalFieldHash: '', lastEventId: 'initial' }
   };
@@ -108,13 +109,15 @@ export class BehaviorContextProjector {
    * @date 2026-10-17
    */
   public constructor(initial: BehaviorContext = createInitialContext()) {
-    this.state = structuredClone(initial);
-    if (!validateContract('behaviorContext', this.state).ok) {
+    const snapshot = structuredClone(initial);
+    if (!validateContract('behaviorContext', snapshot).ok) {
       throw new Error('BehaviorContext 初始契约无效');
     }
-    if (criticalFieldHash(this.state) !== this.state.integrity.criticalFieldHash) {
+    if (criticalFieldHash(snapshot) !== snapshot.integrity.criticalFieldHash) {
       throw new Error('BehaviorContext 初始关键字段哈希不匹配');
     }
+    this.state = normalizeBehaviorContext(snapshot);
+    this.state.integrity.criticalFieldHash = criticalFieldHash(this.state);
   }
 
   /**
@@ -192,7 +195,7 @@ export class BehaviorContextProjector {
     if (event.eventName === 'action.started') this.state.action.status = 'resolved';
     if (event.eventName === 'action.completed') this.state.action.status = 'executed';
     if (event.eventName === 'action.failed') this.state.action.status = 'failed';
-    if (event.eventName === 'action.completed') this.applyTrustedFacts(payload, event.eventId);
+    if (event.eventName === 'action.completed') this.applyTrustedFacts(payload, event.eventId, event.occurredAt);
   }
 
   /** 从已校验的压缩事件恢复完整状态和摘要，拒绝伪造的快照。 */
@@ -252,20 +255,15 @@ export class BehaviorContextProjector {
   }
 
   /** 从成功 Action 的公开输出中投影有界、可追溯事实。 */
-  private applyTrustedFacts(payload: Record<string, unknown>, eventId: string): void {
-    if (payload.resultStatus !== 'succeeded' || !isRecord(payload.output)) return;
-    const functionId = stringValue(payload.functionId);
-    const pluginId = stringValue(payload.pluginId);
-    const publicFacts = payload.output.facts;
-    if (!isRecord(publicFacts) || Object.keys(publicFacts).length > MAX_TRUSTED_FACTS) return;
-    if (!functionId || !pluginId) return;
-    const next = { ...(this.state.facts ?? {}) };
-    for (const [field, value] of Object.entries(publicFacts)) {
-      if (!isTrustedFactField(field) || !isBoundedFactValue(value)) continue;
-      const fact: TrustedFact = { value, status: 'verified', sourceEventId: eventId, functionId, pluginId, field };
-      next[`${functionId}.${field}`] = fact;
-    }
-    this.state.facts = next;
+  private applyTrustedFacts(payload: Record<string, unknown>, eventId: string, occurredAt: string): void {
+    const input = readFactRecordInput(payload);
+    if (!input) return;
+    const history = this.state.factHistory ?? { records: [] };
+    if (history.records.some((record) => record.sourceEventId === eventId)) return;
+    const values = collectTrustedFactValues(input.publicFacts);
+    if (values === undefined) return;
+    const record = createFactRecord(input.functionId, input.pluginId, eventId, occurredAt, history.records, values);
+    this.state.factHistory = appendFactRecord(history, record);
   }
 
   /** 确保每个事实事件都不能把投影推进到非法状态。 */
@@ -306,6 +304,57 @@ function isTrustedFactField(value: string): boolean {
 /** 事实值只允许小型 JSON 原子值，避免把日志或任意对象带入上下文。 */
 function isBoundedFactValue(value: unknown): value is TrustedFactValue {
   return (typeof value === 'string' && Array.from(value).length <= MAX_TRUSTED_FACT_STRING_LENGTH) || typeof value === 'number' || typeof value === 'boolean' || value === null;
+}
+
+/** 读取成功动作中用于创建事实记录的动态来源信息。 */
+function readFactRecordInput(payload: Record<string, unknown>): { functionId: string; pluginId: string; publicFacts: Record<string, unknown> } | undefined {
+  if (payload.resultStatus !== 'succeeded' || !isRecord(payload.output)) return undefined;
+  const functionId = stringValue(payload.functionId);
+  const pluginId = stringValue(payload.pluginId);
+  const publicFacts = payload.output.facts;
+  if (!functionId || !pluginId || !isRecord(publicFacts)) return undefined;
+  return { functionId, pluginId, publicFacts };
+}
+
+/** 过滤 Plugin 事实信封中的字段和值，阻止任意对象进入可信上下文。 */
+function collectTrustedFactValues(publicFacts: Record<string, unknown>): Record<string, TrustedFactValue> | undefined {
+  const entries = Object.entries(publicFacts);
+  if (entries.length === 0 || entries.length > MAX_FACT_RECORD_VALUES) return undefined;
+  const values: Record<string, TrustedFactValue> = {};
+  for (const [field, value] of entries) {
+    if (isTrustedFactField(field) && isBoundedFactValue(value)) values[field] = value;
+  }
+  return Object.keys(values).length > 0 ? values : undefined;
+}
+
+/** 创建可在事件重放中稳定复现的不透明事实记录。 */
+function createFactRecord(functionId: string, pluginId: string, eventId: string, occurredAt: string, records: VerifiedFactRecord[], values: Record<string, TrustedFactValue>): VerifiedFactRecord {
+  const sequence = (records.at(-1)?.sequence ?? 0) + 1;
+  const recordId = `fact-${createHash(HASH_ALGORITHM).update(eventId).digest('hex')}`.slice(0, MAX_FACT_RECORD_ID_LENGTH);
+  return { recordId, sequence, sourceEventId: eventId, functionId, pluginId, values, createdAt: occurredAt };
+}
+
+/** 追加事实并在超过窗口时裁剪最早记录，始终把最新结果设为焦点。 */
+function appendFactRecord(history: VerifiedFactHistory, record: VerifiedFactRecord): VerifiedFactHistory {
+  const records = [...history.records, record].slice(-MAX_TRUSTED_FACTS);
+  return { records, focusRecordId: record.recordId };
+}
+
+/** 将旧版 facts map 转换为新的事实记录集合。 */
+function normalizeBehaviorContext(context: BehaviorContext): BehaviorContext {
+  if (context.factHistory !== undefined || context.facts === undefined) return context;
+  const records = Object.values(context.facts).map((fact, index) => legacyFactRecord(fact, index));
+  const { facts: _legacyFacts, ...withoutLegacyFacts } = context;
+  const focusRecordId = records.at(-1)?.recordId;
+  return focusRecordId === undefined
+    ? { ...withoutLegacyFacts, factHistory: { records } }
+    : { ...withoutLegacyFacts, factHistory: { records, focusRecordId } };
+}
+
+/** 把旧版单字段事实转换为可追溯记录。 */
+function legacyFactRecord(fact: { value: TrustedFactValue; sourceEventId: string; functionId: string; pluginId: string; field: string }, index: number): VerifiedFactRecord {
+  const recordId = `legacy-${createHash(HASH_ALGORITHM).update(`${fact.sourceEventId}:${fact.field}`).digest('hex')}`.slice(0, MAX_FACT_RECORD_ID_LENGTH);
+  return { recordId, sequence: index + 1, sourceEventId: fact.sourceEventId, functionId: fact.functionId, pluginId: fact.pluginId, values: { [fact.field]: fact.value }, createdAt: 'legacy' };
 }
 
 /** 判断主语引用字段是否完整。 */
