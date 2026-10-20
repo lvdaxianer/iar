@@ -32,7 +32,7 @@ The system SHALL maintain separate structured state for each session and update 
 
 ### Requirement: Structured clarification state is persisted with the session
 
-The system SHALL represent model-generated clarification requests as bounded structured state, including the clarification kind, status and finite user-selectable options when applicable. Options SHALL be derived from the current runtime-filtered candidate descriptors, and clarification state SHALL remain data-only and SHALL NOT authorize a Function, Plugin or side effect.
+The system SHALL persist model-generated clarification state with a bounded kind, status and finite options when applicable. Options SHALL come from current runtime-filtered candidate descriptors. Clarification state SHALL remain data-only and SHALL NOT authorize a Function, Plugin or side effect.
 
 #### Scenario: A model asks the user to choose an option
 
@@ -51,7 +51,7 @@ The system SHALL represent model-generated clarification requests as bounded str
 
 ### Requirement: Structured session state is asynchronously persisted and recoverable
 
-The system SHALL persist each accepted message and structured context update through the configured Persistence Provider using `sessionId` as the stable key. Snapshots SHALL preserve bounded verified facts, routing scope, pending clarification, unresolved clarification state, behavior state and validated summary. The default SQLite Provider SHALL be replaceable without changing model-call code; persistence SHALL be asynchronous, ordered, bounded and revision-safe, with explicit error and retry handling.
+The system SHALL persist accepted messages and structured context through the configured Persistence Provider using `sessionId` as the stable key. Snapshots SHALL preserve bounded facts, routing scope, pending clarification, behavior state and validated summary. Persistence SHALL be asynchronous, ordered, bounded and revision-safe.
 
 #### Scenario: Continue after restart
 
@@ -133,7 +133,7 @@ The system SHALL provide pending clarification state, runtime-filtered candidate
 
 ### Requirement: Models can answer from verified facts without repeating actions
 
-The system SHALL separate semantic intent from a fixed action type and let the semantic model choose only among finite, runtime-filtered Plugin/Function candidates using the current message and structured context. The fixed action type SHALL be one of `query`, `create`, `update`, `delete`, `transfer`, `execute` or `unknown`; it SHALL NOT be a business-specific operation name. When no suitable Function is selected, the response model SHALL decide whether to answer from verified facts or ask a bounded clarification. The response model SHALL NOT select or execute a Function, and the runtime SHALL NOT infer or execute a side-effecting action merely because a request mentions a business entity or historical result.
+The system SHALL separate semantic intent from a fixed action type and give the model only finite, runtime-filtered Plugin/Function candidates. The action type SHALL be one of `query`, `create`, `update`, `delete`, `transfer`, `execute` or `unknown`, never a business-specific operation. When no Function is selected, the response model SHALL answer from verified facts or ask a bounded clarification and SHALL NOT execute a Function.
 
 #### Scenario: Ask for the previous ticket number
 
