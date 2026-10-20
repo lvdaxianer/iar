@@ -17,7 +17,7 @@ import {
   type PersistenceProviderConfig
 } from '@iar/persistence-runtime';
 import { sqlitePersistenceProviderModule, SqlitePersistenceError } from '@iar/persistence-sqlite';
-import type { RecentMessageQuery, SessionIdentity, SessionMessage, SessionSnapshotRecord } from '@iar/persistence-spi';
+import { MAX_RECENT_MESSAGE_QUERY_LIMIT, type RecentMessageQuery, type SessionIdentity, type SessionMessage, type SessionSnapshotRecord } from '@iar/persistence-spi';
 
 const identity: SessionIdentity = { sessionId: 'session-sqlite-1', runId: 'run-1', traceId: 'trace-1', messageId: 'message-1' };
 const message: SessionMessage = { messageId: 'message-1', role: 'user', content: '查询当前状态', occurredAt: '2026-10-19T00:00:00.000Z' };
@@ -84,6 +84,33 @@ test('SQLite Provider persists messages, events, and the latest snapshot by sess
   assert.deepEqual(await provider.listEvents(identity.sessionId), [event]);
   assert.deepEqual(await provider.loadSnapshot(identity.sessionId), snapshot);
   await provider.close();
+});
+
+test('SQLite Provider reads a bounded latest-message window from the existing message store', async () => {
+  const provider = await new PersistenceProviderLoader(
+    new PersistenceProviderRegistry([sqlitePersistenceProviderModule])
+  ).load({ provider: 'sqlite', options: { filename: ':memory:' } });
+  const messages = Array.from({ length: 4 }, (_, index) => ({
+    ...message,
+    messageId: `message-window-${index + 1}`,
+    content: `消息-${index + 1}`
+  }));
+
+  try {
+    for (const recentMessage of messages) {
+      await provider.appendMessage({ ...identity, messageId: recentMessage.messageId }, recentMessage);
+    }
+    await provider.flush();
+
+    assert.deepEqual(await provider.listMessages(identity.sessionId, { limit: 2 }), messages.slice(-2));
+    assert.deepEqual(await provider.listMessages(identity.sessionId, { limit: 0 }), []);
+    await assert.rejects(
+      provider.listMessages(identity.sessionId, { limit: MAX_RECENT_MESSAGE_QUERY_LIMIT + 1 }),
+      (error: unknown) => error instanceof SqlitePersistenceError && error.code === 'message_query_invalid'
+    );
+  } finally {
+    await provider.close();
+  }
 });
 
 test('SQLite Provider makes duplicate message and event writes idempotent', async () => {
