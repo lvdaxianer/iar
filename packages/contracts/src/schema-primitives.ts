@@ -111,9 +111,6 @@ export const pluginManifestFields = {
   description: Type.String({ minLength: 1 }),
   // capabilities 不能由模型决策动态增加。
   capabilities: Type.Array(Type.String({ minLength: 1 }), { uniqueItems: true }),
-  // 插件输入输出必须有明确 Schema 文档。
-  inputSchema: JsonSchemaSchema,
-  outputSchema: JsonSchemaSchema,
   // lifecycle 保持宿主与插件解耦。
   lifecycle: PluginLifecycleSchema,
   // policy 供 Policy Gate 使用。
@@ -126,17 +123,12 @@ export const pluginManifestFields = {
 // 业务与系统变体只补充各自的 kind 和 scope。
 // 其余字段始终从同一份公共定义继承。
 
-/** 具有唯一 Function 归属的业务插件 Manifest。 */
-export const FunctionPluginManifestSchema = Type.Object({
-  // 业务插件必须声明 Function 归属。
+/** Plugin 包级业务 Manifest，不直接携带单个 Function 字段。 */
+export const BusinessPluginManifestSchema = Type.Object({
+  // 业务插件通过嵌套 Function 注册提供能力。
   ...pluginManifestFields,
-  // functionId 是业务插件可路由性的硬约束。
-  pluginKind: Type.Literal('function'),
-  scope: Type.Literal('function'),
-  functionId: Type.String({ minLength: 1 }),
-  // 业务 Plugin 必须声明其 Function 的固定动作集合。
-  actionTypes: ActionTypesSchema,
-  operations: Type.Optional(PluginOperationsSchema)
+  pluginKind: Type.Literal('business'),
+  scope: Type.Literal('plugin')
 }, { additionalProperties: false });
 
 /** 通过 Hook/订阅运行且不参与业务路由的系统插件。 */
@@ -145,12 +137,14 @@ export const SystemPluginManifestSchema = Type.Object({
   ...pluginManifestFields,
   pluginKind: Type.Literal('system'),
   // runtime 与现有内置日志插件基线一致。
-  scope: Type.Literal('runtime')
+  scope: Type.Literal('runtime'),
+  inputSchema: JsonSchemaSchema,
+  outputSchema: JsonSchemaSchema
 }, { additionalProperties: false });
 
 /** 所有可安装插件的联合 Schema。 */
 export const PluginManifestSchema = Type.Union([
-  FunctionPluginManifestSchema,
+  BusinessPluginManifestSchema,
   SystemPluginManifestSchema
 ]);
 

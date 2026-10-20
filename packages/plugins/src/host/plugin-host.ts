@@ -11,13 +11,14 @@ import {
   type EventEnvelope,
   type PluginManifest
 } from '@iar/contracts';
+import type { PluginPackage } from '../sdk/index.js';
 import { compareStableIds } from './compare-ids.js';
 import { sortPluginManifests } from './dependency-order.js';
 import { PluginEventLog } from './plugin-events.js';
 import { createRecord, pluginIdOf, prepareInstall, validateInstallSet, type InstallPreparation } from './plugin-installation.js';
 import { canTransition, findActiveDependent, findDependent, findUnavailableDependency } from './plugin-lifecycle.js';
 import { cloneManifest, cloneRecord, hostError } from './plugin-host-support.js';
-import type { PluginDescriptor, PluginDescriptorOptions, PluginHostOptions, PluginHostResult, PluginRecord } from './types.js';
+import type { PluginDescriptor, PluginDescriptorOptions, PluginHostResult, PluginRecord } from './types.js';
 /**
  * 管理当前插件能力和不可变生命周期事件。
  *
@@ -27,20 +28,10 @@ import type { PluginDescriptor, PluginDescriptorOptions, PluginHostOptions, Plug
 export class PluginHost {
   /** 当前注册表中的插件记录。 */
   private readonly records = new Map<string, PluginRecord>();
-  /** 已知 Function ID，用于安装时校验插件归属。 */
-  private readonly functionIds: ReadonlySet<string>;
   /** 所有成功或拒绝的生命周期事件，卸载不会删除历史。 */
   private readonly eventLog = new PluginEventLog();
-  /**
-   * 创建一个带有静态 Function 边界的 PluginHost。
-   *
-   * @param options - 宿主 Function 注册边界
-   * @author lvdaxianer@yeah.net
-   * @date 2026-10-17
-   */
-  public constructor(options: PluginHostOptions) {
-    this.functionIds = new Set(options.functionIds);
-  }
+  /** 创建一个从 Plugin 包派生 Function 边界的 PluginHost。 */
+  public constructor() {}
   /**
    * 返回当前插件记录，不暴露注册表内部 Map。
    *
@@ -52,6 +43,11 @@ export class PluginHost {
   public get(pluginId: string): PluginRecord | undefined {
     const record = this.records.get(pluginId);
     return record ? cloneRecord(record) : undefined;
+  }
+
+  /** 返回当前注册表快照，供统一 Agent 派生 FunctionRegistry。 */
+  public all(): PluginRecord[] {
+    return [...this.records.values()].sort((left, right) => compareStableIds(left.manifest.pluginId, right.manifest.pluginId)).map(cloneRecord);
   }
   /**
    * 返回事件日志的深拷贝快照，调用方不能修改内部历史。
@@ -114,10 +110,11 @@ export class PluginHost {
     const order = sortPluginManifests(preparation.manifests, new Set(this.records.keys()));
     // 依赖排序失败时保持批量安装原子性。
     if (!order.ok) return this.reject(pluginIdOf(order.error.details?.pluginId), order.error);
-    const validation = validateInstallSet(order.value, new Set(this.records.keys()), this.functionIds);
-    // 已存在插件或未知 Function 必须在写注册表前拒绝。
+    const validation = validateInstallSet(order.value, new Set(this.records.keys()));
+    // 已存在插件必须在写注册表前拒绝。
     if (!validation.ok) return this.reject(pluginIdOf(validation.error.details?.pluginId), validation.error);
-    return this.commitRecords(order.value, preparation.handlers);
+    const packages = new Map(preparation.packages.map((plugin) => [plugin.manifest.pluginId, plugin]));
+    return this.commitRecords(order.value, packages);
   }
   /**
    * 将已排序的插件记录一次性写入注册表并发出阶段事件。
@@ -128,8 +125,8 @@ export class PluginHost {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
-  private commitRecords(manifests: PluginManifest[], handlers: InstallPreparation['handlers']): PluginHostResult<PluginRecord[]> {
-    const records = manifests.map((manifest) => createRecord(manifest, handlers.get(manifest.pluginId)));
+  private commitRecords(manifests: PluginManifest[], packages: ReadonlyMap<string, PluginPackage>): PluginHostResult<PluginRecord[]> {
+    const records = manifests.map((manifest) => createRecord(packages.get(manifest.pluginId) as PluginPackage));
     records.forEach((record) => this.records.set(record.manifest.pluginId, record));
     records.forEach((record) => this.eventLog.lifecycle(record.manifest, 'discovered'));
     records.forEach((record) => this.eventLog.lifecycle(record.manifest, 'validated'));
@@ -221,7 +218,7 @@ export class PluginHost {
   public candidates(functionId: string): PluginRecord[] {
     return [...this.records.values()]
       .filter((record) => record.state === 'enabled')
-      .filter((record) => record.manifest.pluginKind === 'function' && record.manifest.functionId === functionId)
+      .filter((record) => record.manifest.pluginKind === 'business' && record.functions.has(functionId))
       .sort((left, right) => compareStableIds(left.manifest.pluginId, right.manifest.pluginId))
       .map(cloneRecord);
   }
@@ -229,7 +226,7 @@ export class PluginHost {
   /** 返回所有启用的业务 Plugin，供 Plugin-first 意图识别建立有限候选。 */
   public businessCandidates(): PluginRecord[] {
     return [...this.records.values()]
-      .filter((record) => record.state === 'enabled' && record.manifest.pluginKind === 'function')
+      .filter((record) => record.state === 'enabled' && record.manifest.pluginKind === 'business')
       .sort((left, right) => compareStableIds(left.manifest.pluginId, right.manifest.pluginId))
       .map(cloneRecord);
   }
@@ -240,7 +237,8 @@ export class PluginHost {
     return this.businessCandidates()
       .filter((record) => authorize(record))
       .slice(0, MAX_ROUTING_SCOPE_PLUGINS)
-      .map((record) => descriptorOf(record));
+      .flatMap((record) => [...record.functions.keys()].map((functionId) => descriptorOf(record, functionId)))
+      .slice(0, MAX_ROUTING_SCOPE_PLUGINS);
   }
   /**
    * 解析单个候选并为 Function 归属失败留下可审计错误。
@@ -258,11 +256,11 @@ export class PluginHost {
       return this.reject(pluginId, hostError(ERROR_CODES.PLUGIN_UNAVAILABLE, '插件当前不可路由', { pluginId, functionId }));
     }
     // 业务候选必须属于请求的 Function，系统插件不能越界。
-    if (record.manifest.pluginKind !== 'function' || record.manifest.functionId !== functionId) {
+    if (record.manifest.pluginKind !== 'business' || !record.functions.has(functionId)) {
       return this.reject(pluginId, hostError(ERROR_CODES.PLUGIN_OWNERSHIP_MISMATCH, '插件不属于目标 Function', {
         pluginId,
         expectedFunctionId: functionId,
-        actualFunctionId: record.manifest.pluginKind === 'function' ? record.manifest.functionId : 'system'
+        actualFunctionId: record.manifest.pluginKind === 'business' ? [...record.functions.keys()].join(',') : 'system'
       }));
     }
     return { ok: true, value: cloneRecord(record) };
@@ -367,24 +365,26 @@ export class PluginHost {
 
 }
 
-/** 从宿主记录构造不包含执行 Handler 的模型描述。 */
-function descriptorOf(record: PluginRecord): PluginDescriptor {
-  if (record.manifest.pluginKind !== 'function') throw new Error('系统插件不能形成业务描述');
-  const actionTypes = [...record.manifest.actionTypes];
-  const capabilities = [...record.manifest.capabilities];
+/** 从宿主记录的指定 Function 构造不包含执行 Handler 的模型描述。 */
+function descriptorOf(record: PluginRecord, functionId: string): PluginDescriptor {
+  if (record.manifest.pluginKind !== 'business') throw new Error('系统插件不能形成业务描述');
+  const functionRecord = record.functions.get(functionId);
+  if (!functionRecord) throw new Error('Plugin 不包含目标 Function');
+  const actionTypes = [...functionRecord.definition.actionTypes];
+  const capabilities = [...functionRecord.definition.capabilities];
   return {
-    candidateKey: opaqueCandidateKey(record.manifest.functionId, record.manifest.pluginId),
-    functionId: record.manifest.functionId,
+    candidateKey: opaqueCandidateKey(functionId, record.manifest.pluginId),
+    functionId,
     pluginId: record.manifest.pluginId,
-    description: record.manifest.description,
+    description: functionRecord.definition.description,
     actionTypes,
     capabilities,
     operationMetadata: {
       actionTypes: [...actionTypes],
       capabilities: [...capabilities],
-      riskLevel: record.manifest.policy.riskLevel,
+      riskLevel: functionRecord.definition.riskLevel,
       requiresConfirmation: record.manifest.policy.requiresConfirmation,
-      operations: record.manifest.operations ? [...record.manifest.operations] : []
+      operations: [...functionRecord.operations]
     }
   };
 }

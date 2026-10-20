@@ -6,6 +6,7 @@
  */
 export * from './compare-ids.js';
 export * from './dependency-order.js';
+export * from './function-registry.js';
 export * from './plugin-host.js';
 export * from './plugin-installation.js';
 export * from './types.js';

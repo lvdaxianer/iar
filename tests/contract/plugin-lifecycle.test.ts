@@ -5,11 +5,10 @@
  * @date 2026-10-17
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import test from 'node:test';
-import { ERROR_CODES, type FunctionPluginManifest } from '@iar/contracts';
+import { ERROR_CODES, type BusinessPluginManifest } from '@iar/contracts';
 import { PluginHost, type PluginState } from '@iar/plugins';
+import { loadBusinessManifest, pluginPackage } from './fixtures/plugin-package.js';
 
 /*
  * 本文件只验证生命周期，不重复安装事务测试。
@@ -38,9 +37,8 @@ import { PluginHost, type PluginState } from '@iar/plugins';
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function loadManifest(): FunctionPluginManifest {
-  const path = join(process.cwd(), 'tests', 'contract', 'fixtures', 'valid-plugin-manifest.json');
-  return JSON.parse(readFileSync(path, 'utf8')) as FunctionPluginManifest;
+function loadManifest(): ReturnType<typeof pluginPackage> {
+  return pluginPackage(loadBusinessManifest());
 }
 
 /**
@@ -51,8 +49,9 @@ function loadManifest(): FunctionPluginManifest {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function manifestWith(overrides: Partial<FunctionPluginManifest>): FunctionPluginManifest {
-  return { ...loadManifest(), ...overrides };
+function manifestWith(overrides: Partial<BusinessPluginManifest> & { functionId?: string }): ReturnType<typeof pluginPackage> {
+  const { functionId = 'dip.service.stop', ...manifestOverrides } = overrides;
+  return pluginPackage({ ...loadBusinessManifest(), ...manifestOverrides }, functionId);
 }
 
 /**
@@ -126,7 +125,7 @@ function assertEventSnapshotIsolation(host: PluginHost, pluginId: string): void 
  * @date 2026-10-17
  */
 test('invalid lifecycle transition preserves current state', () => {
-  const host = new PluginHost({ functionIds: ['dip.service.stop'] });
+  const host = new PluginHost();
   const manifest = loadManifest();
   assert.equal(host.install(manifest).ok, true);
   const result = host.unload(manifest.pluginId);
@@ -142,7 +141,7 @@ test('invalid lifecycle transition preserves current state', () => {
  * @date 2026-10-17
  */
 test('disabled and draining lifecycle paths remain reversible', () => {
-  const host = new PluginHost({ functionIds: ['dip.service.stop'] });
+  const host = new PluginHost();
   const manifest = manifestWith({ pluginId: 'reversible-stop-v1' });
   assert.equal(host.install(manifest).ok, true);
   assert.equal(host.enable(manifest.pluginId).ok, true);
@@ -167,7 +166,7 @@ test('disabled and draining lifecycle paths remain reversible', () => {
  * @date 2026-10-17
  */
 test('dependency lifecycle changes cannot invalidate enabled dependents', () => {
-  assertDependencyGuards(new PluginHost({ functionIds: ['dip.service.stop'] }));
+  assertDependencyGuards(new PluginHost());
 });
 
 /**
@@ -178,7 +177,7 @@ test('dependency lifecycle changes cannot invalidate enabled dependents', () => 
  * @date 2026-10-17
  */
 test('event history is isolated and event ids remain monotonic', () => {
-  const host = new PluginHost({ functionIds: ['dip.service.stop'] });
+  const host = new PluginHost();
   const manifest = loadManifest();
   assert.equal(host.install(manifest).ok, true);
   assertEventSnapshotIsolation(host, manifest.pluginId);

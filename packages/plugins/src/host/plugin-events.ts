@@ -73,7 +73,6 @@ export class PluginEventLog {
    */
   public lifecycle(manifest: PluginManifest, state: LifecycleEventState, from?: PluginState): void {
     const input: PluginEventInput = { eventName: `plugin.${state}`, pluginId: manifest.pluginId, to: state };
-    this.addFunctionMetadata(input, manifest);
     if (from) input.from = from;
     this.emit(input);
   }
@@ -90,19 +89,6 @@ export class PluginEventLog {
   private eventBelongsTo(event: EventEnvelope, pluginId: string): boolean {
     const payload = event.payload;
     return typeof payload === 'object' && payload !== null && !Array.isArray(payload) && payload.pluginId === pluginId;
-  }
-
-  /**
-   * 把 Function 归属写入生命周期事件输入。
-   *
-   * @param input - 待补充的事件输入
-   * @param manifest - 插件 Manifest
-   * @returns 不返回值
-   * @author lvdaxianer@yeah.net
-   * @date 2026-10-17
-   */
-  private addFunctionMetadata(input: PluginEventInput, manifest: PluginManifest): void {
-    if (manifest.pluginKind === 'function') input.functionId = manifest.functionId;
   }
 
   /**

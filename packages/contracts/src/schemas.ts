@@ -48,8 +48,8 @@ import {
 import {
   // Function 定义 Schema。
   FunctionDefinitionSchema,
-  // 业务插件 Manifest Schema。
-  FunctionPluginManifestSchema,
+  // Plugin 包级业务 Manifest Schema。
+  BusinessPluginManifestSchema,
   // 嵌入 JSON Schema 外壳。
   JsonSchemaSchema,
   // 递归 JSON 值 Schema。
@@ -103,7 +103,7 @@ export const CONTRACT_SCHEMAS = {
 export {
   // 基础能力和插件 Manifest。
   FunctionDefinitionSchema,
-  FunctionPluginManifestSchema,
+  BusinessPluginManifestSchema,
   JsonSchemaSchema,
   JsonValueSchema,
   PluginLifecycleSchema,

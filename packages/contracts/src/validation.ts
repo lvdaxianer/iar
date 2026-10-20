@@ -256,7 +256,16 @@ function validateEmbeddedSchema(value: unknown, field: string): ContractIssue[] 
  */
 function validateContractSchemas(name: ContractName, input: unknown): ContractIssue[] {
   // 只有声明嵌入 Schema 的契约需要额外检查。
-  if (!isRecord(input) || !['function', 'pluginManifest'].includes(name)) {
+  if (!isRecord(input) || name === 'function') {
+    return name === 'function' && isRecord(input)
+      ? [
+        ...validateEmbeddedSchema(input.inputSchema, 'inputSchema'),
+        ...validateEmbeddedSchema(input.outputSchema, 'outputSchema')
+      ]
+      : [];
+  }
+  // 业务 Plugin 的 Schema 归属于其嵌套 Function，系统 Plugin 仍保留自己的边界。
+  if (name !== 'pluginManifest' || input.pluginKind !== 'system') {
     return [];
   }
   return [

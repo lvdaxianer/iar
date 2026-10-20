@@ -56,10 +56,10 @@ export type PluginOperation = {
 };
 
 /** 插件的业务或系统实现类型。 */
-export type PluginKind = 'function' | 'system';
+export type PluginKind = 'business' | 'system';
 
 /** 插件作用域；runtime 系统插件不会进入业务候选。 */
-export type PluginScope = 'function' | 'runtime';
+export type PluginScope = 'plugin' | 'runtime';
 
 /** Function 的路由和输入输出边界。 */
 export type FunctionDefinition = {
@@ -104,33 +104,24 @@ export type PluginLifecycle = {
   onUnload?: string;
 };
 
-/** 具有唯一 Function 归属的业务插件 Manifest。 */
-export type FunctionPluginManifest = {
+/** Plugin 包级业务 Manifest，不直接拥有单个 Function。 */
+export type BusinessPluginManifest = {
   // API 版本用于宿主兼容性协商。
   apiVersion: IarApiVersion;
   // Manifest 版本用于字段演进。
   schemaVersion: typeof import('./versions.js').SCHEMA_VERSIONS.pluginManifest;
   // pluginId 是注册表稳定标识。
   pluginId: string;
-  // function 插件只能声明业务实现。
-  pluginKind: 'function';
-  // function scope 强制 Function 所有权边界。
-  scope: 'function';
-  // 每个业务插件必须且只能归属一个 Function。
-  functionId: string;
+  // business 插件通过嵌套 Function 注册提供业务能力。
+  pluginKind: 'business';
+  // plugin scope 表示这是一个可分发的能力包。
+  scope: 'plugin';
   // 版本用于固定执行和回滚。
   version: string;
   // 描述供审计和候选展示。
   description: string;
-  // actionTypes 是模型筛选 Plugin 后可继续选择的动作范围。
-  actionTypes: ActionType[];
-  // 操作描述由插件声明，运行时不维护业务目录。
-  operations?: readonly PluginOperation[];
   // 能力不能由模型动态扩展。
   capabilities: string[];
-  // 输入输出 Schema 是插件调用边界。
-  inputSchema: JsonSchema;
-  outputSchema: JsonSchema;
   lifecycle: PluginLifecycle;
   policy: PluginPolicyMetadata;
   dependencies: string[];
@@ -163,4 +154,4 @@ export type SystemPluginManifest = {
 };
 
 /** 表示可安装的任一插件 Manifest。 */
-export type PluginManifest = FunctionPluginManifest | SystemPluginManifest;
+export type PluginManifest = BusinessPluginManifest | SystemPluginManifest;

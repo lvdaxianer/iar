@@ -4,8 +4,8 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import type { ActionType, ContractErrorResult, EventEnvelope, PluginManifest, PluginOperation, RiskLevel } from '@iar/contracts';
-import type { PluginHandler, PluginRegistration } from '../sdk/index.js';
+import type { ActionType, ContractErrorResult, EventEnvelope, FunctionDefinition, PluginManifest, PluginOperation, RiskLevel } from '@iar/contracts';
+import type { FunctionHandler, PluginPackage } from '../sdk/index.js';
 
 /**
  * 插件注册表支持的生命周期状态。
@@ -24,14 +24,21 @@ export type PluginState = 'discovered' | 'validated' | 'installed' | 'enabled' |
  *
  * @property manifest - 通过契约校验且已深拷贝的插件声明
  * @property state - 当前可路由生命周期状态
- * @property handler - 可选的 SDK 执行处理器
+ * @property functions - 由 Plugin 包拥有的 Function 执行记录
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
 export type PluginRecord = {
   manifest: PluginManifest;
   state: Exclude<PluginState, 'unloaded'>;
-  handler?: PluginHandler;
+  functions: ReadonlyMap<string, PluginFunctionRecord>;
+};
+
+/** PluginRecord 中的 Function 执行快照。 */
+export type PluginFunctionRecord = {
+  definition: FunctionDefinition;
+  operations: readonly PluginOperation[];
+  handler: FunctionHandler;
 };
 
 /** 提供给模型或选择层的通用 Plugin 能力描述，不包含执行权限。 */
@@ -64,23 +71,12 @@ export type PluginDescriptorOptions = {
 };
 
 /**
- * PluginHost 接受的安装输入，可直接传 Manifest 或带 Handler 的注册对象。
+ * PluginHost 接受完整 Plugin 包；仅 system Manifest 可作为无业务 Handler 的生命周期输入。
  *
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-export type PluginInstallInput = PluginManifest | PluginRegistration;
-
-/**
- * 创建 PluginHost 时提供的静态 Function 边界。
- *
- * @property functionIds - 当前宿主允许插件归属的 Function 标识
- * @author lvdaxianer@yeah.net
- * @date 2026-10-17
- */
-export type PluginHostOptions = {
-  functionIds: Iterable<string>;
-};
+export type PluginInstallInput = PluginPackage | PluginManifest;
 
 /**
  * PluginHost 的成功或稳定错误结果。

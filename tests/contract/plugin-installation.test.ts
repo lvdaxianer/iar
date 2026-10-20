@@ -5,11 +5,10 @@
  * @date 2026-10-17
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import test from 'node:test';
-import { ERROR_CODES, type FunctionPluginManifest, type PluginManifest } from '@iar/contracts';
+import { ERROR_CODES, type BusinessPluginManifest, type PluginManifest } from '@iar/contracts';
 import { PluginHost } from '@iar/plugins';
+import { loadBusinessManifest, pluginPackage } from './fixtures/plugin-package.js';
 
 /*
  * 本文件聚焦安装事务，不重复覆盖生命周期事件细节。
@@ -31,9 +30,8 @@ import { PluginHost } from '@iar/plugins';
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function loadManifest(): FunctionPluginManifest {
-  const path = join(process.cwd(), 'tests', 'contract', 'fixtures', 'valid-plugin-manifest.json');
-  return JSON.parse(readFileSync(path, 'utf8')) as FunctionPluginManifest;
+function loadManifest(): ReturnType<typeof pluginPackage> {
+  return pluginPackage(loadBusinessManifest());
 }
 
 /**
@@ -44,8 +42,9 @@ function loadManifest(): FunctionPluginManifest {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function manifestWith(overrides: Partial<FunctionPluginManifest>): FunctionPluginManifest {
-  return { ...loadManifest(), ...overrides };
+function manifestWith(overrides: Partial<BusinessPluginManifest> & { functionId?: string }): ReturnType<typeof pluginPackage> {
+  const { functionId = 'dip.service.stop', ...manifestOverrides } = overrides;
+  return pluginPackage({ ...loadBusinessManifest(), ...manifestOverrides }, functionId);
 }
 
 /**
@@ -73,8 +72,8 @@ function assertDependencyLifecycle(host: PluginHost): void {
  * @date 2026-10-17
  */
 function assertStableIndependentOrder(): void {
-  const first = new PluginHost({ functionIds: ['dip.service.stop'] });
-  const second = new PluginHost({ functionIds: ['dip.service.stop'] });
+  const first = new PluginHost();
+  const second = new PluginHost();
   const alpha = manifestWith({ pluginId: 'alpha-stop-v1' });
   const beta = manifestWith({ pluginId: 'beta-stop-v1' });
   const firstResult = first.installAll([beta, alpha]);
@@ -94,7 +93,7 @@ function assertStableIndependentOrder(): void {
  * @date 2026-10-17
  */
 function assertStableComplexOrder(): void {
-  const host = new PluginHost({ functionIds: ['dip.service.stop'] });
+  const host = new PluginHost();
   const graph = [
     manifestWith({ pluginId: 'graph-gamma-v1', dependencies: ['graph-beta-v1', 'graph-alpha-v1'] }),
     manifestWith({ pluginId: 'graph-beta-v1', dependencies: ['graph-alpha-v1'] }),
@@ -189,9 +188,9 @@ function assertDuplicateRegistration(host: PluginHost): void {
  * @date 2026-10-17
  */
 test('invalid install is atomic and emits rejection history', () => {
-  const host = new PluginHost({ functionIds: ['dip.service.stop'] });
+  const host = new PluginHost();
   const invalid = { ...loadManifest(), pluginId: 'broken-install-v1' } as Record<string, unknown>;
-  delete invalid.functionId;
+  delete invalid.functions;
   const result = host.install(invalid);
   assert.equal(result.ok, false);
   assert.equal(host.get('broken-install-v1'), undefined);
@@ -211,7 +210,7 @@ test('invalid install is atomic and emits rejection history', () => {
  * @date 2026-10-17
  */
 test('dependencies are sorted and lifecycle unload is reversible', () => {
-  const host = new PluginHost({ functionIds: ['dip.service.stop'] });
+  const host = new PluginHost();
   const base = manifestWith({ pluginId: 'base-stop-v1' });
   const dependent = manifestWith({ pluginId: 'dependent-stop-v1', dependencies: ['base-stop-v1'] });
   const result = host.installAll([dependent, base]);
@@ -233,11 +232,9 @@ test('dependencies are sorted and lifecycle unload is reversible', () => {
  * @date 2026-10-17
  */
 test('system plugin is excluded from business candidates', () => {
-  const host = new PluginHost({ functionIds: ['dip.service.stop'] });
-  const { functionId, actionTypes, ...systemBase } = loadManifest();
-  void functionId;
-  void actionTypes;
-  const system: PluginManifest = { ...systemBase, pluginId: 'iar.observability.log', pluginKind: 'system', scope: 'runtime' };
+  const host = new PluginHost();
+  const { manifest: _manifest, functions: _functions, ...systemBase } = loadManifest();
+  const system: PluginManifest = { ...systemBase, pluginId: 'iar.observability.log', pluginKind: 'system', scope: 'runtime', inputSchema: { type: 'object' }, outputSchema: { type: 'object' } };
   assert.equal(host.install(system).ok, true);
   assert.equal(host.enable(system.pluginId).ok, true);
   assert.deepEqual(host.candidates('dip.service.stop'), []);
@@ -251,17 +248,17 @@ test('system plugin is excluded from business candidates', () => {
  * @date 2026-10-17
  */
 test('registry records are isolated from returned manifest mutations', () => {
-  const host = new PluginHost({ functionIds: ['dip.service.stop'] });
+  const host = new PluginHost();
   const manifest = loadManifest();
-  const originalInputSchema = structuredClone(manifest.inputSchema);
+  const originalInputSchema = structuredClone(manifest.functions[0]!.definition.inputSchema);
   assert.equal(host.install(manifest).ok, true);
   manifest.dependencies.push('mutated-after-install');
-  manifest.inputSchema.type = 'array';
+  manifest.functions[0]!.definition.inputSchema.type = 'array';
   const returned = host.get(manifest.pluginId);
   assert.ok(returned);
   returned.manifest.dependencies.push('unexpected-dependency');
   assert.deepEqual(host.get(manifest.pluginId)?.manifest.dependencies, []);
-  assert.deepEqual(host.get(manifest.pluginId)?.manifest.inputSchema, originalInputSchema);
+  assert.deepEqual(host.get(manifest.pluginId)?.functions.get('dip.service.stop')?.definition.inputSchema, originalInputSchema);
 });
 
 /**
@@ -272,7 +269,7 @@ test('registry records are isolated from returned manifest mutations', () => {
  * @date 2026-10-17
  */
 test('dependency failures preserve registry atomicity', () => {
-  const host = new PluginHost({ functionIds: ['dip.service.stop'] });
+  const host = new PluginHost();
   assertMissingDependency(host);
   assertDependencyCycle(host);
   assertDuplicateRegistration(host);
@@ -286,7 +283,7 @@ test('dependency failures preserve registry atomicity', () => {
  * @date 2026-10-17
  */
 test('candidate resolution audits function ownership mismatch', () => {
-  const host = new PluginHost({ functionIds: ['dip.service.stop', 'ticket.create'] });
+  const host = new PluginHost();
   const manifest = manifestWith({ pluginId: 'ticket-create-v1', functionId: 'ticket.create' });
   assert.equal(host.install(manifest).ok, true);
   assert.equal(host.enable(manifest.pluginId).ok, true);
@@ -304,15 +301,15 @@ test('candidate resolution audits function ownership mismatch', () => {
  * @date 2026-10-17
  */
 test('plugin registration preserves its handler reference', () => {
-  const host = new PluginHost({ functionIds: ['dip.service.stop'] });
+  const host = new PluginHost();
   const manifest = loadManifest();
   const handler = async () => ({ output: null, status: 'succeeded' as const });
-  const result = host.install({ manifest, handler });
+  const result = host.install({ manifest: manifest.manifest, functions: [{ ...manifest.functions[0]!, handler }] });
   assert.equal(result.ok, true);
-  if (result.ok) assert.equal(result.value.handler, handler);
-  assert.equal(host.get(manifest.pluginId)?.handler, handler);
-  const invalidHost = new PluginHost({ functionIds: ['dip.service.stop'] });
-  const invalid = invalidHost.install({ manifest, handler: 'not-a-function' });
+  if (result.ok) assert.equal(result.value.functions.get('dip.service.stop')?.handler, handler);
+  assert.equal(host.get(manifest.pluginId)?.functions.get('dip.service.stop')?.handler, handler);
+  const invalidHost = new PluginHost();
+  const invalid = invalidHost.install({ manifest: manifest.manifest, functions: [{ ...manifest.functions[0]!, handler: 'not-a-function' as never }] });
   assert.equal(invalid.ok, false);
   if (!invalid.ok) assert.equal(invalid.error.code, ERROR_CODES.CONTRACT_VALIDATION_FAILED);
 });

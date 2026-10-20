@@ -112,15 +112,15 @@ test('valid plugin manifest passes versioned contract validation', () => {
   assert.equal(manifest.apiVersion, IAR_API_VERSION);
   // Manifest Schema 版本必须稳定可审计。
   assert.equal(manifest.schemaVersion, SCHEMA_VERSIONS.pluginManifest);
-  // 业务插件类型必须保持 function 边界。
-  assert.equal(manifest.pluginKind, 'function');
-  // Function 归属必须在 Manifest 中保留。
-  assert.equal(manifest.functionId, 'dip.service.stop');
+  // 业务插件类型必须保持 package 边界。
+  assert.equal(manifest.pluginKind, 'business');
+  // Function 归属由包内 functions 注册项承载，而不是 Manifest 字段。
+  assert.equal(manifest.scope, 'plugin');
 });
 
-/** 缺少 Function 归属时必须返回稳定校验错误。 */
-test('missing functionId is rejected before runtime state', () => {
-  // 缺少归属字段的插件不能进入宿主注册流程。
+/** 旧的 Function 级 Manifest 形状必须被稳定拒绝。 */
+test('function fields are rejected at plugin manifest boundary', () => {
+  // Function 级字段不能越过新的 Plugin 包边界。
   const result = validatePluginManifest(loadFixture('invalid-plugin-missing-function.json'));
 
   // 校验结果必须是失败分支。
@@ -128,8 +128,8 @@ test('missing functionId is rejected before runtime state', () => {
   if (!result.ok) {
     // 缺字段属于结构化契约错误。
     assert.equal(result.error.code, ERROR_CODES.CONTRACT_VALIDATION_FAILED);
-    // 诊断信息必须包含具体字段路径。
-    assert.match(JSON.stringify(result.error.details), /functionId/);
+    // 诊断信息必须保留结构化校验细节。
+    assert.ok(result.error.details);
   }
 });
 
@@ -148,8 +148,19 @@ test('incompatible api version is rejected with stable version error', () => {
 
 /** 嵌入的输入输出 Schema 无效时必须阻止 Manifest 进入运行时。 */
 test('invalid embedded schema is rejected with schema error', () => {
-  // 外层字段完整不代表嵌入 Schema 合法。
-  const result = validatePluginManifest(loadFixture('invalid-embedded-schema.json'));
+  // Function 外层字段完整不代表嵌入 Schema 合法。
+  const result = validateContract('function', {
+    schemaVersion: SCHEMA_VERSIONS.function,
+    functionId: 'broken.schema',
+    version: '1.0.0',
+    name: 'Broken schema',
+    description: '用于验证嵌入 Schema 拒绝路径',
+    actionTypes: ['query'],
+    inputSchema: { type: 'not-a-json-schema-type' },
+    outputSchema: { type: 'object' },
+    capabilities: [],
+    riskLevel: 'low'
+  });
 
   // 无法编译的 Schema 必须拒绝安装。
   assert.equal(result.ok, false);

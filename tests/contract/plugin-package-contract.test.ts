@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { defineFunction, definePlugin, type FunctionHandler } from '@iar/plugin';
-import { SCHEMA_VERSIONS, type FunctionDefinition } from '@iar/contracts';
+import { ContractValidationError, SCHEMA_VERSIONS, type FunctionDefinition } from '@iar/contracts';
 
 const handler: FunctionHandler = async () => ({ output: { ok: true }, status: 'succeeded' });
 
@@ -69,7 +69,16 @@ test('Function capabilities must be contained by the Plugin capability boundary'
   }), /capabilit|能力/i);
 });
 
+test('business Plugin cannot be defined without a Function', () => {
+  assert.throws(() => definePlugin({ manifest: ticketPlugin().manifest, functions: [] }), /Function|函数/i);
+});
+
+test('Function Operation names and kinds are validated by the authoring SDK', () => {
+  assert.throws(() => defineFunction({ definition: functionDefinition('ticket.invalid'), operations: [{ name: 'read', kind: 'invalid' as never, description: 'bad' }], handler }), /Operation|操作/i);
+  assert.throws(() => defineFunction({ definition: functionDefinition('ticket.duplicate'), operations: [{ name: 'read', kind: 'read', description: 'a' }, { name: 'read', kind: 'read', description: 'b' }], handler }), /Operation|操作/i);
+});
+
 test('old Function-first Manifest fields are rejected', () => {
   const legacyShape = { ...ticketPlugin().manifest, functionId: 'ticket.query', actionTypes: ['query'] };
-  assert.throws(() => definePlugin({ manifest: legacyShape, functions: [] }), /function|scope|business|invalid|字段/i);
+  assert.throws(() => definePlugin({ manifest: legacyShape, functions: [] }), ContractValidationError);
 });

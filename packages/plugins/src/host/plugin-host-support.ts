@@ -42,5 +42,10 @@ export function cloneManifest(manifest: PluginManifest): PluginManifest {
  * @date 2026-10-17
  */
 export function cloneRecord(record: PluginRecord): PluginRecord {
-  return { ...record, manifest: cloneManifest(record.manifest) };
+  const functions = new Map([...record.functions.entries()].map(([functionId, item]) => [functionId, {
+    definition: structuredClone(item.definition),
+    operations: structuredClone(item.operations),
+    handler: item.handler
+  }]));
+  return { ...record, manifest: cloneManifest(record.manifest), functions };
 }

@@ -5,11 +5,10 @@
  * @date 2026-10-17
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import test from 'node:test';
-import { ERROR_CODES, type FunctionPluginManifest } from '@iar/contracts';
+import { ERROR_CODES, type BusinessPluginManifest } from '@iar/contracts';
 import { MAX_INSTALL_BATCH_SIZE, PluginHost } from '@iar/plugins';
+import { loadBusinessManifest, pluginPackage } from './fixtures/plugin-package.js';
 
 /*
  * 本文件覆盖安装输入的资源和审计边界。
@@ -27,9 +26,8 @@ import { MAX_INSTALL_BATCH_SIZE, PluginHost } from '@iar/plugins';
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function loadManifest(): FunctionPluginManifest {
-  const path = join(process.cwd(), 'tests', 'contract', 'fixtures', 'valid-plugin-manifest.json');
-  return JSON.parse(readFileSync(path, 'utf8')) as FunctionPluginManifest;
+function loadManifest(): ReturnType<typeof pluginPackage> {
+  return pluginPackage(loadBusinessManifest());
 }
 
 /**
@@ -40,8 +38,9 @@ function loadManifest(): FunctionPluginManifest {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function manifestWith(overrides: Partial<FunctionPluginManifest>): FunctionPluginManifest {
-  return { ...loadManifest(), ...overrides };
+function manifestWith(overrides: Partial<BusinessPluginManifest> & { functionId?: string }): ReturnType<typeof pluginPackage> {
+  const { functionId = 'dip.service.stop', ...manifestOverrides } = overrides;
+  return pluginPackage({ ...loadBusinessManifest(), ...manifestOverrides }, functionId);
 }
 
 /**
@@ -66,17 +65,13 @@ function rejectedPluginId(host: PluginHost, pluginId: string): unknown {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-test('unknown function ownership preserves rejection attribution', () => {
-  const host = new PluginHost({ functionIds: ['dip.service.stop'] });
+test('function ownership is defined by the Plugin package itself', () => {
+  const host = new PluginHost();
   const manifest = manifestWith({ pluginId: 'foreign-function-v1', functionId: 'ticket.create' });
   const result = host.install(manifest);
-  assert.equal(result.ok, false);
-  if (!result.ok) {
-    assert.equal(result.error.code, ERROR_CODES.PLUGIN_FUNCTION_NOT_FOUND);
-    assert.equal(result.error.details?.pluginId, manifest.pluginId);
-  }
-  assert.equal(host.get(manifest.pluginId), undefined);
-  assert.equal(rejectedPluginId(host, manifest.pluginId), manifest.pluginId);
+  assert.equal(result.ok, true);
+  assert.equal(host.enable(manifest.pluginId).ok, true);
+  assert.equal(host.get(manifest.pluginId)?.functions.has('ticket.create'), true);
 });
 
 /**
@@ -87,7 +82,7 @@ test('unknown function ownership preserves rejection attribution', () => {
  * @date 2026-10-17
  */
 test('install batch size is bounded before validation', () => {
-  const host = new PluginHost({ functionIds: ['dip.service.stop'] });
+  const host = new PluginHost();
   const inputs = Array.from({ length: MAX_INSTALL_BATCH_SIZE + 1 }, (_, index) => manifestWith({ pluginId: `oversized-${index}-v1` }));
   const result = host.installAll(inputs);
   assert.equal(result.ok, false);
@@ -106,9 +101,9 @@ test('install batch size is bounded before validation', () => {
  * @date 2026-10-17
  */
 test('mixed batch failure remains atomic', () => {
-  const host = new PluginHost({ functionIds: ['dip.service.stop'] });
+  const host = new PluginHost();
   const valid = manifestWith({ pluginId: 'valid-before-failure-v1' });
-  const invalid = manifestWith({ pluginId: 'invalid-after-valid-v1', functionId: 'ticket.create' });
+  const invalid = { ...manifestWith({ pluginId: 'invalid-after-valid-v1' }), functions: [] };
   const result = host.installAll([valid, invalid]);
   assert.equal(result.ok, false);
   assert.equal(host.get(valid.pluginId), undefined);
