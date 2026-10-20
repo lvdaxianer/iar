@@ -157,6 +157,9 @@ agent-sandbox 默认同时加载 JEV 和 Intent Model，并固定 JEV 优先。�
 ## 文档与验证
 
 - [完整架构与能力边界](docs/README.md)
+- [定义 Function](docs/defining-functions.md)：Function 契约、与 Plugin 的关系、新增 Function 的四步与检查清单
+- [定义 Plugin](docs/defining-plugins.md)：Manifest 逐字段详解、Handler 契约、可信事实声明、从注册到执行的完整链路
+- [Agent Sandbox 上下文追问测试用例](docs/agent-sandbox-test-cases.md)
 - [Phase 1～5 最终实现审计](docs/implementation-audits/phase-1-5-final.md)
 - [已归档的 OpenSpec 计划](openspec/changes/archive/2026-10-17-iar-five-phase-roadmap/tasks.md)
 
