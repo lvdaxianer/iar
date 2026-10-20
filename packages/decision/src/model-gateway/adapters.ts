@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { ACTION_TYPES, validateContract, type ActionType, type BehaviorContext, type CompactionResult, type DecisionResult, type JsonValue } from '@iar/contracts';
+import { ACTION_TYPES, MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGE_LIMIT, validateContract, type ActionType, type BehaviorContext, type CompactionResult, type DecisionResult, type JsonValue } from '@iar/contracts';
 import { validateDecisionOutput } from '../validation.js';
 import type { DecisionRequest } from '../types.js';
 import { MODEL_NO_PROFILE_MESSAGE, type ModelGatewayInvocationOptions, type ModelGatewayResult, type ModelInvocation, type ModelOutputValidation } from './types.js';
@@ -37,7 +37,7 @@ export type SemanticActionType = ActionType | 'unknown';
 export type SemanticExtractInvocation = ModelInvocation;
 
 /** JEV Decision 的调用输入。 */
-export type JevDecisionInvocation = Omit<ModelInvocation, 'input'> & { request: DecisionRequest; currentMessage?: string; behaviorContext?: BehaviorContext };
+export type JevDecisionInvocation = Omit<ModelInvocation, 'input'> & { request: DecisionRequest; currentMessage?: string; behaviorContext?: BehaviorContext; recentMessages?: Array<{ role: string; text: string }> };
 
 /**
  * Intent Model Decision 与 JEV 共用同一受限请求输入。
@@ -92,8 +92,8 @@ export class JevDecisionAdapter {
     // 先建立唯一请求快照，避免 role、gateway input 和 validator 分别读取可变输入。
     const snapshot = createDecisionInvocationSnapshot(invocation, this.role);
     if (!snapshot) return Promise.resolve(invalidJevResult('JEV decision 输入无效'));
-    const crossBackendInput = options?.crossBackendFallback === true ? buildIntentDecisionInput(snapshot.request, snapshot.currentMessage, snapshot.behaviorContext) : undefined;
-    return this.gateway.invoke(this.role, { traceId: snapshot.traceId, runId: snapshot.runId, input: decisionModelInput(snapshot.request, snapshot.currentMessage, snapshot.behaviorContext) }, (raw) => validateDecisionResult(snapshot.request, raw), decisionOptions('jev', profileId, options, crossBackendInput));
+    const crossBackendInput = options?.crossBackendFallback === true ? buildIntentDecisionInput(snapshot.request, snapshot.currentMessage, snapshot.behaviorContext, snapshot.recentMessages) : undefined;
+    return this.gateway.invoke(this.role, { traceId: snapshot.traceId, runId: snapshot.runId, input: decisionModelInput(snapshot.request, snapshot.currentMessage, snapshot.behaviorContext, snapshot.recentMessages) }, (raw) => validateDecisionResult(snapshot.request, raw), decisionOptions('jev', profileId, options, crossBackendInput));
   }
 }
 
@@ -126,12 +126,12 @@ export class IntentModelDecisionAdapter {
     if (!snapshot) return Promise.resolve(invalidDecisionResult('Intent Model decision request 无效'));
     let input: JsonValue;
     try {
-      input = buildIntentDecisionInput(snapshot.request, snapshot.currentMessage, snapshot.behaviorContext);
+      input = buildIntentDecisionInput(snapshot.request, snapshot.currentMessage, snapshot.behaviorContext, snapshot.recentMessages);
     } catch {
       // Prompt builder 的底层异常统一收敛为稳定 invalid_request。
       return Promise.resolve(invalidDecisionResult('Intent Model decision request 无效'));
     }
-    const crossBackendInput = options?.crossBackendFallback === true ? decisionModelInput(snapshot.request, snapshot.currentMessage, snapshot.behaviorContext) : undefined;
+    const crossBackendInput = options?.crossBackendFallback === true ? decisionModelInput(snapshot.request, snapshot.currentMessage, snapshot.behaviorContext, snapshot.recentMessages) : undefined;
     return this.gateway.invoke(this.role, { traceId: snapshot.traceId, runId: snapshot.runId, input }, (raw) => validateDecisionResult(snapshot.request, raw), decisionOptions('intent-model', profileId, options, crossBackendInput));
   }
 }
@@ -365,7 +365,9 @@ function createDecisionInvocationSnapshot(invocation: unknown, role?: 'function.
     if (invocation.currentMessage !== undefined && currentMessage === undefined) return undefined;
     const behaviorContext = invocation.behaviorContext === undefined ? undefined : snapshotBehaviorContext(invocation.behaviorContext);
     if (invocation.behaviorContext !== undefined && behaviorContext === undefined) return undefined;
-    return { traceId, runId, request, ...(currentMessage === undefined ? {} : { currentMessage }), ...(behaviorContext === undefined ? {} : { behaviorContext }) };
+    const recentMessages = invocation.recentMessages === undefined ? undefined : snapshotRecentMessages(invocation.recentMessages);
+    if (invocation.recentMessages !== undefined && recentMessages === undefined) return undefined;
+    return { traceId, runId, request, ...(currentMessage === undefined ? {} : { currentMessage }), ...(behaviorContext === undefined ? {} : { behaviorContext }), ...(recentMessages === undefined ? {} : { recentMessages }) };
   } catch {
     // Proxy、getter、循环引用和不可复制值都不能进入异步 provider 生命周期。
     return undefined;
@@ -373,9 +375,19 @@ function createDecisionInvocationSnapshot(invocation: unknown, role?: 'function.
 }
 
 /** 构造两个决策 backend 共用的上下文输入，保持 DecisionResult 契约不变。 */
-function decisionModelInput(request: DecisionRequest, currentMessage: string | undefined, behaviorContext: BehaviorContext | undefined): JsonValue {
-  if (currentMessage === undefined && behaviorContext === undefined) return request as unknown as JsonValue;
-  return { ...request, ...(currentMessage === undefined ? {} : { currentMessage }), ...(behaviorContext === undefined ? {} : { behaviorContext }) } as unknown as JsonValue;
+function decisionModelInput(request: DecisionRequest, currentMessage: string | undefined, behaviorContext: BehaviorContext | undefined, recentMessages?: Array<{ role: string; text: string }>): JsonValue {
+  if (currentMessage === undefined && behaviorContext === undefined && recentMessages === undefined) return request as unknown as JsonValue;
+  return { ...request, ...(currentMessage === undefined ? {} : { currentMessage }), ...(behaviorContext === undefined ? {} : { behaviorContext }), ...(recentMessages === undefined ? {} : { recentMessages }) } as unknown as JsonValue;
+}
+
+/** 校验并复制送入决策模型的有界最近消息窗口。 */
+function snapshotRecentMessages(value: unknown): Array<{ role: string; text: string }> | undefined {
+  if (!Array.isArray(value) || value.length > MAX_RECENT_MESSAGE_LIMIT) return undefined;
+  const result = value.map((item) => {
+    if (!isRecord(item) || !['user', 'assistant', 'system'].includes(String(item.role)) || typeof item.text !== 'string') return undefined;
+    return { role: String(item.role), text: item.text.slice(0, MAX_RECENT_MESSAGE_CHARS) };
+  });
+  return result.every((item): item is { role: string; text: string } => item !== undefined) ? result : undefined;
 }
 
 /** 限制送入决策模型的当前问题长度，并隔离调用方可变字符串。 */

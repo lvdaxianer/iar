@@ -13,6 +13,18 @@ import {
 } from '@iar/decision';
 import { buildFallbackUserPrompt, buildResponseUserPrompt, buildSemanticUserPrompt } from '../../../examples/agent-sandbox/src/models/model-input-transport.js';
 import { ResponseGeneratorAdapter } from '@iar/decision';
+import { PluginHost } from '@iar/plugin-host';
+import type { FunctionPluginManifest } from '@iar/contracts';
+import { SEMANTIC_SYSTEM_PROMPT } from '../../../examples/agent-sandbox/src/models/model-input-transport.js';
+
+function descriptorManifest(pluginId: string, functionId: string): FunctionPluginManifest {
+  return {
+    apiVersion: 'iar.dev/v1', schemaVersion: 'iar.plugin-manifest/v1', pluginId, pluginKind: 'function', scope: 'function', functionId,
+    version: '1.0.0', description: `descriptor-${pluginId}`, actionTypes: ['query'], capabilities: ['read.capability'],
+    inputSchema: { type: 'object' }, outputSchema: { type: 'object' }, lifecycle: { entrypoint: './handler.js' },
+    policy: { riskLevel: 'low', requiresConfirmation: false, allowedCapabilities: ['read.capability'] }, dependencies: []
+  };
+}
 
 function request(): DecisionRequest {
   return {
@@ -61,14 +73,43 @@ test('语义与回复模型接收当前问题、结构化上下文和有界最�
     }
   };
   const semantic = buildSemanticUserPrompt({ text: '告诉我刚才的编号', behaviorContext: context });
-  const response = buildResponseUserPrompt({ userMessage: '告诉我刚才的编号', behaviorContext: context, functionId: 'ticket.create', pluginId: 'ticket-create-v1', actionStatus: 'succeeded', actionOutput: { receipt: 'ticket-001' } });
-  const fallback = buildFallbackUserPrompt({ userMessage: '告诉我刚才的编号', behaviorContext: context, reasonCode: 'function_noul' }, ['ticket.create']);
+  const functionDescriptors = [{ candidateKey: 'candidate-opaque', functionId: 'function.visible', pluginId: 'plugin.visible', description: '动态能力描述', actionTypes: ['query'] }];
+  const response = buildResponseUserPrompt({ userMessage: '告诉我刚才的编号', behaviorContext: context, functionId: 'ticket.create', pluginId: 'ticket-create-v1', actionStatus: 'succeeded', actionOutput: { receipt: 'ticket-001' }, functionDescriptors });
+  const fallback = buildFallbackUserPrompt({ userMessage: '告诉我刚才的编号', behaviorContext: context, reasonCode: 'function_noul', recentMessages: [{ role: 'user', text: '上一轮问题' }] }, functionDescriptors);
   for (const prompt of [semantic, response, fallback]) {
     assert.match(prompt, /ticket-001/);
   assert.match(prompt, /最近有限/);
     assert.match(prompt, /结构化|事实|澄清/);
   }
   assert.match(semantic, /告诉我刚才的编号/);
+  assert.match(response, /动态能力描述/);
+  assert.match(fallback, /candidate-opaque/);
+});
+
+test('PluginHost 只投影当前启用且授权的通用描述，并使用不透明候选键', () => {
+  const host = new PluginHost({ functionIds: ['function.visible', 'function.hidden'] });
+  assert.equal(host.install(descriptorManifest('plugin.visible', 'function.visible')).ok, true);
+  assert.equal(host.install(descriptorManifest('plugin.hidden', 'function.hidden')).ok, true);
+  assert.equal(host.enable('plugin.visible').ok, true);
+  assert.equal(host.enable('plugin.hidden').ok, true);
+  const descriptors = host.descriptors({ authorize: (record) => record.manifest.pluginId === 'plugin.visible' });
+  assert.equal(descriptors.length, 1);
+  assert.equal(descriptors[0]?.functionId, 'function.visible');
+  assert.equal(descriptors[0]?.pluginId, 'plugin.visible');
+  assert.notEqual(descriptors[0]?.candidateKey, 'plugin.visible');
+  assert.notEqual(descriptors[0]?.candidateKey, 'function.visible');
+  assert.deepEqual(descriptors[0]?.operationMetadata.actionTypes, ['query']);
+});
+
+test('共享语义系统提示词不内置业务功能目录，描述由调用输入提供', () => {
+  assert.doesNotMatch(SEMANTIC_SYSTEM_PROMPT, /knowledge\.query|ticket\.create|human\.transfer/);
+  const prompt = buildSemanticUserPrompt({
+    text: '请帮我处理这个问题',
+    behaviorContext: createInitialContext('run-descriptor'),
+    functionDescriptors: [{ candidateKey: 'candidate-opaque', functionId: 'function.visible', pluginId: 'plugin.visible', description: '动态能力描述', actionTypes: ['query'] }]
+  });
+  assert.match(prompt, /candidate-opaque/);
+  assert.match(prompt, /动态能力描述/);
 });
 
 test('JEV and Intent Model receive the same structured context without changing the decision contract', async () => {
@@ -85,7 +126,8 @@ test('JEV and Intent Model receive the same structured context without changing 
   } };
   const registry = profiles();
   const gateway = new ModelGateway({ registry, providers: { 'jev-provider': provider, 'intent-provider': provider } });
-  const invocation = { traceId: 'trace-context', runId: 'run-context', request: request(), currentMessage: '告诉我刚才的工单编号', behaviorContext: context };
+  const recentMessages = [{ role: 'user', text: '之前的问题' }, { role: 'assistant', text: '之前的回答' }];
+  const invocation = { traceId: 'trace-context', runId: 'run-context', request: request(), currentMessage: '告诉我刚才的工单编号', behaviorContext: context, recentMessages };
   const jev = await new JevDecisionAdapter(gateway, 'function.select').decide(invocation);
   const intent = await new IntentModelDecisionAdapter(gateway, 'function.select').decide(invocation);
   assert.equal(jev.ok, true);
@@ -94,9 +136,21 @@ test('JEV and Intent Model receive the same structured context without changing 
   assert.deepEqual(calls[1]?.input.behaviorContext, context);
   assert.equal(calls[0]?.input.currentMessage, '告诉我刚才的工单编号');
   assert.equal(calls[1]?.input.currentMessage, '告诉我刚才的工单编号');
+  assert.deepEqual(calls[0]?.input.recentMessages, recentMessages);
+  assert.deepEqual(calls[1]?.input.recentMessages, recentMessages);
   assert.deepEqual((calls[0]?.input.candidates as unknown as DecisionRequest['candidates']), request().candidates);
   assert.equal(calls[0]?.input.request, undefined);
   assert.deepEqual((calls[1]?.input.request as unknown as { candidateIds: string[] })?.candidateIds, ['ticket.create']);
+});
+
+test('决策模型拒绝超过窗口上限的最近消息输入', async () => {
+  const provider: ModelProvider = { complete: async (input) => decisionResult(input.input) };
+  const gateway = new ModelGateway({ registry: profiles(), providers: { 'jev-provider': provider } });
+  const result = await new JevDecisionAdapter(gateway, 'function.select').decide({
+    traceId: 'trace-bounded-messages', runId: 'run-bounded-messages', request: request(),
+    recentMessages: Array.from({ length: 21 }, (_, index) => ({ role: 'user', text: String(index) }))
+  });
+  assert.equal(result.ok, false);
 });
 
 test('normal and streaming session calls use the live structured context after a successful action', async () => {
@@ -142,6 +196,9 @@ test('normal and streaming session calls use the live structured context after a
     assert.deepEqual((await session.state()).context.pending.options, [{ key: '1', label: '第一个对象' }, { key: '2', label: '第二个对象' }]);
     assert.ok(prompts.some((prompt) => prompt.includes(`<behavior_context>`) && prompt.includes(String(ticketId))));
     assert.ok(prompts.filter((prompt) => prompt.includes(String(ticketId))).every((prompt) => prompt.includes('最近有限')));
+    assert.ok(prompts.filter((prompt) => prompt.includes('最近有限')).length >= 2);
+    assert.ok(prompts.some((prompt) => prompt.includes('<function_descriptors>')));
+    assert.ok(prompts.some((prompt) => prompt.includes('当前能力描述')));
   } finally {
     session.dispose();
     globalThis.fetch = originalFetch;

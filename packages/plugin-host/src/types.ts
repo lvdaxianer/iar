@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import type { ContractErrorResult, EventEnvelope, PluginManifest } from '@iar/contracts';
+import type { ActionType, ContractErrorResult, EventEnvelope, PluginManifest, RiskLevel } from '@iar/contracts';
 import type { PluginHandler, PluginRegistration } from '@iar/plugin-sdk';
 
 /**
@@ -32,6 +32,34 @@ export type PluginRecord = {
   manifest: PluginManifest;
   state: Exclude<PluginState, 'unloaded'>;
   handler?: PluginHandler;
+};
+
+/** 提供给模型或选择层的通用 Plugin 能力描述，不包含执行权限。 */
+export type PluginDescriptor = {
+  /** 当前候选的稳定不透明键，用于跨模型传递选择。 */
+  candidateKey: string;
+  /** 声明该能力归属的 Function。 */
+  functionId: string;
+  /** 声明该能力实现的 Plugin。 */
+  pluginId: string;
+  /** Manifest 提供的自然语言描述。 */
+  description: string;
+  /** Manifest 声明的动作类型。 */
+  actionTypes: ActionType[];
+  /** Plugin 的固定能力权限集合。 */
+  capabilities: string[];
+  /** 模型可理解的操作元数据，不等于执行授权。 */
+  operationMetadata: {
+    actionTypes: ActionType[];
+    capabilities: string[];
+    riskLevel: RiskLevel;
+    requiresConfirmation: boolean;
+  };
+};
+
+/** 描述投影的授权边界。 */
+export type PluginDescriptorOptions = {
+  authorize?: (record: PluginRecord) => boolean;
 };
 
 /**

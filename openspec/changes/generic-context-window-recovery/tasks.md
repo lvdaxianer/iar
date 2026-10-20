@@ -15,10 +15,10 @@
 
 ## 3. Dynamic Plugin Descriptors and Model Context
 
-- [ ] 3.1 Add failing tests for descriptor collection, authorization filtering, opaque candidate keys, recent-message bounds, and prompt inputs with no static business catalog in `tests/integration/model-gateway/structured-context.test.ts` and routing tests; verify the tests fail against the current hardcoded prompt/input shape.
-- [ ] 3.2 Implement a generic PluginHost descriptor projection from enabled, authorized Plugin manifests, including declared Function/Plugin IDs, descriptions, action types, and operation metadata; verify candidates are generated only from the current registry and no core Runtime source contains business-specific names or keyword branches.
-- [ ] 3.3 Extend the semantic extraction and response-generation input builders in `examples/agent-sandbox/src/models/model-input-transport.ts`, `packages/decision/src/model-gateway/adapters.ts`, and session routing/reply contexts to pass bounded recent messages and dynamic descriptors while keeping compaction input structured-only; verify prompt contract tests and model gateway tests pass.
-- [ ] 3.4 Add parity tests for `session.ts` and `session-stream-turn.ts` proving streaming and non-streaming calls receive equivalent recent-message, descriptor, and clarification inputs; verify both paths preserve the existing no-side-effect-on-uncertain behavior.
+- [x] 3.1 Add failing tests for descriptor collection, authorization filtering, opaque candidate keys, recent-message bounds, and prompt inputs with no static business catalog in `tests/integration/model-gateway/structured-context.test.ts` and routing tests; verify the tests fail against the current hardcoded prompt/input shape.
+- [x] 3.2 Implement a generic PluginHost descriptor projection from enabled, authorized Plugin manifests, including declared Function/Plugin IDs, descriptions, action types, and operation metadata; verify candidates are generated only from the current registry and no core Runtime source contains business-specific names or keyword branches.
+- [x] 3.3 Extend the semantic extraction and response-generation input builders in `examples/agent-sandbox/src/models/model-input-transport.ts`, `packages/decision/src/model-gateway/adapters.ts`, and session routing/reply contexts to pass bounded recent messages and dynamic descriptors while keeping compaction input structured-only; verify prompt contract tests and model gateway tests pass.
+- [x] 3.4 Add parity tests for `session.ts` and `session-stream-turn.ts` proving streaming and non-streaming calls receive equivalent recent-message, descriptor, and clarification inputs; verify both paths preserve the existing no-side-effect-on-uncertain behavior.
 
 ## 4. Generic Clarification Escalation and Selection
 

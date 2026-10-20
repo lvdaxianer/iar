@@ -89,7 +89,7 @@ class StableIntentDecisionRequestError extends TypeError {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-export function buildIntentDecisionInput(request: DecisionRequest, currentMessage?: string, behaviorContext?: BehaviorContext): JsonValue {
+export function buildIntentDecisionInput(request: DecisionRequest, currentMessage?: string, behaviorContext?: BehaviorContext, recentMessages?: Array<{ role: string; text: string }>): JsonValue {
   try {
     const normalizedRequest = canonicalizeDecisionRequest(request);
     const promptRequest = { ...normalizedRequest, candidateIds: normalizedRequest.candidates.map((candidate) => candidate.candidateId) } as unknown as JsonValue;
@@ -98,7 +98,8 @@ export function buildIntentDecisionInput(request: DecisionRequest, currentMessag
       systemPrompt: INTENT_DECISION_SYSTEM_PROMPT,
       request: promptRequest,
       ...(currentMessage === undefined ? {} : { currentMessage }),
-      ...(behaviorContext === undefined ? {} : { behaviorContext })
+      ...(behaviorContext === undefined ? {} : { behaviorContext }),
+      ...(recentMessages === undefined ? {} : { recentMessages })
     } as unknown as JsonValue);
   } catch (error) {
     throw toStableRequestError(error);

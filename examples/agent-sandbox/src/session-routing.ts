@@ -6,13 +6,13 @@
  * @date 2026-10-18
  */
 import { randomUUID } from 'node:crypto';
-import { SCHEMA_VERSIONS, type ActionDefinition, type BehaviorContext, type EventEnvelope, type JsonValue, type PluginPolicyMetadata } from '@iar/contracts';
+import { SCHEMA_VERSIONS, type ActionDefinition, type BehaviorContext, type EventEnvelope, type JsonValue, type PluginPolicyMetadata, type RuleExpression } from '@iar/contracts';
 import { ModelGateway, SemanticExtractorAdapter, type ModelGatewayResult, type ModelProfileRegistry, type SemanticFrame } from '@iar/decision';
 import { PluginFirstRouter, type AsyncDecisionAdapter, type RouteResult } from '@iar/runtime';
-import type { PluginHost } from '@iar/plugin-host';
+import type { FunctionRule, PluginRule } from '@iar/rule-engine';
+import type { PluginDescriptor, PluginHost } from '@iar/plugin-host';
 import type { ActionExecutor, LocalWorkflow } from '@iar/workflow';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
-import { sandboxFunctionRules, sandboxPluginRules } from './rules.js';
 import { SESSION_RUN_ID, SESSION_CORRELATION_ID, TURN_DEFINITION } from './session-core.js';
 import type { CompactionContext } from './session-compaction.js';
 import { buildActionInput, buildFacts, describeAction, sandboxOperationKind, toSlotMap } from './session-helpers.js';
@@ -67,11 +67,12 @@ export class SandboxSessionRouting {
    * @date 2026-10-18
    */
   public async extractFrame(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages = this.context.recentMessages): Promise<ExtractFrameOutcome> {
-    const extracted = await new SemanticExtractorAdapter(this.context.gateway).extract({ traceId, runId, input: { text: userText, behaviorContext, recentMessages } });
+    const descriptors = this.context.pluginHost.descriptors();
+    const extracted = await new SemanticExtractorAdapter(this.context.gateway).extract({ traceId, runId, input: { text: userText, behaviorContext, recentMessages, functionDescriptors: descriptors } });
     if (extracted.ok) return { ok: true, frame: extracted.value, semanticFallback: false };
     if (this.context.mode === 'brain') {
       // 真实 LLM 抽取失败时降级到离线关键词抽取，保证链路可以继续。
-      const retried = await this.retrySemanticWithScripted(traceId, runId, userText, behaviorContext, recentMessages);
+      const retried = await this.retrySemanticWithScripted(traceId, runId, userText, behaviorContext, recentMessages, descriptors);
       if (retried.ok) return { ok: true, frame: retried.value, semanticFallback: true };
     }
     const route: RouteEvidence = { status: 'semantic_failed', reasonCode: extracted.error.code, semanticIntent: 'unknown', semanticConfidence: 0 };
@@ -92,9 +93,9 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected async retrySemanticWithScripted(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>): Promise<ModelGatewayResult<SemanticFrame>> {
+  protected async retrySemanticWithScripted(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>, functionDescriptors: PluginDescriptor[]): Promise<ModelGatewayResult<SemanticFrame>> {
     const fallbackGateway = new ModelGateway({ registry: this.context.registry, providers: { brain: new ScriptedModelProvider() } });
-    return new SemanticExtractorAdapter(fallbackGateway).extract({ traceId, runId, input: { text: userText, behaviorContext, recentMessages } });
+    return new SemanticExtractorAdapter(fallbackGateway).extract({ traceId, runId, input: { text: userText, behaviorContext, recentMessages, functionDescriptors } });
   }
 
 
@@ -108,18 +109,21 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public routeFrame(traceId: string, runId: string, frame: SemanticFrame, behaviorContext: BehaviorContext, currentMessage: string): Promise<RouteResult> {
+  public routeFrame(traceId: string, runId: string, frame: SemanticFrame, behaviorContext: BehaviorContext, currentMessage: string, recentMessages = this.context.recentMessages): Promise<RouteResult> {
+    const descriptors = this.context.pluginHost.descriptors();
+    const rules = createRoutingRules(descriptors);
     return new PluginFirstRouter().routeAsync({
       traceId,
       runId,
       facts: buildFacts(frame),
       behaviorContext,
       currentMessage,
+      recentMessages,
       tenantId: 'tenant-sandbox',
       actorId: 'actor-sandbox',
       environment: 'sandbox',
-      functionRules: sandboxFunctionRules,
-      pluginRules: sandboxPluginRules,
+      functionRules: rules.functionRules,
+      pluginRules: rules.pluginRules,
       pluginHost: this.context.pluginHost,
       functionDecisionAdapter: this.context.functionDecisionAdapter,
       pluginDecisionAdapter: this.context.pluginDecisionAdapter,
@@ -264,4 +268,52 @@ export class SandboxSessionRouting {
     return payload;
   }
 
+}
+
+/** 根据当前启用 Plugin 描述构造无业务目录的 Function/Plugin 规则。 */
+function createRoutingRules(descriptors: readonly PluginDescriptor[]): { functionRules: FunctionRule[]; pluginRules: PluginRule[] } {
+  const functionRules = new Map<string, FunctionRule>();
+  for (const descriptor of descriptors) {
+    const current = functionRules.get(descriptor.functionId);
+    if (current) {
+      current.requiresConfirmation = current.requiresConfirmation || descriptor.operationMetadata.requiresConfirmation;
+      current.riskLevel = higherRisk(current.riskLevel ?? descriptor.operationMetadata.riskLevel, descriptor.operationMetadata.riskLevel);
+      continue;
+    }
+    functionRules.set(descriptor.functionId, {
+      functionId: descriptor.functionId,
+      riskLevel: descriptor.operationMetadata.riskLevel,
+      requiresConfirmation: descriptor.operationMetadata.requiresConfirmation,
+      evidenceCodes: [`runtime.function.${descriptor.candidateKey}`],
+      rule: genericRule('function', `function-${descriptor.candidateKey}`, descriptor.functionId)
+    });
+  }
+  const pluginRules = descriptors.map((descriptor) => ({
+    pluginId: descriptor.pluginId,
+    functionId: descriptor.functionId,
+    requiredCapabilities: descriptor.capabilities,
+    requiresConfirmation: descriptor.operationMetadata.requiresConfirmation,
+    riskLevel: descriptor.operationMetadata.riskLevel,
+    evidenceCodes: [`runtime.plugin.${descriptor.candidateKey}`],
+    rule: genericRule('plugin', `plugin-${descriptor.candidateKey}`, descriptor.functionId)
+  }));
+  return { functionRules: [...functionRules.values()], pluginRules };
+}
+
+/** 构造只匹配结构化 semantic.intent 的通用规则，不解析业务关键词。 */
+function genericRule(target: 'function', ruleId: string, functionId: string): FunctionRule['rule'];
+function genericRule(target: 'plugin', ruleId: string, functionId: string): PluginRule['rule'];
+function genericRule(target: 'function' | 'plugin', ruleId: string, functionId: string): FunctionRule['rule'] | PluginRule['rule'] {
+  return { schemaVersion: SCHEMA_VERSIONS.rule, ruleId, version: '1.0.0', target, priority: 100, specificity: 1, unknownFieldPolicy: 'match_none', expression: intentEquals(functionId) } as FunctionRule['rule'] | PluginRule['rule'];
+}
+
+/** 生成稳定的意图匹配表达式。 */
+function intentEquals(functionId: string): RuleExpression {
+  return { condition: { field: 'semantic.intent', operator: 'equals', value: functionId } };
+}
+
+/** 合并同一 Function 下多个 Plugin 的最高风险策略。 */
+function higherRisk(left: NonNullable<FunctionRule['riskLevel']>, right: PluginDescriptor['operationMetadata']['riskLevel']): NonNullable<FunctionRule['riskLevel']> {
+  const rank = { low: 1, medium: 2, high: 3, critical: 4 } as const;
+  return (left && rank[left] >= rank[right] ? left : right);
 }

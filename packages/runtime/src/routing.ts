@@ -34,7 +34,7 @@ type MatchedRouteInput = RouteEvidence & { pluginId: string; routingScope?: Rout
 /** 异步模型决策适配器的最小结构，UnifiedDecisionAdapter 可直接满足该接口。 */
 export type AsyncDecisionAdapter = {
   /** 使用 trace/run 和有限候选执行一次模型决策。 */
-  decide(invocation: { traceId: string; runId: string; request: DecisionRequest; behaviorContext?: BehaviorContext }): Promise<ModelGatewayResult<DecisionResult>>;
+  decide(invocation: { traceId: string; runId: string; request: DecisionRequest; behaviorContext?: BehaviorContext; recentMessages?: Array<{ role: string; text: string }> }): Promise<ModelGatewayResult<DecisionResult>>;
 };
 
 /** 授权回调当前正在验证的阶段和不可变宿主记录。 */
@@ -59,6 +59,8 @@ export type RouteRequest = {
   behaviorContext?: BehaviorContext;
   /** 当前用户问题，和结构化上下文分开传递给决策模型。 */
   currentMessage?: string;
+  /** 当前会话的有界原文窗口，仅供模型理解，不参与规则授权。 */
+  recentMessages?: Array<{ role: string; text: string }>;
   /** 当前租户边界。 */
   tenantId: string;
   /** 当前 actor 边界。 */
@@ -154,7 +156,7 @@ export class TwoStageRouter {
     // Function 未形成可执行选择时，异步模型和同步 provider 一样不能启动 Plugin。
     if (functionEvaluation.status !== 'matched') return evaluationResult('function', functionEvaluation);
     const functionRequest = decisionRequest('function.select', functionEvaluation);
-    const functionDecision = await safeAsyncDecision(request.functionDecisionAdapter, request.traceId, request.runId, functionRequest, request.behaviorContext, request.currentMessage);
+    const functionDecision = await safeAsyncDecision(request.functionDecisionAdapter, request.traceId, request.runId, functionRequest, request.behaviorContext, request.currentMessage, request.recentMessages);
     if (functionDecision.status !== 'choice' || !functionDecision.choice) return decisionResult('function', functionEvaluation, functionDecision);
     return this.routePluginAsync(request, functionEvaluation, functionDecision);
   }
@@ -191,7 +193,7 @@ export class TwoStageRouter {
     // Plugin 候选为空时保持同步路由的 fail-closed 语义。
     if (pluginEvaluation.status !== 'matched') return { ...evaluationResult('plugin', pluginEvaluation), functionId, functionEvaluation, functionDecision, pluginEvaluation };
     const pluginRequest = decisionRequest('plugin.select', pluginEvaluation);
-    const pluginDecision = await safeAsyncDecision(request.pluginDecisionAdapter, request.traceId, request.runId, pluginRequest, request.behaviorContext, request.currentMessage);
+    const pluginDecision = await safeAsyncDecision(request.pluginDecisionAdapter, request.traceId, request.runId, pluginRequest, request.behaviorContext, request.currentMessage, request.recentMessages);
     if (pluginDecision.status !== 'choice' || !pluginDecision.choice) return { status: routeStatus(pluginDecision.status), reasonCode: `plugin_${pluginDecision.status}`, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision };
     return finalizePluginRoute({ request, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision });
   }
@@ -220,7 +222,8 @@ export class PluginFirstRouter {
       request.runId,
       decisionRequest('plugin.select', pluginEvaluation, records),
       request.behaviorContext,
-      request.currentMessage
+      request.currentMessage,
+      request.recentMessages
     );
     if (pluginDecision.status !== 'choice' || !pluginDecision.choice) {
       return { status: routeStatus(pluginDecision.status), reasonCode: `plugin_${pluginDecision.status}`, pluginEvaluation, pluginDecision };
@@ -238,7 +241,8 @@ export class PluginFirstRouter {
       request.runId,
       decisionRequest('function.select', functionEvaluation),
       request.behaviorContext,
-      request.currentMessage
+      request.currentMessage,
+      request.recentMessages
     );
     if (functionDecision.status !== 'choice' || functionDecision.choice !== functionId) {
       return { status: routeStatus(functionDecision.status), reasonCode: `function_${functionDecision.status}`, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision };
@@ -366,9 +370,9 @@ function decisionRequest(decisionType: DecisionRequest['decisionType'], evaluati
 }
 
 /** 解包 UnifiedDecisionAdapter 结果；模型 gateway 失败收敛为既有 provider_failed 决策，不暴露 provider 错误。 @param adapter - 异步决策适配器 @param traceId - 链路标识 @param runId - 运行标识 @param request - 有限候选请求 @returns 稳定 DecisionResult @author lvdaxianer@yeah.net @date 2026-10-17 */
-async function safeAsyncDecision(adapter: AsyncDecisionAdapter, traceId: string, runId: string, request: DecisionRequest, behaviorContext?: BehaviorContext, currentMessage?: string): Promise<DecisionResult> {
+async function safeAsyncDecision(adapter: AsyncDecisionAdapter, traceId: string, runId: string, request: DecisionRequest, behaviorContext?: BehaviorContext, currentMessage?: string, recentMessages?: Array<{ role: string; text: string }>): Promise<DecisionResult> {
   try {
-    const result = await adapter.decide({ traceId, runId, request, ...(currentMessage === undefined ? {} : { currentMessage }), ...(behaviorContext === undefined ? {} : { behaviorContext }) });
+    const result = await adapter.decide({ traceId, runId, request, ...(currentMessage === undefined ? {} : { currentMessage }), ...(behaviorContext === undefined ? {} : { behaviorContext }), ...(recentMessages === undefined ? {} : { recentMessages }) });
     return result.ok ? result.value : providerFailureResult(request);
   } catch {
     // 适配器异常不能绕过路由的 DecisionResult 边界或进入公开错误正文。

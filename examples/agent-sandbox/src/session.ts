@@ -72,6 +72,7 @@ export class IarSandboxSession extends SandboxSessionCore {
       get recentMessages() { return session.recentMessages; },
       get recentMessageLimit() { return session.recentMessageLimit; },
       get recentMessageMaxChars() { return session.recentMessageMaxChars; },
+      get functionDescriptors() { return session.pluginHost.descriptors(); },
       get compactCount() { return session.compactCount; },
       set compactCount(value) { session.compactCount = value; }
     });
@@ -96,6 +97,7 @@ export class IarSandboxSession extends SandboxSessionCore {
       nextTraceId: () => { this.turnCount += 1; return resolveSandboxTraceId(`trace-sandbox-${String(this.turnCount)}`); },
       extractFrame: (traceId, runId, text, behaviorContext, recentMessages) => this.routing.extractFrame(traceId, runId, text, behaviorContext, recentMessages),
       get recentMessages() { return session.recentMessages; },
+      get functionDescriptors() { return session.pluginHost.descriptors(); },
       routeFrame: (traceId, runId, frame, behaviorContext, currentMessage) => this.routing.routeFrame(traceId, runId, frame, behaviorContext, currentMessage),
       prepareAndExecute: (context) => this.routing.prepareAndExecute(context),
       fallbackReplyStreamed: (context, onDelta) => this.replies.fallbackReplyStreamed(context, onDelta),
@@ -174,7 +176,7 @@ export class IarSandboxSession extends SandboxSessionCore {
   protected async finishNormalFallback(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; evidence: RouteEvidence }): Promise<TurnResult> {
     const { userText, traceId, behaviorContext, evidence } = context;
     // 未命中功能时只允许生成澄清回复，不能在兜底阶段隐式执行插件。
-    const reply = await trackModelResponseLimit(() => this.replies.fallbackReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext, recentMessages: this.recentMessages, reasonCode: evidence.reasonCode })).catch((error: unknown) => {
+    const reply = await trackModelResponseLimit(() => this.replies.fallbackReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext, recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), reasonCode: evidence.reasonCode })).catch((error: unknown) => {
       // 非超限错误必须继续向调用方传播。
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
@@ -218,7 +220,7 @@ export class IarSandboxSession extends SandboxSessionCore {
   protected async finishNormalExecution(context: { userText: string; traceId: string; evidence: RouteEvidence; outcome: Extract<ExecuteTurnOutcome, { status: 'executed' }> }): Promise<TurnResult> {
     const { userText, traceId, evidence, outcome } = context;
     // 动作已经落地后，模型回复失败也必须保留 executed 事实，禁止重试动作。
-    const reply = await trackModelResponseLimit(() => this.replies.generateReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: this.projector.current(), recentMessages: this.recentMessages, action: outcome.action, actionResult: outcome.actionResult })).catch((error: unknown) => {
+    const reply = await trackModelResponseLimit(() => this.replies.generateReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: this.projector.current(), recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), action: outcome.action, actionResult: outcome.actionResult })).catch((error: unknown) => {
       // 非超限错误保持原有传播方式。
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
@@ -296,7 +298,7 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
   protected async finishConfirmedAction(action: ActionDefinition, actionResult: ActionResult): Promise<ConfirmResult> {
-    const reply = await trackModelResponseLimit(() => this.replies.generateReply({ traceId: resolveSandboxTraceId(`trace-sandbox-confirm-${String(this.turnCount)}`), runId: action.runId, userText: '（确认执行）', behaviorContext: this.projector.current(), recentMessages: this.recentMessages, action, actionResult })).catch((error: unknown) => {
+    const reply = await trackModelResponseLimit(() => this.replies.generateReply({ traceId: resolveSandboxTraceId(`trace-sandbox-confirm-${String(this.turnCount)}`), runId: action.runId, userText: '（确认执行）', behaviorContext: this.projector.current(), recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), action, actionResult })).catch((error: unknown) => {
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
     });

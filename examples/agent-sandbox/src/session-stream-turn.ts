@@ -4,6 +4,7 @@ import { buildEvidence, summarizeAction } from './session-helpers.js';
 import type { ActionDefinition, ActionResult, BehaviorContext } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/decision';
 import type { RouteResult } from '@iar/runtime';
+import type { PluginDescriptor } from '@iar/plugin-host';
 import type { ExecuteTurnOutcome, ExtractFrameOutcome, RouteEvidence, StreamEvent, TurnResult } from './session-types.js';
 
 /** 流式编排所需的会话能力，状态和资源仍由宿主唯一持有。 */
@@ -16,11 +17,13 @@ export type StreamTurnContext = {
   extractFrame: (traceId: string, runId: string, text: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>) => Promise<ExtractFrameOutcome>;
   /** 当前会话的有界原文窗口，普通与流式入口必须读取同一份状态。 */
   recentMessages: Array<{ role: string; text: string }>;
+  /** 当前启用 Plugin 的动态能力描述。 */
+  functionDescriptors: PluginDescriptor[];
   routeFrame: (traceId: string, runId: string, frame: SemanticFrame, behaviorContext: BehaviorContext, currentMessage: string) => Promise<RouteResult>;
   prepareAndExecute: (context: { runId: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext }) => Promise<ExecuteTurnOutcome>;
   /** 兜底与执行后回复分别保留增量回调和超限错误。 */
-  fallbackReplyStreamed: (context: { traceId: string; runId: string; userText: string; reasonCode: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }> }, onDelta: (delta: string) => void) => Promise<string>;
-  generateReplyStreamed: (context: { traceId: string; runId: string; userText: string; action: ActionDefinition; actionResult: ActionResult; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }> }, onDelta: (delta: string) => void) => Promise<string>;
+  fallbackReplyStreamed: (context: { traceId: string; runId: string; userText: string; reasonCode: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[] }, onDelta: (delta: string) => void) => Promise<string>;
+  generateReplyStreamed: (context: { traceId: string; runId: string; userText: string; action: ActionDefinition; actionResult: ActionResult; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[] }, onDelta: (delta: string) => void) => Promise<string>;
   currentBehaviorContext: () => BehaviorContext;
   /** 仅完整回复可写入宿主持有的历史。 */
   pushMessages: (userText: string, reply: string) => void;
@@ -113,7 +116,7 @@ export class SandboxSessionStreamTurn {
    */
   protected async finishStreamFallback(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; evidence: RouteEvidence }): Promise<TurnResult> {
     const { userText, traceId, emit, behaviorContext, evidence } = context;
-    const reply = await trackModelResponseLimit(() => this.context.fallbackReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext, recentMessages: this.context.recentMessages, reasonCode: evidence.reasonCode }, (delta) => emit({ type: 'delta', text: delta }))).catch((error: unknown) => {
+    const reply = await trackModelResponseLimit(() => this.context.fallbackReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext, recentMessages: this.context.recentMessages, functionDescriptors: this.context.functionDescriptors, reasonCode: evidence.reasonCode }, (delta) => emit({ type: 'delta', text: delta }))).catch((error: unknown) => {
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
     });
@@ -151,7 +154,7 @@ export class SandboxSessionStreamTurn {
   protected async finishStreamExecution(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; evidence: RouteEvidence; outcome: Extract<ExecuteTurnOutcome, { status: 'executed' }> }): Promise<TurnResult> {
     const { userText, traceId, emit, evidence, outcome } = context;
     emit({ type: 'stage', stage: 'response' });
-    const reply = await trackModelResponseLimit(() => this.context.generateReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, action: outcome.action, actionResult: outcome.actionResult, behaviorContext: this.context.currentBehaviorContext(), recentMessages: this.context.recentMessages }, (delta) => emit({ type: 'delta', text: delta }))).catch((error: unknown) => {
+    const reply = await trackModelResponseLimit(() => this.context.generateReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, action: outcome.action, actionResult: outcome.actionResult, behaviorContext: this.context.currentBehaviorContext(), recentMessages: this.context.recentMessages, functionDescriptors: this.context.functionDescriptors }, (delta) => emit({ type: 'delta', text: delta }))).catch((error: unknown) => {
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
     });

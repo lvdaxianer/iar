@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import type { ActionDefinition, ActionResult, BehaviorContext, JsonValue, PendingInput } from '@iar/contracts';
 import { ResponseGeneratorAdapter, type ClarificationMetadata, type ModelGateway, type ModelProfileRegistry } from '@iar/decision';
 import type { SessionMessage } from '@iar/persistence-spi';
-import { sandboxFunctionIds } from './functions/index.js';
+import type { PluginDescriptor } from '@iar/plugin-host';
 import { OpenAICompatibleModelProvider, type BrainModelProvider } from './models/llm-provider.js';
 import type { ScriptedModelProvider } from './models/scripted-provider.js';
 import { SandboxSessionCompaction, type CompactionContext } from './session-compaction.js';
@@ -18,7 +18,7 @@ import { streamModelReply } from './session-model-stream.js';
  * traceId 与 runId 继承当前轮次，不创建新的会话身份。
  * 所有回复路径共享同一个输入形状，避免普通和流式入口漂移。
  */
-type ReplyContext = { traceId: string; runId: string; userText: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }> };
+type ReplyContext = { traceId: string; runId: string; userText: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[] };
 type FallbackContext = ReplyContext & { reasonCode: string };
 type ActionReplyContext = ReplyContext & { action: ActionDefinition; actionResult: ActionResult };
 
@@ -32,6 +32,8 @@ export type SessionRepliesContext = CompactionContext & {
   recentMessageLimit: number;
   /** 当前会话允许提供给模型的单条原文字符上限。 */
   recentMessageMaxChars: number;
+  /** 当前启用 Plugin 的动态能力描述。 */
+  functionDescriptors: PluginDescriptor[];
   updateClarification: (pending: PendingInput) => Promise<void>;
   /** 将完整消息发布给会话持久化 Hook；未配置 Provider 时为空操作。 */
   recordMessage?: (message: SessionMessage) => void;
@@ -71,7 +73,7 @@ export class SandboxSessionReplies {
    * @date 2026-10-18
    */
   public async fallbackReply(context: FallbackContext): Promise<string> {
-    const { traceId, runId, userText, behaviorContext, recentMessages, reasonCode } = context;
+    const { traceId, runId, userText, behaviorContext, recentMessages, functionDescriptors, reasonCode } = context;
     if (this.context.mode === 'brain') {
       const generated = await new ResponseGeneratorAdapter(this.context.gateway).generate({
         traceId,
@@ -80,7 +82,8 @@ export class SandboxSessionReplies {
           userMessage: userText,
           behaviorContext,
           recentMessages,
-          availableFunctions: [...sandboxFunctionIds],
+          availableFunctions: functionDescriptors,
+          functionDescriptors,
           reasonCode
         }
       });
@@ -116,7 +119,7 @@ export class SandboxSessionReplies {
    * @date 2026-10-18
    */
   public async fallbackReplyStreamed(context: FallbackContext, onDelta: (delta: string) => void): Promise<string> {
-    const { traceId, runId, userText, behaviorContext, recentMessages, reasonCode } = context;
+    const { traceId, runId, userText, behaviorContext, recentMessages, functionDescriptors, reasonCode } = context;
     if (this.context.mode !== 'brain' || !(this.context.brainProvider instanceof OpenAICompatibleModelProvider)) {
       const reply = await this.fallbackReply(context);
       onDelta(reply);
@@ -126,7 +129,8 @@ export class SandboxSessionReplies {
       userMessage: userText,
       behaviorContext,
       recentMessages,
-      availableFunctions: [...sandboxFunctionIds],
+      availableFunctions: functionDescriptors,
+      functionDescriptors,
       reasonCode
     };
     const fallback = () => this.fallbackReply(context);
@@ -182,7 +186,7 @@ export class SandboxSessionReplies {
    * @date 2026-10-18
    */
   public async generateReplyStreamed(context: ActionReplyContext, onDelta: (delta: string) => void): Promise<string> {
-    const { traceId, runId, userText, behaviorContext, recentMessages, action, actionResult } = context;
+    const { traceId, runId, userText, behaviorContext, recentMessages, functionDescriptors, action, actionResult } = context;
     if (this.context.mode !== 'brain' || !(this.context.brainProvider instanceof OpenAICompatibleModelProvider)) {
       const reply = await this.generateReply(context);
       onDelta(reply);
@@ -195,7 +199,8 @@ export class SandboxSessionReplies {
       actionStatus: actionResult.status,
       actionOutput: actionResult.output ?? null,
       behaviorContext,
-      recentMessages
+      recentMessages,
+      functionDescriptors
     };
     return streamModelReply({ provider: this.context.brainProvider, profile: this.context.registry.forRole('response.generate'), traceId, runId, input, onDelta, onClarification: (clarification) => this.persistClarification(behaviorContext, clarification),
       onInvalid: async () => `动作已执行（${action.functionId}），但回复生成失败（model.schema_invalid）。`, onFailure: () => this.generateReply(context) });
@@ -213,7 +218,7 @@ export class SandboxSessionReplies {
    * @date 2026-10-17
    */
   public async generateReply(context: ActionReplyContext): Promise<string> {
-    const { traceId, runId, userText, behaviorContext, recentMessages, action, actionResult } = context;
+    const { traceId, runId, userText, behaviorContext, recentMessages, functionDescriptors, action, actionResult } = context;
     const generated = await new ResponseGeneratorAdapter(this.context.gateway).generate({
       traceId,
       runId,
@@ -224,7 +229,8 @@ export class SandboxSessionReplies {
         actionStatus: actionResult.status,
         actionOutput: actionResult.output ?? null,
         behaviorContext,
-        recentMessages
+        recentMessages,
+        functionDescriptors
       }
     });
     if (!generated.ok) return `动作已执行（${action.functionId}），但回复生成失败（${generated.error.code}）。`;

@@ -6,6 +6,7 @@
  */
 import {
   ERROR_CODES,
+  MAX_ROUTING_SCOPE_PLUGINS,
   type ContractErrorResult,
   type EventEnvelope,
   type PluginManifest
@@ -16,7 +17,7 @@ import { PluginEventLog } from './plugin-events.js';
 import { createRecord, pluginIdOf, prepareInstall, validateInstallSet, type InstallPreparation } from './plugin-installation.js';
 import { canTransition, findActiveDependent, findDependent, findUnavailableDependency } from './plugin-lifecycle.js';
 import { cloneManifest, cloneRecord, hostError } from './plugin-host-support.js';
-import type { PluginHostOptions, PluginHostResult, PluginRecord } from './types.js';
+import type { PluginDescriptor, PluginDescriptorOptions, PluginHostOptions, PluginHostResult, PluginRecord } from './types.js';
 /**
  * 管理当前插件能力和不可变生命周期事件。
  *
@@ -232,6 +233,15 @@ export class PluginHost {
       .sort((left, right) => compareStableIds(left.manifest.pluginId, right.manifest.pluginId))
       .map(cloneRecord);
   }
+
+  /** 投影当前启用且通过调用方授权的通用 Plugin 描述。 */
+  public descriptors(options: PluginDescriptorOptions = {}): PluginDescriptor[] {
+    const authorize = options.authorize ?? (() => true);
+    return this.businessCandidates()
+      .filter((record) => authorize(record))
+      .slice(0, MAX_ROUTING_SCOPE_PLUGINS)
+      .map((record) => descriptorOf(record));
+  }
   /**
    * 解析单个候选并为 Function 归属失败留下可审计错误。
    *
@@ -355,4 +365,27 @@ export class PluginHost {
     return { ok: false, error };
   }
 
+}
+
+/** 从宿主记录构造不包含执行 Handler 的模型描述。 */
+function descriptorOf(record: PluginRecord): PluginDescriptor {
+  if (record.manifest.pluginKind !== 'function') throw new Error('系统插件不能形成业务描述');
+  const actionTypes = [...record.manifest.actionTypes];
+  const capabilities = [...record.manifest.capabilities];
+  return {
+    candidateKey: opaqueCandidateKey(record.manifest.functionId, record.manifest.pluginId),
+    functionId: record.manifest.functionId,
+    pluginId: record.manifest.pluginId,
+    description: record.manifest.description,
+    actionTypes,
+    capabilities,
+    operationMetadata: { actionTypes: [...actionTypes], capabilities: [...capabilities], riskLevel: record.manifest.policy.riskLevel, requiresConfirmation: record.manifest.policy.requiresConfirmation }
+  };
+}
+
+/** 生成不暴露业务 ID 的稳定候选键，重启后仍可重建同一映射。 */
+function opaqueCandidateKey(functionId: string, pluginId: string): string {
+  let hash = 2166136261;
+  for (const char of `${functionId}\u0000${pluginId}`) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+  return `candidate-${(hash >>> 0).toString(36)}`;
 }
