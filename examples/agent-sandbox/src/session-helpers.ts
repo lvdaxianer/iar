@@ -124,12 +124,14 @@ function chooseCompatibleOperation(operations: readonly PluginOperation[], rawOp
  * @date 2026-10-19
  */
 function inheritFactParams(functionId: string, params: Record<string, string> | undefined, behaviorContext: BehaviorContext | undefined): Record<string, string> | undefined {
-  const facts = behaviorContext?.facts;
-  if (!facts) return params;
   const inherited = { ...(params ?? {}) };
-  for (const fact of Object.values(facts)) {
-    if (fact.status !== 'verified' || fact.functionId !== functionId || typeof fact.field !== 'string' || inherited[fact.field]) continue;
-    if (typeof fact.value === 'string' && fact.value.length > 0) inherited[fact.field] = fact.value;
+  const records = behaviorContext?.factHistory?.records ?? [];
+  for (const record of [...records].reverse()) {
+    if (record.functionId !== functionId) continue;
+    for (const [field, value] of Object.entries(record.values)) {
+      if (inherited[field] || typeof value !== 'string' || value.length === 0) continue;
+      inherited[field] = value;
+    }
   }
   return Object.keys(inherited).length > 0 ? inherited : undefined;
 }

@@ -104,6 +104,7 @@ export class IarSandboxSession extends SandboxSessionCore {
       get recentMessages() { return session.recentMessages; },
       get functionDescriptors() { return session.pluginHost.descriptors(); },
       routeFrame: (traceId, runId, frame, behaviorContext, currentMessage, recentMessages, selectedDescriptor) => this.routing.routeFrame(traceId, runId, frame, behaviorContext, currentMessage, recentMessages, selectedDescriptor),
+      resolveReferences: (frame, behaviorContext) => this.routing.resolveReferences(frame, behaviorContext),
       prepareAndExecute: (context) => this.routing.prepareAndExecute(context),
       fallbackReplyStreamed: (context, onDelta) => this.replies.fallbackReplyStreamed(context, onDelta),
       generateReplyStreamed: (context, onDelta) => this.replies.generateReplyStreamed(context, onDelta),
@@ -159,12 +160,14 @@ export class IarSandboxSession extends SandboxSessionCore {
    */
   protected async routeNormalTurn(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }>; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
     const { userText, traceId, behaviorContext, extracted, selectedDescriptor } = context;
+    const references = this.routing.resolveReferences(extracted.frame, behaviorContext);
+    if (!references.ok) return this.finishNormalFallback({ userText, traceId, behaviorContext, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: extracted.frame.intent, semanticConfidence: extracted.frame.confidence } });
     const route = await this.routing.routeFrame(traceId, SESSION_RUN_ID, extracted.frame, behaviorContext, userText, this.recentMessages, selectedDescriptor);
     const evidence = buildEvidence(route, extracted.frame);
     // 抽取降级须保留在返回的路由证据中。
     if (extracted.semanticFallback) evidence.semanticFallback = true;
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
-      return this.finishNormalFallback({ userText, traceId, behaviorContext, evidence });
+      return this.finishNormalFallback({ userText, traceId, behaviorContext, evidence, resolvedReferences: references.references });
     }
     const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame: extracted.frame, route, behaviorContext });
     return this.finishNormalOutcome({ userText, traceId, evidence, outcome });
@@ -177,12 +180,12 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected async finishNormalFallback(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; evidence: RouteEvidence }): Promise<TurnResult> {
-    const { userText, traceId, behaviorContext, evidence } = context;
+  protected async finishNormalFallback(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; evidence: RouteEvidence; resolvedReferences?: import('./session-types.js').ResolvedFactReference[] }): Promise<TurnResult> {
+    const { userText, traceId, behaviorContext, evidence, resolvedReferences } = context;
     if (!hasVerifiedFactsForFollowUp(behaviorContext, evidence) && !matchesPendingOption(behaviorContext, userText)) await this.markUnresolved(evidence.reasonCode);
     const currentBehaviorContext = this.projector.current();
     // 未命中功能时只允许生成澄清回复，不能在兜底阶段隐式执行插件。
-    const reply = await trackModelResponseLimit(() => this.replies.fallbackReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: currentBehaviorContext, recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), reasonCode: evidence.reasonCode })).catch((error: unknown) => {
+    const reply = await trackModelResponseLimit(() => this.replies.fallbackReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: currentBehaviorContext, recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), reasonCode: evidence.reasonCode, ...(resolvedReferences === undefined ? {} : { resolvedReferences }) })).catch((error: unknown) => {
       // 非超限错误必须继续向调用方传播。
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;

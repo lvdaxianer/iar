@@ -3,7 +3,7 @@
  *
  * 该 provider 通过内置 fetch 调用 OpenAI 兼容的 chat/completions 接口，
  * 按 request.profile.role 分支构造结构化输出提示词：
- * semantic.extract 抽取 iar.semantic-frame/v1，
+ * semantic.extract 抽取 iar.semantic-frame/v2（兼容旧版 v1），
  * context.compact 生成 iar.compaction-result/v1，
  * response.generate 生成 iar.response/v1。
  * 解析失败或缺 key 时抛出 ModelProviderError，交由 ModelGateway 走 fallback。

@@ -9,7 +9,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { ActionDefinition, ActionResult, BehaviorContext, EventEnvelope, JsonValue } from '@iar/contracts';
+import type { ActionDefinition, ActionResult, BehaviorContext, EventEnvelope, JsonValue, VerifiedFactRecord } from '@iar/contracts';
 import type { DecisionBackend, SemanticFrame } from '@iar/decision';
 
 /** sandbox 模式：brain 使用真实 LLM，scripted 使用离线假大脑。 */
@@ -79,6 +79,12 @@ export type StreamEvent =
 export type ExtractFrameOutcome =
   | { ok: true; frame: SemanticFrame; semanticFallback: boolean }
   | { ok: false; route: RouteEvidence; reasonCode: string; reply: string };
+
+/** 运行时解析出的历史引用，供回复模型读取已验证的单条事实。 */
+export type ResolvedFactReference = {
+  text: string;
+  record: VerifiedFactRecord;
+};
 
 /** 单轮执行阶段的内部结果联合。 */
 export type ExecuteTurnOutcome =

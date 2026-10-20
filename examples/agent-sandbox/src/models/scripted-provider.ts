@@ -49,7 +49,7 @@ export class ScriptedModelProvider implements ModelProvider {
    * 或子操作关键词时给出，缺省时由 handler 端推断默认 read 操作。
    *
    * @param text - 用户输入文本
-   * @returns iar.semantic-frame/v1 结构
+   * @returns iar.semantic-frame/v2 或兼容 v1 的结构
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
@@ -57,7 +57,7 @@ export class ScriptedModelProvider implements ModelProvider {
     const trimmed = text.trim();
     if (trimmed.length === 0) return frame('unknown', {}, 0.1, 'unknown');
     // 已有可信事实的追问优先交给通用回复模型，不能因业务名词重复触发默认动作。
-    if (hasVerifiedFacts(behaviorContext) && isFactFollowUp(trimmed) && !isExplicitNewOperation(trimmed)) return frame('unknown', {}, 0.95, 'query');
+    if (hasVerifiedFacts(behaviorContext) && isFactFollowUp(trimmed) && !isExplicitNewOperation(trimmed)) return frame('unknown', {}, 0.95, 'query', historicalReference(trimmed));
     // howTo 用于区分「如何/怎么/怎样」类咨询与真正的动作请求。
     const howTo = /(如何|怎么|怎样)/.test(trimmed);
     // 人工优先于工单和查询，避免“转人工查问题”被误判。
@@ -173,13 +173,13 @@ export class ScriptedModelProvider implements ModelProvider {
 
 /** 判断结构化上下文中是否存在可供追问使用的 verified 事实。 */
 function hasVerifiedFacts(context: Record<string, unknown>): boolean {
-  const facts = context.facts;
-  return typeof facts === 'object' && facts !== null && !Array.isArray(facts) && Object.values(facts).some((fact) => isRecord(fact) && fact.status === 'verified');
+  const history = context.factHistory;
+  return isRecord(history) && Array.isArray(history.records) && history.records.length > 0;
 }
 
 /** 判断用户是否在追问已有结果，而非表达新副作用。 */
 function isFactFollowUp(text: string): boolean {
-  return /刚才|之前|上次|前面|这个|该|那条|编号|单号|结果|进度|状态|多少|哪个|第几个|第几位|哪一位|什么位置|位次/.test(text);
+  return /刚才|之前|上次|前面|上一个|前一个|当前|这个|该|那条|编号|单号|结果|进度|状态|多少|哪个|第几个|第几位|哪一位|什么位置|位次/.test(text);
 }
 
 /** 判断当前句子是否明确要求重新执行一个新操作。 */
@@ -193,14 +193,23 @@ function isExplicitNewOperation(text: string): boolean {
  * @param intent - 结构化意图
  * @param slots - 抽取到的槽位
  * @param confidence - 模型置信度
- * @returns iar.semantic-frame/v1 结构
+ * @returns iar.semantic-frame/v2 或兼容 v1 的结构
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
 type ScriptedAction = 'query' | 'create' | 'update' | 'delete' | 'transfer' | 'execute' | 'unknown';
 
-function frame(intent: string, slots: Record<string, JsonValue>, confidence: number, action?: ScriptedAction): unknown {
-  return { schemaVersion: 'iar.semantic-frame/v1', intent, action: action ?? inferAction(intent, slots), slots, references: [], confidence };
+function frame(intent: string, slots: Record<string, JsonValue>, confidence: number, action?: ScriptedAction, references: Array<Record<string, JsonValue>> = []): unknown {
+  return { schemaVersion: references.length > 0 ? 'iar.semantic-frame/v2' : 'iar.semantic-frame/v1', intent, action: action ?? inferAction(intent, slots), slots, references, confidence };
+}
+
+/** 将自然语言顺序词归一化为不透明事实链关系。 */
+function historicalReference(text: string): Array<Record<string, JsonValue>> {
+  if (/上一个|前一个|上一条|前一条|上次/.test(text)) return [{ text, relation: 'previous', scope: 'same_fact_chain' }];
+  if (/下一个|后一个|下一条|后一次/.test(text)) return [{ text, relation: 'next', scope: 'same_fact_chain' }];
+  if (/第一个|第一条|最早/.test(text)) return [{ text, relation: 'first', scope: 'same_fact_chain' }];
+  if (/最后一个|最后一条|最近一个/.test(text)) return [{ text, relation: 'last', scope: 'same_fact_chain' }];
+  return [{ text, relation: 'current', scope: 'same_fact_chain' }];
 }
 
 /** 离线 provider 只模拟固定动作协议，不把业务词映射写入运行时路由。 */

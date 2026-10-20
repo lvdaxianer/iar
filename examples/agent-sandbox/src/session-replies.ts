@@ -10,7 +10,7 @@ import type { PluginDescriptor } from '@iar/plugin-host';
 import { OpenAICompatibleModelProvider, type BrainModelProvider } from './models/llm-provider.js';
 import type { ScriptedModelProvider } from './models/scripted-provider.js';
 import { SandboxSessionCompaction, type CompactionContext } from './session-compaction.js';
-import type { CompactResult, SandboxMode } from './session-types.js';
+import type { CompactResult, ResolvedFactReference, SandboxMode } from './session-types.js';
 import { FALLBACK_REPLY_TEXT } from './session-core.js';
 import { streamModelReply } from './session-model-stream.js';
 
@@ -19,7 +19,7 @@ import { streamModelReply } from './session-model-stream.js';
  * 所有回复路径共享同一个输入形状，避免普通和流式入口漂移。
  */
 type ReplyContext = { traceId: string; runId: string; userText: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[] };
-type FallbackContext = ReplyContext & { reasonCode: string };
+type FallbackContext = ReplyContext & { reasonCode: string; resolvedReferences?: ResolvedFactReference[] };
 type ActionReplyContext = ReplyContext & { action: ActionDefinition; actionResult: ActionResult };
 
 /** 回复及压缩只访问宿主状态，重置后所有访问器指向当前会话。 */
@@ -73,7 +73,7 @@ export class SandboxSessionReplies {
    * @date 2026-10-18
    */
   public async fallbackReply(context: FallbackContext): Promise<string> {
-    const { traceId, runId, userText, behaviorContext, recentMessages, functionDescriptors, reasonCode } = context;
+    const { traceId, runId, userText, behaviorContext, recentMessages, functionDescriptors, reasonCode, resolvedReferences } = context;
     if (this.context.mode === 'brain') {
       const generated = await new ResponseGeneratorAdapter(this.context.gateway).generate({
         traceId,
@@ -84,7 +84,8 @@ export class SandboxSessionReplies {
           recentMessages,
           availableFunctions: functionDescriptors,
           functionDescriptors,
-          reasonCode
+          reasonCode,
+          ...(resolvedReferences === undefined ? {} : { resolvedReferences })
         }
       });
       // 只有生成失败才回退固定话术。
@@ -94,7 +95,7 @@ export class SandboxSessionReplies {
       }
       return FALLBACK_REPLY_TEXT;
     }
-    const scripted = this.scriptedFallbackResponse(userText, behaviorContext, functionDescriptors);
+    const scripted = this.scriptedFallbackResponse(userText, behaviorContext, functionDescriptors, resolvedReferences, reasonCode);
     await this.persistClarification(behaviorContext, scripted?.clarification);
     return scripted?.text ?? FALLBACK_REPLY_TEXT;
   }
@@ -120,7 +121,7 @@ export class SandboxSessionReplies {
    * @date 2026-10-18
    */
   public async fallbackReplyStreamed(context: FallbackContext, onDelta: (delta: string) => void): Promise<string> {
-    const { traceId, runId, userText, behaviorContext, recentMessages, functionDescriptors, reasonCode } = context;
+    const { traceId, runId, userText, behaviorContext, recentMessages, functionDescriptors, reasonCode, resolvedReferences } = context;
     if (this.context.mode !== 'brain' || !(this.context.brainProvider instanceof OpenAICompatibleModelProvider)) {
       const reply = await this.fallbackReply(context);
       onDelta(reply);
@@ -132,7 +133,8 @@ export class SandboxSessionReplies {
       recentMessages,
       availableFunctions: functionDescriptors,
       functionDescriptors,
-      reasonCode
+      reasonCode,
+      ...(resolvedReferences === undefined ? {} : { resolvedReferences })
     };
     const fallback = () => this.fallbackReply(context);
     return streamModelReply({ provider: this.context.brainProvider, profile: this.context.registry.forRole('response.generate'), traceId, runId, input, onDelta, onClarification: (clarification) => this.persistClarification(behaviorContext, clarification), onInvalid: fallback, onFailure: fallback });
@@ -152,7 +154,7 @@ export class SandboxSessionReplies {
   }
 
   /** 离线模型的通用结构化上下文兜底，不按业务关键词解释事实。 */
-  protected scriptedFallbackResponse(userText: string, behaviorContext: BehaviorContext, functionDescriptors: PluginDescriptor[] = this.context.functionDescriptors): ScriptedReply | undefined {
+  protected scriptedFallbackResponse(userText: string, behaviorContext: BehaviorContext, functionDescriptors: PluginDescriptor[] = this.context.functionDescriptors, resolvedReferences: ResolvedFactReference[] = [], reasonCode = 'unknown'): ScriptedReply | undefined {
     const text = userText.trim();
     const pending = behaviorContext.pending;
     if (pending.status === 'required' && pending.kind === 'selection' && pending.options && text.length <= 60) {
@@ -160,8 +162,8 @@ export class SandboxSessionReplies {
       if (selected) return { text: `已记录你的选择「${selected.label}」。如果还需要继续处理，请告诉我下一步需求。` };
     }
     if (isFactFollowUp(text)) {
-      const facts = Object.values(behaviorContext.facts ?? {}).filter((fact) => fact.status === 'verified');
-      if (facts.length > 0) return { text: `根据当前会话已确认的信息：${facts.map((fact) => `${fact.field}=${String(fact.value ?? '空')}`).join('、')}。` };
+      const records = resolvedReferences.length > 0 ? resolvedReferences.map((item) => item.record) : reasonCode === 'reference_unresolved' ? [] : currentFactRecords(behaviorContext);
+      if (records.length > 0) return { text: `根据当前会话已确认的信息：${records.flatMap((record) => Object.entries(record.values).map(([field, value]) => `${field}=${String(value ?? '空')}`)).join('、')}。` };
       return { text: '当前会话没有足够的已确认事实。请说明你想查询的对象或需要补充的信息。' };
     }
     if (/(你是谁|你叫什么|自我介绍|你是什么)/.test(text)) {
@@ -285,5 +287,14 @@ function boundMessageText(text: string, maxChars: number): string {
 
 /** 判断用户是否在询问当前会话已经确认的事实，而不是发起新操作。 */
 function isFactFollowUp(text: string): boolean {
-  return /刚才|之前|上次|前面|这个|该|那条|编号|单号|结果|进度|状态|多少|哪个|第几个|第几位|哪一位|排名|排队|位置|位次|顺序/.test(text);
+  return /刚才|之前|上次|前面|上一个|前一个|这个|该|那条|编号|单号|结果|进度|状态|多少|哪个|第几个|第几位|哪一位|排名|排队|位置|位次|顺序/.test(text);
+}
+
+/** 读取当前事实焦点，避免未声明顺序关系时把整条事实链暴露给回复。 */
+function currentFactRecords(context: BehaviorContext): Array<NonNullable<BehaviorContext['factHistory']>['records'][number]> {
+  const history = context.factHistory;
+  if (!history) return [];
+  const focus = history.focusRecordId ? history.records.find((record) => record.recordId === history.focusRecordId) : undefined;
+  const latest = history.records.at(-1);
+  return focus ? [focus] : latest ? [latest] : [];
 }

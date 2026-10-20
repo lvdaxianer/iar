@@ -216,6 +216,23 @@ test('semantic action is normalized to unknown when omitted and rejects dynamic 
   assert.equal(invalid.ok, false);
 });
 
+test('semantic frame accepts generic historical relation references', async () => {
+  const provider: ModelProvider = { complete: async (request) => request.profile.role === 'semantic.extract'
+    ? { schemaVersion: 'iar.semantic-frame/v2', intent: 'historical.lookup', action: 'query', confidence: 0.95, slots: {}, references: [{ text: '上一个', anchorRecordId: 'record-opaque-b', relation: 'previous', scope: 'same_fact_chain' }] }
+    : { schemaVersion: 'iar.response/v1', text: 'ok' } };
+  const result = await new SemanticExtractorAdapter(new ModelGateway({ registry: registry(), providers: { mock: provider } })).extract({ traceId: 'trace-reference', runId: 'run-reference', input: { text: '这个的上一个' } });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.deepEqual(result.value.references[0], { text: '上一个', anchorRecordId: 'record-opaque-b', relation: 'previous', scope: 'same_fact_chain' });
+});
+
+test('semantic frame rejects direct business target values in the new reference contract', async () => {
+  const provider: ModelProvider = { complete: async (request) => request.profile.role === 'semantic.extract'
+    ? { schemaVersion: 'iar.semantic-frame/v2', intent: 'historical.lookup', action: 'query', confidence: 0.95, slots: {}, references: [{ text: '上一个', resolvedTo: 'business-value-001' }] }
+    : { schemaVersion: 'iar.response/v1', text: 'ok' } };
+  const result = await new SemanticExtractorAdapter(new ModelGateway({ registry: registry(), providers: { mock: provider } })).extract({ traceId: 'trace-reference-invalid', runId: 'run-reference-invalid', input: { text: '这个的上一个' } });
+  assert.equal(result.ok, false);
+});
+
 /* timeout、schema invalid 和 provider failure 必须走 retry/fallback 的稳定路径。 */
 test('retries bounded failures and records the fallback profile version', async () => {
   let calls = 0;
