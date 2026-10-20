@@ -8,26 +8,26 @@
 
 ### Requirement: Plugin scope precedes action filtering
 
-The routing layer SHALL resolve an active Plugin scope from the current structured context or a finite Plugin summary catalog before expanding Function candidates. An `actionType` SHALL only filter Functions inside the active Plugin scope or an explicitly selected finite scope.
+The registration model SHALL derive every routable Function scope from an installed Plugin package, while the existing routing protocol SHALL first select a finite Function and then select a Plugin implementation within that Function. An `actionType` SHALL only filter Functions and Plugin candidates inside the current finite routing scope.
 
 #### Scenario: Query does not load every Plugin query Function
 
-- **WHEN** ten Plugins each expose a `query` Function and the model selects one Plugin scope
-- **THEN** the runtime loads only Functions from the selected Plugin scope and does not construct a global query candidate set
+- **WHEN** ten Plugin packages each expose a `query`-compatible Function and the current input has no active Function scope
+- **THEN** the first decision receives the same finite Function candidates derived from registered packages, and no Plugin implementation is selected before the Function decision succeeds
 
 #### Scenario: Unknown domain is clarified
 
-- **WHEN** the current input does not identify a Plugin and no active scope exists
-- **THEN** the runtime asks a clarification question without loading executable Function candidates from every Plugin
+- **WHEN** the current input does not identify a Function and no active scope exists
+- **THEN** the runtime asks a clarification question without selecting a Plugin or expanding executable candidates from unrelated packages
 
 ### Requirement: Function manifests declare fixed action types
 
-Every routable Function manifest SHALL declare a bounded list of fixed action types, and the runtime SHALL reject unknown or malformed action types before candidate construction.
+Every routable Function registration inside a Plugin package SHALL declare a bounded list of fixed action types, and the runtime SHALL reject unknown or malformed action types before candidate construction.
 
 #### Scenario: Action narrows a selected Plugin
 
 - **WHEN** the selected Plugin contains `query`, `create`, and `update` Functions and the decision returns `query`
-- **THEN** only the Plugin's query-compatible Functions are sent to the Function decision stage
+- **THEN** only the Plugin's query-compatible Function registrations continue to the next route stage
 
 ### Requirement: Session routing scope is stateful
 
@@ -36,18 +36,32 @@ The structured session context SHALL preserve the active Plugin, bounded candida
 #### Scenario: Short follow-up keeps the Plugin scope
 
 - **WHEN** a session has active Plugin `human-service` and the user asks “我排第几位”
-- **THEN** routing remains within `human-service` and does not rescan unrelated Plugin Functions
+- **THEN** routing reuses the active Plugin scope and its registered Functions without rescanning unrelated Plugin packages
 
 #### Scenario: Explicit domain switch replaces the scope
 
 - **WHEN** the session is in `human-service` and the user asks to query an order
-- **THEN** the routing scope changes to the order Plugin before Function candidates are expanded
+- **THEN** the Function decision can replace the route scope and the Plugin decision then evaluates only order-related implementations
 
 ### Requirement: Routing decisions remain non-authoritative
 
-Plugin and action decisions SHALL remain finite model recommendations; final registry, authorization, policy, capability, confirmation, and enabled-state checks SHALL still run before execution. System Provider plugins SHALL not enter business routing candidates.
+Plugin and action decisions SHALL remain finite model recommendations; final registry, authorization, policy, capability, confirmation, and enabled-state checks SHALL still run before execution. System Plugin packages SHALL not enter business routing candidates.
 
 #### Scenario: Model cannot grant execution authority
 
-- **WHEN** a model proposes a disabled, unauthorized, or policy-incompatible Function
+- **WHEN** a model proposes a disabled, unauthorized, or policy-incompatible Function or Plugin
 - **THEN** the runtime rejects the proposal before execution and records the stable rejection reason
+
+### Requirement: Plugin packages own Function scope
+
+The runtime SHALL derive Function ownership and Plugin candidate relationships from validated nested registrations rather than from a separate caller-maintained Function ownership list.
+
+#### Scenario: Function routing uses package registrations
+
+- **WHEN** a Plugin package exposes `knowledge.query` and `report.center`
+- **THEN** both Function candidates are derived from that package and Plugin selection for either candidate is restricted to the package's matching registration
+
+#### Scenario: Multiple providers share a Function
+
+- **WHEN** two enabled Plugin packages expose `ticket.query`
+- **THEN** the Function stage retains one bounded Function identity and the Plugin stage receives only those two matching providers
