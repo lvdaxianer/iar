@@ -10,6 +10,7 @@ import test from 'node:test';
 import type { EventEnvelope } from '@iar/contracts';
 import type {
   PersistenceProviderManifest,
+  RecentMessageQuery,
   SessionIdentity,
   SessionMessage,
   SessionPersistenceProvider,
@@ -56,7 +57,7 @@ class RecordingProvider implements SessionPersistenceProvider {
     return structuredClone(this.events);
   }
 
-  public async listMessages(): Promise<SessionMessage[]> {
+  public async listMessages(_sessionId: string, _query?: RecentMessageQuery): Promise<SessionMessage[]> {
     return structuredClone(this.messages);
   }
 

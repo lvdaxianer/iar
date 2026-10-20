@@ -4,6 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-19
  */
+import { MAX_RECENT_MESSAGE_LIMIT } from '@iar/contracts';
 import type { BehaviorContext, EventEnvelope, JsonValue } from '@iar/contracts';
 
 /** 当前 Provider SPI 的版本标识。 */
@@ -11,6 +12,9 @@ export const PERSISTENCE_API_VERSION = 'iar.persistence/v1' as const;
 
 /** Provider 标识和消息边界的最大长度。 */
 export const MAX_PERSISTENCE_ID_LENGTH = 256;
+
+/** 单次最近消息查询允许读取的最大数量。 */
+export const MAX_RECENT_MESSAGE_QUERY_LIMIT = MAX_RECENT_MESSAGE_LIMIT;
 
 /** 会话运行期间跨消息、事件和快照传递的稳定身份。 */
 export type SessionIdentity = {
@@ -39,6 +43,12 @@ export type SessionMessage = {
   occurredAt: string;
   /** 可选的安全结构化摘要，不作为模型指令。 */
   metadata?: JsonValue;
+};
+
+/** 最近消息窗口查询参数，结果按时间顺序返回。 */
+export type RecentMessageQuery = {
+  /** 查询最近消息的数量，零表示返回空窗口。 */
+  limit: number;
 };
 
 /** Provider 宣布的能力和 SPI 版本。 */
@@ -85,7 +95,7 @@ export interface SessionPersistenceProvider {
   /** 读取会话事件，结果按持久化顺序返回。 */
   listEvents(sessionId: string): Promise<EventEnvelope[]>;
   /** 读取会话消息，结果按消息产生顺序返回。 */
-  listMessages(sessionId: string): Promise<SessionMessage[]>;
+  listMessages(sessionId: string, query?: RecentMessageQuery): Promise<SessionMessage[]>;
   /** 等待已接受的异步写入完成。 */
   flush(): Promise<void>;
   /** 释放 Provider 持有的连接和线程资源。 */
@@ -106,10 +116,27 @@ export type PersistenceProviderModule = {
 /** SPI 输入校验失败时使用的稳定错误。 */
 export class PersistenceValidationError extends Error {
   /** @param code - 稳定错误码 @param message - 不包含密钥的诊断信息 */
-  public constructor(public readonly code: 'session_identity_invalid' | 'provider_manifest_invalid', message: string) {
+  public constructor(public readonly code: 'session_identity_invalid' | 'provider_manifest_invalid' | 'recent_message_query_invalid', message: string) {
     super(message);
     this.name = 'PersistenceValidationError';
   }
+}
+
+/**
+ * 校验最近消息查询参数，防止 Provider 执行无界历史读取。
+ *
+ * @param input - 待校验的查询参数
+ * @returns 可安全传给 Provider 的查询参数副本
+ * @throws PersistenceValidationError 当数量不是安全整数或超出边界时
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-20
+ */
+export function validateRecentMessageQuery(input: unknown): RecentMessageQuery {
+  const limit = isPlainObject(input) ? input.limit : undefined;
+  if (typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit < 0 || limit > MAX_RECENT_MESSAGE_QUERY_LIMIT) {
+    throw new PersistenceValidationError('recent_message_query_invalid', '最近消息查询数量无效');
+  }
+  return { limit };
 }
 
 /**

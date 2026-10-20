@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  MAX_RECENT_MESSAGE_QUERY_LIMIT,
   PERSISTENCE_API_VERSION,
   PersistenceValidationError,
+  validateRecentMessageQuery,
   validatePersistenceProviderManifest,
   validateSessionIdentity,
   type PersistenceProviderManifest,
@@ -46,5 +48,18 @@ test('accepts only the declared persistence API version and capabilities', () =>
   assert.throws(
     () => validatePersistenceProviderManifest({ ...manifest, capabilities: [] }),
     (error: unknown) => error instanceof PersistenceValidationError && error.code === 'provider_manifest_invalid'
+  );
+});
+
+test('validates bounded recent-message query options', () => {
+  assert.deepEqual(validateRecentMessageQuery({ limit: 0 }), { limit: 0 });
+  assert.deepEqual(validateRecentMessageQuery({ limit: MAX_RECENT_MESSAGE_QUERY_LIMIT }), { limit: MAX_RECENT_MESSAGE_QUERY_LIMIT });
+  assert.throws(
+    () => validateRecentMessageQuery({ limit: MAX_RECENT_MESSAGE_QUERY_LIMIT + 1 }),
+    (error: unknown) => error instanceof PersistenceValidationError && error.code === 'recent_message_query_invalid'
+  );
+  assert.throws(
+    () => validateRecentMessageQuery({ limit: 1.5 }),
+    (error: unknown) => error instanceof PersistenceValidationError && error.code === 'recent_message_query_invalid'
   );
 });

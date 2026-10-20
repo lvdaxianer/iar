@@ -17,7 +17,7 @@ import {
   type PersistenceProviderConfig
 } from '@iar/persistence-runtime';
 import { sqlitePersistenceProviderModule, SqlitePersistenceError } from '@iar/persistence-sqlite';
-import type { SessionIdentity, SessionMessage, SessionSnapshotRecord } from '@iar/persistence-spi';
+import type { RecentMessageQuery, SessionIdentity, SessionMessage, SessionSnapshotRecord } from '@iar/persistence-spi';
 
 const identity: SessionIdentity = { sessionId: 'session-sqlite-1', runId: 'run-1', traceId: 'trace-1', messageId: 'message-1' };
 const message: SessionMessage = { messageId: 'message-1', role: 'user', content: '查询当前状态', occurredAt: '2026-10-19T00:00:00.000Z' };
@@ -168,7 +168,7 @@ test('loader can load an explicitly configured external Provider module', async 
       saveSnapshot: async () => {},
       loadSnapshot: async () => undefined,
       listEvents: async () => [],
-      listMessages: async () => [],
+      listMessages: async (_sessionId: string, _query?: RecentMessageQuery) => [],
       flush: async () => {},
       close: async () => { opened.push('close'); }
     })
