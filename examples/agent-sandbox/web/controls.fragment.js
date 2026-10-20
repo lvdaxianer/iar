@@ -1,3 +1,17 @@
+  /** 展示确认结果并写入本地历史，三种终态对应原有展示文案。
+   * 执行与取消共用动作标识，结果文字直接来自服务端响应。
+   * @param confirmResult - 服务端确认终态
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-20
+   */
+  function reportConfirmResult(confirmResult) {
+    var meta = confirmResult.status === 'executed' ? '已执行' : confirmResult.status === 'cancelled' ? '已取消' : '失败';
+    var reply = confirmResult.reply || '操作失败';
+    appendMsg('bot', reply, meta);
+    recordConversation('bot', reply, meta);
+  }
+
   /** 确认或取消本会话中的待确认动作。
    * 回调只闭包保存用户实际看到的动作，而非稍后读取的新快照。
    * 相同动作已显示时不重复创建控件；新动作替换旧确认框。
@@ -20,13 +34,7 @@
       pendingRunId = null;
       setBusy(true);
       api('/confirm', { accepted: accepted, actionId: pending.actionId }).then(function (confirmResult) {
-        if (confirmResult.status === 'executed') {
-          appendMsg('bot', confirmResult.reply, '已执行');
-        } else if (confirmResult.status === 'cancelled') {
-          appendMsg('bot', confirmResult.reply, '已取消');
-        } else {
-          appendMsg('bot', confirmResult.reply || '操作失败', '失败');
-        }
+        reportConfirmResult(confirmResult);
         return refreshState();
       }).catch(function () { if (!sessionExpired) appendMsg('bot', '确认请求失败，结果可能未知；请检查状态后再操作。', '失败'); }).finally(function () { setBusy(false); });
     });
@@ -59,6 +67,7 @@
     if (!text) return;
     inputEl.value = '';
     appendMsg('user', text);
+    recordConversation('user', text);
     setBusy(true);
     streamChat(text)
       .catch(function () {
@@ -100,6 +109,7 @@
    * 只有服务成功响应后才清除本地消息和压缩结果。
    * 状态刷新完成之前持续禁止并发操作。
    * 本地 pending 标识一并清除，刷新时再读取服务端事实。
+   * 本地历史随重置一并清理，避免旧记录被切回时回放。
    * 网络错误保留既有画面，避免暗示服务端一定没有重置。
    * @returns 无返回值
    * @author lvdaxianer@yeah.net
@@ -109,49 +119,59 @@
     if (!sessionReady || sessionBusy || sessionExpired || !confirm('重置将清除当前会话状态，确定继续吗？')) return;
     setBusy(true);
     api('/reset').then(function () {
+      clearConversation(sessionId);
       messagesEl.innerHTML = '';
       pendingRunId = null;
       appendMsg('bot', '会话已重置，开始新的对话吧。');
+      recordConversation('bot', '会话已重置，开始新的对话吧。');
       document.getElementById('compactResult').className = '';
       return refreshState();
     }).catch(function () { if (!sessionExpired) appendMsg('bot', '重置请求失败，请检查状态后重试。', '失败'); })
       .finally(function () { setBusy(false); });
   };
 
+  /** 新会话建立后的收尾：释放旧锁、重建画面并同步状态与列表。
+   * 欢迎消息同时写入本地历史，切回该会话时仍可见建立提示。
+   * @param oldLease - 上一个会话的锁租约
+   * @returns 状态刷新完成的 Promise
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-20
+   */
+  function finishNewSession(oldLease) {
+    sessionReady = true;
+    if (oldLease) oldLease.release();
+    messagesEl.innerHTML = '';
+    pendingRunId = null;
+    document.getElementById('compactResult').className = '';
+    appendMsg('bot', '新会话已建立，原会话已保留在会话列表中。');
+    recordConversation('bot', '新会话已建立，原会话已保留在会话列表中。');
+    refreshSessionList();
+    return refreshState();
+  }
+
   /** 经用户确认后新建独立会话并清空本地画面。
-   * 旧服务端会话尽力删除，失败不阻塞新会话建立。
+   * 旧服务端会话保留在会话列表中，可随时切回继续提问。
    * 先清本地恢复凭据，复用初始化逻辑走新建路径。
    * 旧锁在新会话建立后释放，避免窗口期无锁可恢复。
-   * 新会话就绪后才重建欢迎消息并同步状态面板。
+   * 新会话就绪后才重建欢迎消息并同步状态面板与会话列表。
    * @returns 无返回值
    * @author lvdaxianer@yeah.net
    * @date 2026-10-19
    */
   document.getElementById('newSessionBtn').onclick = function () {
     if (!sessionReady || sessionBusy || sessionExpired) return;
-    if (!confirm('新建会话将结束当前会话并开启全新对话，确定继续吗？')) return;
+    if (!confirm('新建会话将保留当前会话（可在会话列表切回），确定继续吗？')) return;
     setBusy(true);
     sessionReady = false;
-    var oldId = sessionId;
     var oldLease = sessionLease;
     sessionId = null;
     sessionLease = null;
     try { sessionStorage.removeItem(SESSION_KEY); sessionStorage.removeItem(RELOAD_KEY); sessionStorage.removeItem(TAB_KEY); } catch (err) { /* 尽力清理，失败时初始化仍会新建。 */ }
-    var deleteOld = fetch('/api/sessions/' + encodeURIComponent(oldId), { method: 'DELETE' }).catch(function () {});
-    Promise.resolve().then(initializeSession).then(function () {
-      sessionReady = true;
-      return deleteOld;
-    }).then(function () {
-      if (oldLease) oldLease.release();
-      messagesEl.innerHTML = '';
-      pendingRunId = null;
-      document.getElementById('compactResult').className = '';
-      appendMsg('bot', '新会话已建立，开始新的对话吧。');
-      return refreshState();
-    }).then(function () { setBusy(false); }).catch(function () {
-      setBusy(false);
-      if (!sessionExpired) appendMsg('bot', '新建会话失败，请刷新页面重试。', '失败');
-    });
+    Promise.resolve().then(initializeSession).then(function () { return finishNewSession(oldLease); })
+      .then(function () { setBusy(false); }).catch(function () {
+        setBusy(false);
+        if (!sessionExpired) appendMsg('bot', '新建会话失败，请刷新页面重试。', '失败');
+      });
   };
 
   /** 拉取当前会话快照并同步调试面板及待确认动作。
@@ -271,7 +291,10 @@
   Promise.resolve().then(initializeSession).then(function () {
     sessionReady = true;
     return refreshState();
-  }).then(function () { setBusy(false); }).catch(function () {
+  }).then(function () {
+    refreshSessionList();
+    setBusy(false);
+  }).catch(function () {
     sessionReady = false;
     setBusy(false);
     if (!sessionExpired) appendMsg('bot', '无法建立独立会话，请检查浏览器存储、Web Locks 支持和服务连接后刷新页面。', '失败');

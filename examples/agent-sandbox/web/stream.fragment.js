@@ -70,6 +70,7 @@
       : result.status === 'awaiting_confirmation' ? '等待确认'
       : result.status === 'clarification' ? '需要澄清' : '失败';
     appendMessageMeta(state.div, metaText);
+    recordConversation('bot', state.textEl.textContent, metaText);
     messagesEl.scrollTop = messagesEl.scrollHeight;
     if (result.status === 'awaiting_confirmation' && result.pending) runConfirm(result.pending);
   }

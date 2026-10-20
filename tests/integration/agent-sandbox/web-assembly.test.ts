@@ -135,7 +135,7 @@ function expectedPage(): string {
   const template = readFileSync(`${base}index.html`, 'utf8');
   assert.match(template, /IAR_SANDBOX_STYLES/); assert.match(template, /IAR_SANDBOX_SCRIPT/);
   const styles = readFileSync(`${base}styles.css`, 'utf8');
-  const names = ['session.fragment.js', 'markdown.fragment.js', 'markdown-lines.fragment.js', 'interaction.fragment.js', 'stream.fragment.js', 'controls.fragment.js'];
+  const names = ['session.fragment.js', 'markdown.fragment.js', 'markdown-lines.fragment.js', 'interaction.fragment.js', 'stream.fragment.js', 'sessions.fragment.js', 'controls.fragment.js'];
   const script = names.map((name) => readFileSync(`${base}${name}`, 'utf8')).join('');
   return template.replace('<!-- IAR_SANDBOX_STYLES -->', () => `<style>${styles}</style>`)
     .replace('<!-- IAR_SANDBOX_SCRIPT -->', () => `<script>${script}</script>`);

@@ -14,7 +14,8 @@
 <header>
   <h1>IAR Agent Sandbox</h1>
   <span id="modeBadge" class="badge">加载中…</span>
-  <button id="newSessionBtn" class="ghost" type="button" title="结束当前会话并创建全新会话">新建会话</button>
+  <button id="sessionsBtn" class="ghost" type="button" title="查看全部会话并切换">会话列表</button>
+  <button id="newSessionBtn" class="ghost" type="button" title="保留当前会话并创建全新会话">新建会话</button>
   <span style="flex:1"></span>
   <span class="hint">意图 → Function → Plugin → 执行 · 全链路可调试</span>
 </header>
@@ -23,6 +24,16 @@
        表单提交由脚本拦截，避免导航导致标签页会话丢失。
        请求进行时输入和确认操作都受同一个忙碌状态约束。 -->
   <section class="chat">
+    <!-- 会话列表面板只负责选择与切换，列表数据来自服务端摘要接口。 -->
+    <div id="sessionsPanel" class="sessions-panel" hidden>
+      <div class="sessions-toolbar">
+        <span>会话列表</span>
+        <button id="sessionsRefreshBtn" class="ghost" type="button">刷新</button>
+      </div>
+      <ul id="sessionsList" class="sessions-list"></ul>
+      <div id="sessionsStatus" class="hint sessions-status"></div>
+      <button id="sessionsMoreBtn" class="ghost" type="button" hidden>加载更多</button>
+    </div>
     <div id="messages" class="messages"></div>
     <form id="inputBar" class="input-bar">
       <input id="messageInput" placeholder="输入消息，例如：搜一下用户表" autocomplete="off" />

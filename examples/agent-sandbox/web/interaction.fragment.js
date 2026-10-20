@@ -97,7 +97,11 @@
     document.getElementById('compactBtn').disabled = disabled;
     document.getElementById('resetBtn').disabled = disabled;
     document.getElementById('newSessionBtn').disabled = disabled;
+    document.getElementById('sessionsBtn').disabled = disabled;
+    document.getElementById('sessionsRefreshBtn').disabled = disabled;
+    document.getElementById('sessionsMoreBtn').disabled = disabled;
     document.querySelectorAll('.confirm-box button').forEach(function (button) { button.disabled = disabled; });
+    document.querySelectorAll('.sessions-list button').forEach(function (button) { button.disabled = disabled; });
   }
 
   /** 发送与当前会话绑定的 JSON 操作。

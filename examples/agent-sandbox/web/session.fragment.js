@@ -31,6 +31,7 @@
     try { sessionStorage.removeItem(SESSION_KEY); } catch (err) { /* 仍然禁用失效会话。 */ }
     if (sessionLease) { sessionLease.release(); sessionLease = null; }
     document.querySelectorAll('.confirm-box').forEach(function (box) { box.remove(); });
+    clearConversation(sessionId);
     appendMsg('bot', '会话已过期或服务已重启。请刷新页面开始新会话；原操作不会自动重试。', '会话失效');
     setBusy(false);
   }

@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** 片段按原页面词法作用域顺序拼接，不作为独立脚本执行。 */
-const SCRIPT_PARTS = ['session.fragment.js', 'markdown.fragment.js', 'markdown-lines.fragment.js', 'interaction.fragment.js', 'stream.fragment.js', 'controls.fragment.js'];
+const SCRIPT_PARTS = ['session.fragment.js', 'markdown.fragment.js', 'markdown-lines.fragment.js', 'interaction.fragment.js', 'stream.fragment.js', 'sessions.fragment.js', 'controls.fragment.js'];
 /** 每个占位符仅允许在模板中出现一次。 */
 const STYLE_MARKER = '<!-- IAR_SANDBOX_STYLES -->';
 const SCRIPT_MARKER = '<!-- IAR_SANDBOX_SCRIPT -->';
