@@ -45,6 +45,7 @@ export const accountPrivilegeManifest: FunctionPluginManifest = {
   version: '1.0.0',
   description: '账户与权限插件，提供本人权限查询与授权申请受理的确定性模拟',
   actionTypes: ['query', 'update'],
+  operations: accountPrivilegeOperations,
   capabilities: ['account.read', 'account.grant'],
   inputSchema: sandboxInputSchema(),
   outputSchema: sandboxOutputSchema(),

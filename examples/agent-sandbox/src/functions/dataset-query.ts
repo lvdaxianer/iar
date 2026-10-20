@@ -48,6 +48,7 @@ export const datasetQueryManifest: FunctionPluginManifest = {
   version: '1.0.0',
   description: '数据资产目录插件，提供资产检索与表级血缘查询的确定性模拟',
   actionTypes: ['query'],
+  operations: datasetQueryOperations,
   capabilities: ['dataset.read'],
   inputSchema: sandboxInputSchema(),
   outputSchema: sandboxOutputSchema(),

@@ -22,16 +22,16 @@
 
 ## 4. Generic Clarification Escalation and Selection
 
-- [ ] 4.1 Write failing session tests for unresolved streak increments, threshold escalation, reset after confirmation/success, empty-candidate fallback, and stale selection rejection in `tests/integration/agent-sandbox/session-refactor-behavior.test.ts` or a focused new test file; verify the current implementation repeats generic clarification and has no durable streak.
-- [ ] 4.2 Implement bounded clarification state transitions in the session/runtime layer, counting only semantic/routing/input clarification outcomes and persisting the state through the existing context snapshot path; verify focused state tests pass and confirmation waits do not increment the streak.
-- [ ] 4.3 Implement dynamic selection responses from current authorized Plugin descriptors and validate opaque user selections against the current candidate set before narrowing the normal route; verify no selection path invokes a Plugin directly and invalid/stale keys remain outside execution.
-- [ ] 4.4 Add end-to-end regression coverage for a colloquial follow-up understood through recent messages, two unresolved turns escalating to dynamic choices, a valid choice re-entering the normal policy/confirmation path, and a restart during selection; verify `tests/integration/agent-sandbox/e2e-structured-context.test.ts` passes.
+- [x] 4.1 Write failing session tests for unresolved streak increments, threshold escalation, reset after confirmation/success, empty-candidate fallback, and stale selection rejection in `tests/integration/agent-sandbox/session-refactor-behavior.test.ts` or a focused new test file; verify the current implementation repeats generic clarification and has no durable streak.
+- [x] 4.2 Implement bounded clarification state transitions in the session/runtime layer, counting only semantic/routing/input clarification outcomes and persisting the state through the existing context snapshot path; verify focused state tests pass and confirmation waits do not increment the streak.
+- [x] 4.3 Implement dynamic selection responses from current authorized Plugin descriptors and validate opaque user selections against the current candidate set before narrowing the normal route; verify no selection path invokes a Plugin directly and invalid/stale keys remain outside execution.
+- [x] 4.4 Add end-to-end regression coverage for a colloquial follow-up understood through recent messages, two unresolved turns escalating to dynamic choices, a valid choice re-entering the normal policy/confirmation path, and a restart during selection; verify `tests/integration/agent-sandbox/e2e-structured-context.test.ts` passes.
 
 ## 5. Review, Compatibility, and Verification
 
-- [ ] 5.1 Remove or isolate static business catalogs from shared Runtime/model prompt code while preserving sample Plugin descriptors inside the example application; verify `rg` finds no business-specific keyword routing in core packages and all descriptor-based tests pass.
-- [ ] 5.2 Run OpenSpec validation and the focused contract, persistence, model-gateway, routing, and agent-sandbox suites; verify `openspec validate generic-context-window-recovery --strict`, `npm test`, `npm run lint`, and `npm run verify:packages` complete successfully.
-- [ ] 5.3 Perform the per-task code-review and plan-implementation audit against the canonical code-review, backend reliability, frontend interaction, logging, and verification skills; record findings and evidence before marking implementation tasks complete.
+- [x] 5.1 Remove or isolate static business catalogs from shared Runtime/model prompt code while preserving sample Plugin descriptors inside the example application; verify `rg` finds no business-specific keyword routing in core packages and all descriptor-based tests pass.
+- [x] 5.2 Run OpenSpec validation and the focused contract, persistence, model-gateway, routing, and agent-sandbox suites; verify `openspec validate generic-context-window-recovery --strict`, `npm test`, `npm run lint`, and `npm run verify:packages` complete successfully.
+- [x] 5.3 Perform the per-task code-review and plan-implementation audit against the canonical code-review, backend reliability, frontend interaction, logging, and verification skills; record findings and evidence before marking implementation tasks complete.
 
 ## Workflow follow-up
 

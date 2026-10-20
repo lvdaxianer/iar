@@ -2,11 +2,10 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { ActionDefinition, BehaviorContext, JsonValue, SlotValue } from '@iar/contracts';
+import type { ActionDefinition, BehaviorContext, JsonValue, PluginOperation, SlotValue } from '@iar/contracts';
 import type { SemanticActionType, SemanticFrame } from '@iar/decision';
 import type { RouteResult } from '@iar/runtime';
 import type { RuleEvaluationFacts } from '@iar/rule-engine';
-import { sandboxFunctionCatalog } from './functions/index.js';
 import type { PendingActionSummary, RouteEvidence } from './session-types.js';
 
 /**
@@ -81,15 +80,14 @@ export function buildEvidence(route: RouteResult, frame: SemanticFrame): RouteEv
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function buildActionInput(functionId: string, slots: Record<string, JsonValue>, userText: string, actionType: SemanticActionType = 'unknown', behaviorContext?: BehaviorContext): { input: JsonValue } | { missing: string[] } {
-  const descriptor = sandboxFunctionCatalog[functionId];
-  if (!descriptor) return { missing: [`未知 Function: ${functionId}`] };
+export function buildActionInput(functionId: string, slots: Record<string, JsonValue>, userText: string, actionType: SemanticActionType = 'unknown', behaviorContext?: BehaviorContext, operations: readonly PluginOperation[] = []): { input: JsonValue } | { missing: string[] } {
+  if (functionId.trim().length === 0) return { missing: ['functionId'] };
   if (actionType === 'unknown') return { missing: ['actionType'] };
   const rawOperation = stringSlot(slots, 'operation');
   const query = stringSlot(slots, 'query') ?? (userText.length > 0 ? userText : undefined);
   const expectedKind = actionType === 'query' ? 'read' : 'action';
-  const operation = chooseCompatibleOperation(descriptor, rawOperation, expectedKind);
-  const params = inheritFactParams(functionId, operation ?? descriptor.defaultOperation, paramsSlot(slots), behaviorContext);
+  const operation = chooseCompatibleOperation(operations, rawOperation, expectedKind);
+  const params = inheritFactParams(functionId, paramsSlot(slots), behaviorContext);
   if (!operation) return { missing: ['operation'] };
   if (operation === 'search' && !query) return { missing: ['query'] };
   const input: Record<string, JsonValue> = {};
@@ -100,14 +98,14 @@ export function buildActionInput(functionId: string, slots: Record<string, JsonV
 }
 
 /** 选择与固定语义动作类型兼容的操作目录项。 */
-function chooseCompatibleOperation(descriptor: { operations: ReadonlyArray<{ name: string; kind: string }> }, rawOperation: string | undefined, expectedKind: 'read' | 'action'): string | undefined {
+function chooseCompatibleOperation(operations: readonly PluginOperation[], rawOperation: string | undefined, expectedKind: 'read' | 'action'): string | undefined {
   if (rawOperation) {
-    const explicit = descriptor.operations.find((item) => item.name === rawOperation);
+    const explicit = operations.find((item) => item.name === rawOperation);
     if (explicit?.kind === expectedKind) return explicit.name;
     return undefined;
   }
   if (expectedKind === 'action') return undefined;
-  return descriptor.operations.find((item) => item.kind === expectedKind)?.name;
+  return operations.find((item) => item.kind === expectedKind)?.name;
 }
 
 /**
@@ -125,17 +123,14 @@ function chooseCompatibleOperation(descriptor: { operations: ReadonlyArray<{ nam
  * @author lvdaxianer@yeah.net
  * @date 2026-10-19
  */
-function inheritFactParams(functionId: string, operation: string, params: Record<string, string> | undefined, behaviorContext: BehaviorContext | undefined): Record<string, string> | undefined {
+function inheritFactParams(functionId: string, params: Record<string, string> | undefined, behaviorContext: BehaviorContext | undefined): Record<string, string> | undefined {
   const facts = behaviorContext?.facts;
   if (!facts) return params;
   const inherited = { ...(params ?? {}) };
-  const fill = (field: string, param: string) => {
-    if (inherited[param]) return;
-    const hit = Object.values(facts).find((fact) => fact.status === 'verified' && fact.functionId === functionId && fact.field === field);
-    if (hit && typeof hit.value === 'string' && hit.value.length > 0) inherited[param] = hit.value;
-  };
-  if (functionId === 'api.gateway' && operation === 'limit') fill('target', 'target');
-  if (functionId === 'ticket.create' && operation === 'progress') fill('ticketId', 'ticketId');
+  for (const fact of Object.values(facts)) {
+    if (fact.status !== 'verified' || fact.functionId !== functionId || typeof fact.field !== 'string' || inherited[fact.field]) continue;
+    if (typeof fact.value === 'string' && fact.value.length > 0) inherited[fact.field] = fact.value;
+  }
   return Object.keys(inherited).length > 0 ? inherited : undefined;
 }
 
@@ -148,16 +143,14 @@ function inheritFactParams(functionId: string, operation: string, params: Record
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function sandboxOperationKind(functionId: string, input: JsonValue): 'read' | 'action' {
-  const descriptor = sandboxFunctionCatalog[functionId];
-  if (!descriptor) return 'action';
+export function sandboxOperationKind(functionId: string, input: JsonValue, operations: readonly PluginOperation[] = []): 'read' | 'action' {
+  if (functionId.trim().length === 0) return 'action';
   const record = typeof input === 'object' && input !== null && !Array.isArray(input) ? input as Record<string, JsonValue> : {};
   const raw = record.operation;
   if (typeof raw === 'string' && raw.length > 0) {
-    return descriptor.operations.find((item) => item.name === raw)?.kind ?? 'read';
+    return operations.find((item) => item.name === raw)?.kind ?? 'read';
   }
-  const name = descriptor.defaultOperation;
-  return descriptor.operations.find((item) => item.name === name)?.kind ?? 'read';
+  return operations.find((item) => item.kind === 'read')?.kind ?? 'action';
 }
 
 /**
@@ -168,11 +161,10 @@ export function sandboxOperationKind(functionId: string, input: JsonValue): 'rea
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function describeAction(action: ActionDefinition): string {
-  const descriptor = sandboxFunctionCatalog[action.functionId];
+export function describeAction(action: ActionDefinition, descriptor?: { description: string; operations?: readonly PluginOperation[] }): string {
   const record = typeof action.input === 'object' && action.input !== null && !Array.isArray(action.input) ? action.input as Record<string, JsonValue> : {};
-  const operation = typeof record.operation === 'string' && record.operation.length > 0 ? record.operation : descriptor?.defaultOperation;
-  const name = descriptor?.name ?? action.functionId;
+  const operation = typeof record.operation === 'string' && record.operation.length > 0 ? record.operation : undefined;
+  const name = descriptor?.description ?? action.functionId;
   return operation ? `${name} · ${operation}` : name;
 }
 

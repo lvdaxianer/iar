@@ -12,12 +12,12 @@
  * @date 2026-10-18
  */
 import type { JsonValue } from '@iar/contracts';
+import type { PluginDescriptor } from '@iar/plugin-host';
 import { REQUIRED_PRESERVED_FACTS } from '@iar/contracts';
 import type { ModelProvider, ModelProviderRequest } from '@iar/decision';
-import { sandboxFunctionCatalog } from '../functions/index.js';
 
 /** 压缩 state 片段允许保留的白名单字段。 */
-const STATE_FIELD_WHITELIST = ['subject', 'intent', 'action', 'route', 'slots', 'workflow', 'pending', 'confirmation'] as const;
+const STATE_FIELD_WHITELIST = ['subject', 'intent', 'action', 'route', 'slots', 'workflow', 'pending', 'confirmation', 'clarification'] as const;
 
 /**
  * 用关键词规则模拟真实模型的离线 provider。
@@ -141,7 +141,8 @@ export class ScriptedModelProvider implements ModelProvider {
     const functionId = readString(input, 'functionId') ?? 'unknown';
     const status = readString(input, 'actionStatus') ?? 'unknown';
     const output = asRecord(input.actionOutput);
-    const subsystem = sandboxFunctionCatalog[functionId]?.name ?? functionId;
+    const descriptors = Array.isArray(input.functionDescriptors) ? input.functionDescriptors.filter(isRecord) as unknown as PluginDescriptor[] : [];
+    const subsystem = descriptors.find((descriptor) => descriptor.functionId === functionId)?.description ?? functionId;
     let text: string;
     if (status !== 'succeeded') {
       text = `【${subsystem}】动作执行失败（${typeof output.errorCode === 'string' ? output.errorCode : 'unknown'}），请稍后重试。`;

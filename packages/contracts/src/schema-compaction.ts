@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import { Type } from '@sinclair/typebox';
-import { BehaviorContextSchema, MAX_CONTEXT_SUMMARY_LENGTH } from './schema-context.js';
+import { BehaviorContextSchema, ClarificationStateSchema, MAX_CONTEXT_SUMMARY_LENGTH } from './schema-context.js';
 import { JsonValueSchema } from './schema-primitives.js';
 import { SCHEMA_VERSIONS } from './versions.js';
 
@@ -149,7 +149,9 @@ export const CompactionModelStateSchema = Type.Object({
     scopeHash: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })),
     confirmedAt: Type.Optional(Type.String({ minLength: 1, maxLength: 100 })),
     status: Type.Optional(Type.Literal('unresolved'))
-  }, { additionalProperties: false }))
+  }, { additionalProperties: false })),
+  // clarification 是运行时持久化的有限澄清状态，候选仍由 Runtime 校验。
+  clarification: Type.Optional(ClarificationStateSchema)
 }, { additionalProperties: false });
 // 状态候选明确拒绝 schemaVersion 和 integrity 等 Runtime 字段。
 // additionalProperties false 使候选状态不会携带隐藏执行命令。

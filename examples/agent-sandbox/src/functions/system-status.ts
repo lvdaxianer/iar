@@ -47,6 +47,7 @@ export const systemStatusManifest: FunctionPluginManifest = {
   version: '1.0.0',
   description: '系统状态与告警插件，提供服务健康度总览与活动告警列表的确定性模拟',
   actionTypes: ['query'],
+  operations: systemStatusOperations,
   capabilities: ['status.read'],
   inputSchema: sandboxInputSchema(),
   outputSchema: sandboxOutputSchema(),

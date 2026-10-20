@@ -46,6 +46,7 @@ export const apiGatewayManifest: FunctionPluginManifest = {
   version: '1.0.0',
   description: 'API 网关管理插件，提供调用统计查看与限流调整的确定性模拟',
   actionTypes: ['query', 'update'],
+  operations: apiGatewayOperations,
   capabilities: ['gateway.read', 'gateway.control'],
   inputSchema: sandboxInputSchema(),
   outputSchema: sandboxOutputSchema(),

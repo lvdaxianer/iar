@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import { createHash } from 'node:crypto';
-import { ERROR_CODES, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, validateContract, type BehaviorContext, type ContractErrorResult, type EventEnvelope, type RoutingScope, type TrustedFact, type TrustedFactValue } from '@iar/contracts';
+import { ERROR_CODES, MAX_CANDIDATE_KEY_LENGTH, MAX_CANDIDATE_VERSION_LENGTH, MAX_CLARIFICATION_REASON_LENGTH, MAX_CLARIFICATION_OPTIONS, MAX_UNRESOLVED_STREAK, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, validateContract, type BehaviorContext, type ClarificationState, type ContractErrorResult, type EventEnvelope, type RoutingScope, type TrustedFact, type TrustedFactValue } from '@iar/contracts';
 
 /** 关键字段哈希固定使用 SHA-256，避免实现更换导致快照不可恢复。 */
 const HASH_ALGORITHM = 'sha256';
@@ -58,6 +58,7 @@ export function criticalFieldHash(context: BehaviorContext): string {
     slots: context.slots,
     workflow: context.workflow,
     pending: context.pending,
+    ...(context.clarification ? { clarification: context.clarification } : {}),
     confirmation: context.confirmation,
     idempotencyKey: context.idempotencyKey,
     ...(context.facts ? { facts: context.facts } : {})
@@ -84,6 +85,7 @@ export function createInitialContext(runId = 'unknown-run'): BehaviorContext {
     slots: {},
     workflow: { currentStep: 'initial', status: 'pending' },
     pending: { kind: 'input', status: 'none' },
+    clarification: { mode: 'none', unresolvedStreak: 0 },
     confirmation: { state: 'not_required' },
     facts: {},
     idempotencyKey: `run:${runId}`,
@@ -175,7 +177,7 @@ export class BehaviorContextProjector {
       this.applyCompactedState(payload);
       return;
     }
-    if (event.eventName === 'context.clarification.updated' && !isPendingInput(payload.pending)) {
+    if (event.eventName === 'context.clarification.updated' && (!isPendingInput(payload.pending) || (payload.clarification !== undefined && !isClarificationState(payload.clarification)))) {
       throw new Error('澄清 pending 状态无效');
     }
     // workflow.started 固定主语、意图和运行状态。
@@ -228,6 +230,7 @@ export class BehaviorContextProjector {
     if (isActionStatus(payload.actionStatus)) this.state.action.status = payload.actionStatus;
     if (isSlotMap(payload.slots)) this.state.slots = structuredClone(payload.slots);
     if (isPendingInput(payload.pending)) this.state.pending = { ...payload.pending };
+    if (isClarificationState(payload.clarification)) this.state.clarification = structuredClone(payload.clarification);
     if (isConfirmationState(payload.confirmation)) this.state.confirmation = { ...payload.confirmation };
     if (isRoutingScope(payload.routingScope)) this.state.routingScope = structuredClone(payload.routingScope);
   }
@@ -333,6 +336,17 @@ function isPendingInput(value: unknown): value is BehaviorContext['pending'] {
     keys.add(option.key);
     return true;
   });
+}
+
+/** 判断事件中的连续澄清状态是否满足通用契约边界。 */
+function isClarificationState(value: unknown): value is ClarificationState {
+  if (!isRecord(value) || !['none', 'unresolved', 'selection'].includes(String(value.mode)) || !Number.isSafeInteger(value.unresolvedStreak) || Number(value.unresolvedStreak) < 0 || Number(value.unresolvedStreak) > MAX_UNRESOLVED_STREAK) return false;
+  if (value.reasonCode !== undefined && (typeof value.reasonCode !== 'string' || value.reasonCode.length === 0 || value.reasonCode.length > MAX_CLARIFICATION_REASON_LENGTH)) return false;
+  if (value.candidateVersion !== undefined && (typeof value.candidateVersion !== 'string' || value.candidateVersion.length === 0 || value.candidateVersion.length > MAX_CANDIDATE_VERSION_LENGTH)) return false;
+  if (value.candidateKeys === undefined) return true;
+  if (!Array.isArray(value.candidateKeys) || value.candidateKeys.length > MAX_CLARIFICATION_OPTIONS) return false;
+  const keys = new Set<string>();
+  return value.candidateKeys.every((key) => typeof key === 'string' && key.length > 0 && key.length <= MAX_CANDIDATE_KEY_LENGTH && !keys.has(key) && (keys.add(key), true));
 }
 
 /** 判断确认状态是否完整。 */

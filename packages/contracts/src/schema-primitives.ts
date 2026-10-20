@@ -48,6 +48,13 @@ export const ActionTypeSchema = Type.Union(ACTION_TYPES.map((actionType) => Type
 /** ActionType 数组的统一边界，拒绝未知动作和重复声明。 */
 export const ActionTypesSchema = Type.Array(ActionTypeSchema, { minItems: 1, maxItems: ACTION_TYPES.length, uniqueItems: true });
 
+/** Plugin 声明的操作目录，保持运行时只消费通用元数据。 */
+export const PluginOperationsSchema = Type.Array(Type.Object({
+  name: Type.String({ minLength: 1, maxLength: 60 }),
+  kind: Type.Union([Type.Literal('read'), Type.Literal('action')]),
+  description: Type.String({ minLength: 1, maxLength: 200 })
+}, { additionalProperties: false }), { maxItems: 32, uniqueItems: true });
+
 /** Function 的路由和输入输出边界。 */
 export const FunctionDefinitionSchema = Type.Object({
   // 版本字段用于兼容性判断。
@@ -128,7 +135,8 @@ export const FunctionPluginManifestSchema = Type.Object({
   scope: Type.Literal('function'),
   functionId: Type.String({ minLength: 1 }),
   // 业务 Plugin 必须声明其 Function 的固定动作集合。
-  actionTypes: ActionTypesSchema
+  actionTypes: ActionTypesSchema,
+  operations: Type.Optional(PluginOperationsSchema)
 }, { additionalProperties: false });
 
 /** 通过 Hook/订阅运行且不参与业务路由的系统插件。 */

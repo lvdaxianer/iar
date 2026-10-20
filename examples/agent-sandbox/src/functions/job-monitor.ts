@@ -85,6 +85,7 @@ export const jobMonitorManifest: FunctionPluginManifest = {
   version: '1.0.0',
   description: '任务调度监控插件，提供调度任务状态与运行日志的确定性模拟',
   actionTypes: ['query'],
+  operations: jobMonitorOperations,
   capabilities: ['job.read'],
   inputSchema: sandboxInputSchema(),
   outputSchema: sandboxOutputSchema(),

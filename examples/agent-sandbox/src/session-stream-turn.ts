@@ -13,13 +13,18 @@ export type StreamTurnContext = {
   cancelStalePending: () => Promise<void>;
   /** 与普通入口共用轮次计数和追踪标识生成。 */
   nextTraceId: () => string;
+  /** 选择状态只接受当前授权候选；无效键必须在语义抽取前终止。 */
+  resolveSelection: (text: string, context: BehaviorContext) => { descriptor?: PluginDescriptor; invalid: boolean; reasonCode: string };
+  rejectSelection: (userText: string, reasonCode: string) => Promise<TurnResult>;
+  markUnresolved: (reasonCode: string) => Promise<void>;
+  resetClarification: () => Promise<void>;
   /** 与普通入口共用语义抽取及路由，确保相同的策略边界。 */
-  extractFrame: (traceId: string, runId: string, text: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>) => Promise<ExtractFrameOutcome>;
+  extractFrame: (traceId: string, runId: string, text: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>, selectedDescriptor?: PluginDescriptor) => Promise<ExtractFrameOutcome>;
   /** 当前会话的有界原文窗口，普通与流式入口必须读取同一份状态。 */
   recentMessages: Array<{ role: string; text: string }>;
   /** 当前启用 Plugin 的动态能力描述。 */
   functionDescriptors: PluginDescriptor[];
-  routeFrame: (traceId: string, runId: string, frame: SemanticFrame, behaviorContext: BehaviorContext, currentMessage: string) => Promise<RouteResult>;
+  routeFrame: (traceId: string, runId: string, frame: SemanticFrame, behaviorContext: BehaviorContext, currentMessage: string, recentMessages: Array<{ role: string; text: string }>, selectedDescriptor?: PluginDescriptor) => Promise<RouteResult>;
   prepareAndExecute: (context: { runId: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext }) => Promise<ExecuteTurnOutcome>;
   /** 兜底与执行后回复分别保留增量回调和超限错误。 */
   fallbackReplyStreamed: (context: { traceId: string; runId: string; userText: string; reasonCode: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[] }, onDelta: (delta: string) => void) => Promise<string>;
@@ -64,8 +69,14 @@ export class SandboxSessionStreamTurn {
     await this.context.cancelStalePending();
     const traceId = this.context.nextTraceId();
     const behaviorContext = this.context.currentBehaviorContext();
-    const extracted = await this.context.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext, this.context.recentMessages);
-    const result = await this.finishStreamExtraction({ userText, traceId, emit, behaviorContext, extracted });
+    const selection = this.context.resolveSelection(userText, behaviorContext);
+    if (selection.invalid) {
+      const result = await this.context.rejectSelection(userText, selection.reasonCode);
+      emit({ type: 'done', result });
+      return result;
+    }
+    const extracted = await this.context.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext, this.context.recentMessages, selection.descriptor);
+    const result = await this.finishStreamExtraction({ userText, traceId, emit, behaviorContext, extracted, ...(selection.descriptor === undefined ? {} : { selectedDescriptor: selection.descriptor }) });
     emit({ type: 'done', result });
     return result;
   }
@@ -76,7 +87,7 @@ export class SandboxSessionStreamTurn {
    * @returns 本轮结果，不发送终态事件
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  protected async finishStreamExtraction(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; extracted: ExtractFrameOutcome }): Promise<TurnResult> {
+  protected async finishStreamExtraction(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; extracted: ExtractFrameOutcome; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
     const { userText, extracted } = context;
     // 抽取失败仍与普通入口一样保存失败说明。
     if (!extracted.ok) {
@@ -93,11 +104,11 @@ export class SandboxSessionStreamTurn {
    * @returns 本轮结果
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  protected async routeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }> }): Promise<TurnResult> {
-    const { userText, traceId, emit, behaviorContext, extracted } = context;
+  protected async routeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }>; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
+    const { userText, traceId, emit, behaviorContext, extracted, selectedDescriptor } = context;
     emit({ type: 'stage', stage: 'route' });
     const frame = extracted.frame;
-    const route = await this.context.routeFrame(traceId, SESSION_RUN_ID, frame, behaviorContext, userText);
+    const route = await this.context.routeFrame(traceId, SESSION_RUN_ID, frame, behaviorContext, userText, this.context.recentMessages, selectedDescriptor);
     const evidence = buildEvidence(route, frame);
     if (extracted.semanticFallback) evidence.semanticFallback = true;
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
@@ -116,7 +127,9 @@ export class SandboxSessionStreamTurn {
    */
   protected async finishStreamFallback(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; evidence: RouteEvidence }): Promise<TurnResult> {
     const { userText, traceId, emit, behaviorContext, evidence } = context;
-    const reply = await trackModelResponseLimit(() => this.context.fallbackReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext, recentMessages: this.context.recentMessages, functionDescriptors: this.context.functionDescriptors, reasonCode: evidence.reasonCode }, (delta) => emit({ type: 'delta', text: delta }))).catch((error: unknown) => {
+    if (!(evidence.semanticIntent === 'unknown' && Object.values(behaviorContext.facts ?? {}).some((fact) => fact.status === 'verified')) && !(behaviorContext.pending.status === 'required' && behaviorContext.pending.options?.some((option) => option.key === userText.trim()) === true)) await this.context.markUnresolved(evidence.reasonCode);
+    const currentBehaviorContext = this.context.currentBehaviorContext();
+    const reply = await trackModelResponseLimit(() => this.context.fallbackReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: currentBehaviorContext, recentMessages: this.context.recentMessages, functionDescriptors: this.context.functionDescriptors, reasonCode: evidence.reasonCode }, (delta) => emit({ type: 'delta', text: delta }))).catch((error: unknown) => {
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
     });
@@ -134,10 +147,12 @@ export class SandboxSessionStreamTurn {
   protected async finishStreamOutcome(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; evidence: RouteEvidence; outcome: ExecuteTurnOutcome }): Promise<TurnResult> {
     const { userText, evidence, outcome } = context;
     if (outcome.status === 'awaiting_confirmation') {
+      await this.context.resetClarification();
       this.context.pushMessages(userText, outcome.reply);
       return { status: 'awaiting_confirmation', reply: outcome.reply, route: evidence, pending: summarizeAction(outcome.action) };
     }
     if (outcome.status === 'failed' || outcome.status === 'clarification') {
+      if (outcome.status === 'clarification') await this.context.markUnresolved(outcome.reasonCode);
       this.context.pushMessages(userText, outcome.reply);
       return { status: outcome.status, reply: outcome.reply, route: evidence, reasonCode: outcome.reasonCode };
     }
@@ -153,6 +168,7 @@ export class SandboxSessionStreamTurn {
    */
   protected async finishStreamExecution(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; evidence: RouteEvidence; outcome: Extract<ExecuteTurnOutcome, { status: 'executed' }> }): Promise<TurnResult> {
     const { userText, traceId, emit, evidence, outcome } = context;
+    await this.context.resetClarification();
     emit({ type: 'stage', stage: 'response' });
     const reply = await trackModelResponseLimit(() => this.context.generateReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, action: outcome.action, actionResult: outcome.actionResult, behaviorContext: this.context.currentBehaviorContext(), recentMessages: this.context.recentMessages, functionDescriptors: this.context.functionDescriptors }, (delta) => emit({ type: 'delta', text: delta }))).catch((error: unknown) => {
       if (!(error instanceof ModelResponseLimitError)) throw error;

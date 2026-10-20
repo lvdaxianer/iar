@@ -6,7 +6,7 @@
  * @date 2026-10-18
  */
 import { randomUUID } from 'node:crypto';
-import { SCHEMA_VERSIONS, type ActionDefinition, type BehaviorContext, type EventEnvelope, type JsonValue, type PluginPolicyMetadata, type RuleExpression } from '@iar/contracts';
+import { SCHEMA_VERSIONS, type ActionDefinition, type ActionType, type BehaviorContext, type EventEnvelope, type JsonValue, type PluginOperation, type PluginPolicyMetadata, type RuleExpression } from '@iar/contracts';
 import { ModelGateway, SemanticExtractorAdapter, type ModelGatewayResult, type ModelProfileRegistry, type SemanticFrame } from '@iar/decision';
 import { PluginFirstRouter, type AsyncDecisionAdapter, type RouteResult } from '@iar/runtime';
 import type { FunctionRule, PluginRule } from '@iar/rule-engine';
@@ -66,14 +66,14 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public async extractFrame(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages = this.context.recentMessages): Promise<ExtractFrameOutcome> {
-    const descriptors = this.context.pluginHost.descriptors();
+  public async extractFrame(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages = this.context.recentMessages, selectedDescriptor?: PluginDescriptor): Promise<ExtractFrameOutcome> {
+    const descriptors = selectedDescriptor ? [selectedDescriptor] : this.context.pluginHost.descriptors();
     const extracted = await new SemanticExtractorAdapter(this.context.gateway).extract({ traceId, runId, input: { text: userText, behaviorContext, recentMessages, functionDescriptors: descriptors } });
-    if (extracted.ok) return { ok: true, frame: extracted.value, semanticFallback: false };
+    if (extracted.ok) return { ok: true, frame: selectedDescriptor ? constrainFrame(extracted.value, selectedDescriptor) : extracted.value, semanticFallback: false };
     if (this.context.mode === 'brain') {
       // 真实 LLM 抽取失败时降级到离线关键词抽取，保证链路可以继续。
       const retried = await this.retrySemanticWithScripted(traceId, runId, userText, behaviorContext, recentMessages, descriptors);
-      if (retried.ok) return { ok: true, frame: retried.value, semanticFallback: true };
+      if (retried.ok) return { ok: true, frame: selectedDescriptor ? constrainFrame(retried.value, selectedDescriptor) : retried.value, semanticFallback: true };
     }
     const route: RouteEvidence = { status: 'semantic_failed', reasonCode: extracted.error.code, semanticIntent: 'unknown', semanticConfidence: 0 };
     return { ok: false, route, reasonCode: extracted.error.code, reply: `语义抽取失败（${extracted.error.code}），请换个说法重试。` };
@@ -109,8 +109,8 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public routeFrame(traceId: string, runId: string, frame: SemanticFrame, behaviorContext: BehaviorContext, currentMessage: string, recentMessages = this.context.recentMessages): Promise<RouteResult> {
-    const descriptors = this.context.pluginHost.descriptors();
+  public routeFrame(traceId: string, runId: string, frame: SemanticFrame, behaviorContext: BehaviorContext, currentMessage: string, recentMessages = this.context.recentMessages, selectedDescriptor?: PluginDescriptor): Promise<RouteResult> {
+    const descriptors = selectedDescriptor ? [selectedDescriptor] : this.context.pluginHost.descriptors();
     const rules = createRoutingRules(descriptors);
     return new PluginFirstRouter().routeAsync({
       traceId,
@@ -147,11 +147,13 @@ export class SandboxSessionRouting {
     if (!route.functionId || !route.pluginId) return { status: 'failed', reply: '路由结果缺少 Function 或 Plugin。', reasonCode: 'route_incomplete' };
     const resolved = this.context.pluginHost.resolveCandidate(route.functionId, route.pluginId);
     if (!resolved.ok) return { status: 'failed', reply: `路由选中的插件不可用（${resolved.error.code}）。`, reasonCode: resolved.error.code };
-    const built = buildActionInput(route.functionId, frame.slots, userText, frame.action, behaviorContext);
+    if (resolved.value.manifest.pluginKind !== 'function') return { status: 'failed', reply: '路由选中的插件不是 Function 插件。', reasonCode: 'plugin_kind_invalid' };
+    const manifest = resolved.value.manifest;
+    const built = buildActionInput(route.functionId, frame.slots, userText, frame.action, behaviorContext, manifest.operations ?? []);
     if ('missing' in built) return { status: 'clarification', reply: `还缺少必要信息（${built.missing.join('、')}），请补充完整后再试。`, reasonCode: 'slots_missing' };
-    const action = this.createAction({ runId, functionId: route.functionId, pluginId: route.pluginId, input: built.input, policy: resolved.value.manifest.policy });
+    const action = this.createAction({ runId, functionId: route.functionId, pluginId: route.pluginId, input: built.input, policy: manifest.policy, operations: manifest.operations ?? [] });
     await this.appendDecisionEvent({ runId, frame, route, input: built.input });
-    return this.executePreparedAction(action, resolved.value.manifest.capabilities);
+    return this.executePreparedAction(action, manifest.capabilities);
   }
 
   /** 按插件策略生成动作，读取操作保持低风险。
@@ -159,9 +161,9 @@ export class SandboxSessionRouting {
    * @returns 附带唯一标识和确认策略的动作
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  private createAction(context: { runId: string; functionId: string; pluginId: string; input: JsonValue; policy: PluginPolicyMetadata }): ActionDefinition {
-    const { runId, functionId, pluginId, input, policy } = context;
-    const operationKind = sandboxOperationKind(functionId, input);
+  private createAction(context: { runId: string; functionId: string; pluginId: string; input: JsonValue; policy: PluginPolicyMetadata; operations: readonly PluginOperation[] }): ActionDefinition {
+    const { runId, functionId, pluginId, input, policy, operations } = context;
+    const operationKind = sandboxOperationKind(functionId, input, operations);
     return {
       schemaVersion: SCHEMA_VERSIONS.action,
       actionId: `action-sandbox-${randomUUID()}`,
@@ -213,7 +215,9 @@ export class SandboxSessionRouting {
   private failedPreparedAction(action: ActionDefinition, reasonCode: string): ExecuteTurnOutcome {
     if (reasonCode === 'confirmation_required') {
       this.context.pending = { action };
-      return { status: 'awaiting_confirmation', action, reply: `即将执行高风险操作「${describeAction(action)}」（插件 ${action.pluginId}），需要你的确认。` };
+      const resolved = this.context.pluginHost.resolveCandidate(action.functionId, action.pluginId);
+      const descriptor = resolved.ok && resolved.value.manifest.pluginKind === 'function' ? resolved.value.manifest : undefined;
+      return { status: 'awaiting_confirmation', action, reply: `即将执行高风险操作「${describeAction(action, descriptor)}」（插件 ${action.pluginId}），需要你的确认。` };
     }
     return { status: 'failed', reply: `动作被拒绝：${reasonCode}`, reasonCode };
   }
@@ -316,4 +320,10 @@ function intentEquals(functionId: string): RuleExpression {
 function higherRisk(left: NonNullable<FunctionRule['riskLevel']>, right: PluginDescriptor['operationMetadata']['riskLevel']): NonNullable<FunctionRule['riskLevel']> {
   const rank = { low: 1, medium: 2, high: 3, critical: 4 } as const;
   return (left && rank[left] >= rank[right] ? left : right);
+}
+
+/** 将模型语义限制在用户已选择的当前候选范围内，不直接创建 Action。 */
+function constrainFrame(frame: SemanticFrame, descriptor: PluginDescriptor): SemanticFrame {
+  const action = frame.action !== undefined && descriptor.actionTypes.includes(frame.action as ActionType) ? frame.action : (descriptor.actionTypes[0] ?? 'unknown');
+  return { ...frame, intent: descriptor.functionId, action };
 }

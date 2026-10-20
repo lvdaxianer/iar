@@ -379,7 +379,13 @@ function descriptorOf(record: PluginRecord): PluginDescriptor {
     description: record.manifest.description,
     actionTypes,
     capabilities,
-    operationMetadata: { actionTypes: [...actionTypes], capabilities: [...capabilities], riskLevel: record.manifest.policy.riskLevel, requiresConfirmation: record.manifest.policy.requiresConfirmation }
+    operationMetadata: {
+      actionTypes: [...actionTypes],
+      capabilities: [...capabilities],
+      riskLevel: record.manifest.policy.riskLevel,
+      requiresConfirmation: record.manifest.policy.requiresConfirmation,
+      operations: record.manifest.operations ? [...record.manifest.operations] : []
+    }
   };
 }
 

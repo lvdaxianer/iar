@@ -40,6 +40,7 @@ export const reportCenterManifest: FunctionPluginManifest = {
   version: '1.0.0',
   description: '报表中心插件，提供报表目录查看与受控导出的确定性模拟',
   actionTypes: ['query', 'execute'],
+  operations: reportCenterOperations,
   capabilities: ['report.read', 'report.export'],
   inputSchema: sandboxInputSchema(),
   outputSchema: sandboxOutputSchema(),

@@ -28,6 +28,7 @@ export const knowledgeQueryManifest: FunctionPluginManifest = {
   version: '1.0.0',
   description: '平台通用知识问答插件，检索本地知识库返回确定性 FAQ 结果',
   actionTypes: ['query'],
+  operations: knowledgeQueryOperations,
   capabilities: ['knowledge.read'],
   inputSchema: sandboxInputSchema(),
   outputSchema: sandboxOutputSchema(),

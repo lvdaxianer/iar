@@ -6,6 +6,12 @@
  */
 import {
   COMPACTION_LIMITS,
+  MAX_CANDIDATE_KEY_LENGTH,
+  MAX_CANDIDATE_VERSION_LENGTH,
+  MAX_CLARIFICATION_LABEL_LENGTH,
+  MAX_CLARIFICATION_OPTIONS,
+  MAX_CLARIFICATION_REASON_LENGTH,
+  MAX_UNRESOLVED_STREAK,
   REQUIRED_PRESERVED_FACTS,
   validateContract,
   type BehaviorContext,
@@ -224,17 +230,32 @@ export function normalizeCompactionState(state: Record<string, unknown>, current
   mergeObject(next.pending, pending, ['kind', 'status']);
   if (pending?.options !== undefined && isPendingOptions(pending.options)) next.pending.options = structuredClone(pending.options);
   mergeObject(next.confirmation, recordValue(state.confirmation), ['state', 'scopeHash', 'confirmedAt']);
+  const clarification = recordValue(state.clarification);
+  if (clarification && isClarificationState(clarification)) next.clarification = clarification;
   return next;
 }
 
 /** 压缩候选只允许有限且去重的澄清选项进入可信旧状态。 */
 function isPendingOptions(value: unknown): value is NonNullable<BehaviorContext['pending']['options']> {
-  if (!Array.isArray(value) || value.length > 12) return false;
+  if (!Array.isArray(value) || value.length > MAX_CLARIFICATION_OPTIONS) return false;
   const keys = new Set<string>();
   return value.every((option) => isRecord(option)
-    && typeof option.key === 'string' && option.key.length > 0 && option.key.length <= 60
-    && typeof option.label === 'string' && option.label.length > 0 && option.label.length <= 200
+    && typeof option.key === 'string' && option.key.length > 0 && option.key.length <= MAX_CANDIDATE_KEY_LENGTH
+    && typeof option.label === 'string' && option.label.length > 0 && option.label.length <= MAX_CLARIFICATION_LABEL_LENGTH
     && !keys.has(option.key) && (keys.add(option.key), true));
+}
+
+/** 只接受压缩结果中的有限 clarification 状态，避免模型扩展候选边界。 */
+function isClarificationState(value: Record<string, unknown>): value is NonNullable<BehaviorContext['clarification']> {
+  const mode = value.mode;
+  const streak = value.unresolvedStreak;
+  if (mode !== 'none' && mode !== 'unresolved' && mode !== 'selection') return false;
+  if (typeof streak !== 'number' || !Number.isInteger(streak) || streak < 0 || streak > MAX_UNRESOLVED_STREAK) return false;
+  if (value.reasonCode !== undefined && (typeof value.reasonCode !== 'string' || value.reasonCode.length > MAX_CLARIFICATION_REASON_LENGTH)) return false;
+  if (value.candidateVersion !== undefined && (typeof value.candidateVersion !== 'string' || value.candidateVersion.length > MAX_CANDIDATE_VERSION_LENGTH)) return false;
+  if (value.candidateKeys === undefined) return true;
+  if (!Array.isArray(value.candidateKeys) || value.candidateKeys.length > MAX_CLARIFICATION_OPTIONS || value.candidateKeys.some((key) => typeof key !== 'string' || key.length === 0 || key.length > MAX_CANDIDATE_KEY_LENGTH)) return false;
+  return new Set(value.candidateKeys).size === value.candidateKeys.length;
 }
 // 规范化之后仍必须调用 replaceIfIntegrityMatches。
 // 该调用阻止 subject、route、workflow 或 confirmation 被改变。

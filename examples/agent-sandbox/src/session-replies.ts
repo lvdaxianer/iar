@@ -94,13 +94,14 @@ export class SandboxSessionReplies {
       }
       return FALLBACK_REPLY_TEXT;
     }
-    const scripted = this.scriptedFallbackResponse(userText, behaviorContext);
+    const scripted = this.scriptedFallbackResponse(userText, behaviorContext, functionDescriptors);
     await this.persistClarification(behaviorContext, scripted?.clarification);
     return scripted?.text ?? FALLBACK_REPLY_TEXT;
   }
 
   /** 将模型通过契约返回的澄清元数据转换为可重放 pending 事件。 */
   private async persistClarification(context: BehaviorContext, clarification: ClarificationMetadata | undefined): Promise<void> {
+    if (context.clarification?.mode === 'selection' && context.pending.kind === 'selection' && context.pending.status === 'required') return;
     if (clarification) {
       await this.context.updateClarification({ kind: clarification.kind, status: clarification.status, ...(clarification.options ? { options: structuredClone(clarification.options) } : {}) });
       return;
@@ -147,11 +148,11 @@ export class SandboxSessionReplies {
    * @date 2026-10-18
    */
   protected scriptedFallbackReply(userText: string, behaviorContext: BehaviorContext): string | undefined {
-    return this.scriptedFallbackResponse(userText, behaviorContext)?.text;
+    return this.scriptedFallbackResponse(userText, behaviorContext, this.context.functionDescriptors)?.text;
   }
 
   /** 离线模型的通用结构化上下文兜底，不按业务关键词解释事实。 */
-  protected scriptedFallbackResponse(userText: string, behaviorContext: BehaviorContext): ScriptedReply | undefined {
+  protected scriptedFallbackResponse(userText: string, behaviorContext: BehaviorContext, functionDescriptors: PluginDescriptor[] = this.context.functionDescriptors): ScriptedReply | undefined {
     const text = userText.trim();
     const pending = behaviorContext.pending;
     if (pending.status === 'required' && pending.kind === 'selection' && pending.options && text.length <= 60) {
@@ -164,10 +165,10 @@ export class SandboxSessionReplies {
       return { text: '当前会话没有足够的已确认事实。请说明你想查询的对象或需要补充的信息。' };
     }
     if (/(你是谁|你叫什么|自我介绍|你是什么)/.test(text)) {
-      return { text: '我是 IAR Agent Sandbox，一个可交互的 IAR 插件沙盒。当前模拟的企业数据平台包含 10 个子系统：平台通用知识、数据集成管理（DIP）、任务调度监控、API 网关管理、数据资产目录、报表中心、系统状态与告警、账户与权限、工单支持和人工服务。你输入一句话，我会走完语义抽取、两阶段路由（Function → Plugin）、策略确认和插件执行，并在右侧展示完整的路由证据和事件流。' };
+      return { text: '我是 IAR Agent Sandbox，一个可交互的 IAR 插件沙盒。你输入一句话，我会走完语义抽取、两阶段路由、策略确认和插件执行。当前可用能力：' + describeFunctions(functionDescriptors) };
     }
     if (/(能做什么|会什么|有什么功能|可以做什么|能干嘛|能干什么)/.test(text)) {
-      return { text: '我目前支持十项能力：1）平台知识问答，如「如何申请数据权限」；2）数据集成管理，如「列出今天的集成任务」，重跑/停止需确认；3）任务调度监控，如「订单汇总 Job 跑完了吗」；4）API 网关管理，如「查看网关调用统计」，调整限流需确认；5）数据资产检索，如「搜一下用户表」；6）报表中心，如「列出销售报表」，导出需确认；7）系统状态与告警，如「现在有哪些告警」；8）账户与权限，如「我有哪些权限」，申请授权需确认；9）工单支持，如「帮我提个工单，网络很卡」；10）人工服务，如「转人工」，转接需确认。' };
+      return { text: `我目前可以使用这些已注册能力：${describeFunctions(functionDescriptors)}` };
     }
     return undefined;
   }
@@ -269,6 +270,12 @@ export class SandboxSessionReplies {
     this.context.recordMessage?.({ messageId: `message-${randomUUID()}`, role: 'assistant', content: assistantReply, occurredAt: new Date().toISOString() });
     if (this.context.recentMessages.length > this.context.recentMessageLimit) this.context.recentMessages.splice(0, this.context.recentMessages.length - this.context.recentMessageLimit);
   }
+}
+
+/** 只从当前 Plugin 描述生成能力说明，不维护业务功能清单。 */
+function describeFunctions(functionDescriptors: PluginDescriptor[]): string {
+  if (functionDescriptors.length === 0) return '当前没有可用能力。';
+  return functionDescriptors.map((descriptor, index) => `${String(index + 1)}）${descriptor.description}`).join('；');
 }
 
 /** 将进入模型窗口的消息限制在稳定的字符边界内。 */

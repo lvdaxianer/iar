@@ -9,10 +9,12 @@ import { resolveSandboxTraceId } from './safe-log.js';
 import { SandboxSessionStreamTurn } from './session-stream-turn.js';
 import { SandboxSessionReplies } from './session-replies.js';
 import { SandboxSessionRouting } from './session-routing.js';
-import type { ActionDefinition, ActionResult, BehaviorContext } from '@iar/contracts';
+import { DEFAULT_UNRESOLVED_STREAK_THRESHOLD, MAX_UNRESOLVED_STREAK, type ActionDefinition, type ActionResult, type BehaviorContext } from '@iar/contracts';
+import type { PluginDescriptor } from '@iar/plugin-host';
 import { confirmationScopeHash } from '@iar/workflow';
 import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
+import { createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
 import type { CompactResult, ConfirmResult, ExecuteTurnOutcome, ExtractFrameOutcome, RouteEvidence, StreamEvent, TurnResult } from './session-types.js';
 export type { CompactResult, ConfirmResult, PendingActionSummary, RouteEvidence, SandboxDecisionBackend, SandboxMode, SandboxState, StreamEvent, TurnResult, TurnStage } from './session-types.js';
 
@@ -27,7 +29,6 @@ export class IarSandboxSession extends SandboxSessionCore {
   private readonly replies = this.createReplies();
   /** 流式组件只持有宿主能力，重置后仍访问当前状态。 */
   private readonly streaming = this.createStreaming();
-
   /** 绑定路由依赖和可变状态，重置不会留下过期引用。
    * @returns 使用当前会话状态的路由组件
    * @author lvdaxianer@yeah.net
@@ -95,10 +96,14 @@ export class IarSandboxSession extends SandboxSessionCore {
     return new SandboxSessionStreamTurn({
       cancelStalePending: () => this.cancelStalePending(),
       nextTraceId: () => { this.turnCount += 1; return resolveSandboxTraceId(`trace-sandbox-${String(this.turnCount)}`); },
-      extractFrame: (traceId, runId, text, behaviorContext, recentMessages) => this.routing.extractFrame(traceId, runId, text, behaviorContext, recentMessages),
+      resolveSelection: (text, context) => session.resolveSelection(text, context),
+      rejectSelection: (text, reasonCode) => session.rejectSelection(text, reasonCode),
+      markUnresolved: (reasonCode) => session.markUnresolved(reasonCode),
+      resetClarification: () => session.resetClarification(),
+      extractFrame: (traceId, runId, text, behaviorContext, recentMessages, selectedDescriptor) => this.routing.extractFrame(traceId, runId, text, behaviorContext, recentMessages, selectedDescriptor),
       get recentMessages() { return session.recentMessages; },
       get functionDescriptors() { return session.pluginHost.descriptors(); },
-      routeFrame: (traceId, runId, frame, behaviorContext, currentMessage) => this.routing.routeFrame(traceId, runId, frame, behaviorContext, currentMessage),
+      routeFrame: (traceId, runId, frame, behaviorContext, currentMessage, recentMessages, selectedDescriptor) => this.routing.routeFrame(traceId, runId, frame, behaviorContext, currentMessage, recentMessages, selectedDescriptor),
       prepareAndExecute: (context) => this.routing.prepareAndExecute(context),
       fallbackReplyStreamed: (context, onDelta) => this.replies.fallbackReplyStreamed(context, onDelta),
       generateReplyStreamed: (context, onDelta) => this.replies.generateReplyStreamed(context, onDelta),
@@ -134,16 +139,17 @@ export class IarSandboxSession extends SandboxSessionCore {
     this.turnCount += 1;
     const traceId = resolveSandboxTraceId(`trace-sandbox-${String(this.turnCount)}`);
     const behaviorContext = this.projector.current();
-    const extracted = await this.routing.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext, this.recentMessages);
+    const selection = this.resolveSelection(userText, behaviorContext);
+    if (selection.invalid) return this.rejectSelection(userText, selection.reasonCode);
+    const extracted = await this.routing.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext, this.recentMessages, selection.descriptor);
     // 语义失败仍写入历史，保持原有对话恢复行为。
     if (!extracted.ok) {
+      await this.markUnresolved(extracted.reasonCode);
       this.replies.pushMessages(userText, extracted.reply);
       return { status: 'failed', reply: extracted.reply, route: extracted.route, reasonCode: extracted.reasonCode };
     }
-    return this.routeNormalTurn({ userText, traceId, behaviorContext, extracted });
+    return this.routeNormalTurn({ userText, traceId, behaviorContext, extracted, ...(selection.descriptor === undefined ? {} : { selectedDescriptor: selection.descriptor }) });
   }
-
-
   /**
    * 执行普通对话的路由并分派未命中或动作路径。
    * @param context - 用户输入、链路标识及抽取结果
@@ -151,9 +157,9 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected async routeNormalTurn(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }> }): Promise<TurnResult> {
-    const { userText, traceId, behaviorContext, extracted } = context;
-    const route = await this.routing.routeFrame(traceId, SESSION_RUN_ID, extracted.frame, behaviorContext, userText);
+  protected async routeNormalTurn(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }>; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
+    const { userText, traceId, behaviorContext, extracted, selectedDescriptor } = context;
+    const route = await this.routing.routeFrame(traceId, SESSION_RUN_ID, extracted.frame, behaviorContext, userText, this.recentMessages, selectedDescriptor);
     const evidence = buildEvidence(route, extracted.frame);
     // 抽取降级须保留在返回的路由证据中。
     if (extracted.semanticFallback) evidence.semanticFallback = true;
@@ -163,8 +169,6 @@ export class IarSandboxSession extends SandboxSessionCore {
     const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame: extracted.frame, route, behaviorContext });
     return this.finishNormalOutcome({ userText, traceId, evidence, outcome });
   }
-
-
   /**
    * 生成路由未命中时的普通回复，超限内容不写入历史。
    * 没有动作执行时，回复超限表现为失败而非正常澄清。
@@ -175,8 +179,10 @@ export class IarSandboxSession extends SandboxSessionCore {
    */
   protected async finishNormalFallback(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; evidence: RouteEvidence }): Promise<TurnResult> {
     const { userText, traceId, behaviorContext, evidence } = context;
+    if (!hasVerifiedFactsForFollowUp(behaviorContext, evidence) && !matchesPendingOption(behaviorContext, userText)) await this.markUnresolved(evidence.reasonCode);
+    const currentBehaviorContext = this.projector.current();
     // 未命中功能时只允许生成澄清回复，不能在兜底阶段隐式执行插件。
-    const reply = await trackModelResponseLimit(() => this.replies.fallbackReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext, recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), reasonCode: evidence.reasonCode })).catch((error: unknown) => {
+    const reply = await trackModelResponseLimit(() => this.replies.fallbackReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: currentBehaviorContext, recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), reasonCode: evidence.reasonCode })).catch((error: unknown) => {
       // 非超限错误必须继续向调用方传播。
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
@@ -185,8 +191,6 @@ export class IarSandboxSession extends SandboxSessionCore {
     this.replies.pushMessages(userText, reply);
     return { status: 'clarification', reply, route: evidence, reasonCode: evidence.reasonCode };
   }
-
-
   /**
    * 将动作阶段各终态转换成普通对话结果。
    * @param context - 当前输入、链路、路由证据和动作结果
@@ -198,17 +202,17 @@ export class IarSandboxSession extends SandboxSessionCore {
     const { userText, traceId, evidence, outcome } = context;
     // 尚未执行的终态先写入对话历史，不生成动作回复。
     if (outcome.status === 'awaiting_confirmation') {
+      await this.resetClarification();
       this.replies.pushMessages(userText, outcome.reply);
       return { status: 'awaiting_confirmation', reply: outcome.reply, route: evidence, pending: summarizeAction(outcome.action) };
     }
     if (outcome.status === 'failed' || outcome.status === 'clarification') {
+      if (outcome.status === 'clarification') await this.markUnresolved(outcome.reasonCode);
       this.replies.pushMessages(userText, outcome.reply);
       return { status: outcome.status, reply: outcome.reply, route: evidence, reasonCode: outcome.reasonCode };
     }
     return this.finishNormalExecution({ userText, traceId, evidence, outcome });
   }
-
-
   /**
    * 为已执行动作生成普通回复，保留动作成功和回复超限的区别。
    * 回复失败不能抹去动作结果，也不能将不完整文本存入历史。
@@ -220,6 +224,7 @@ export class IarSandboxSession extends SandboxSessionCore {
   protected async finishNormalExecution(context: { userText: string; traceId: string; evidence: RouteEvidence; outcome: Extract<ExecuteTurnOutcome, { status: 'executed' }> }): Promise<TurnResult> {
     const { userText, traceId, evidence, outcome } = context;
     // 动作已经落地后，模型回复失败也必须保留 executed 事实，禁止重试动作。
+    await this.resetClarification();
     const reply = await trackModelResponseLimit(() => this.replies.generateReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: this.projector.current(), recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), action: outcome.action, actionResult: outcome.actionResult })).catch((error: unknown) => {
       // 非超限错误保持原有传播方式。
       if (!(error instanceof ModelResponseLimitError)) throw error;
@@ -230,7 +235,40 @@ export class IarSandboxSession extends SandboxSessionCore {
     return { status: 'executed', reply, route: evidence, actionResult: outcome.actionResult };
   }
 
+  /** 累加未解决状态，达到阈值时将当前授权候选转换为动态选择。 */
+  public async markUnresolved(reasonCode: string): Promise<void> {
+    const current = this.projector.current();
+    const streak = Math.min(MAX_UNRESOLVED_STREAK, (current.clarification?.unresolvedStreak ?? 0) + 1);
+    const descriptors = this.pluginHost.descriptors();
+    if (streak >= DEFAULT_UNRESOLVED_STREAK_THRESHOLD && descriptors.length > 0) {
+      const selection = createSelectionState(descriptors, streak, reasonCode);
+      await this.updateClarificationState(selection.state, { kind: 'selection', status: 'required', options: selection.options });
+      return;
+    }
+    await this.updateClarificationState({ mode: 'unresolved', unresolvedStreak: streak, reasonCode }, current.pending);
+  }
 
+  /** 成功进入确认或执行阶段后清除旧的 unresolved 状态。 */
+  public async resetClarification(): Promise<void> {
+    await this.updateClarificationState({ mode: 'none', unresolvedStreak: 0 }, { kind: 'input', status: 'none' });
+  }
+
+  /** 解析待选择的候选键，只接受当前启用且授权的候选快照。 */
+  public resolveSelection(text: string, context: BehaviorContext): { descriptor?: PluginDescriptor; invalid: boolean; reasonCode: string } {
+    if (context.clarification?.mode !== 'selection' || context.pending.kind !== 'selection' || context.pending.status !== 'required') return { invalid: false, reasonCode: 'none' };
+    const trimmed = text.trim();
+    const descriptor = this.pluginHost.descriptors().find((item) => item.candidateKey === trimmed);
+    // 新的自然语言需求可以主动替换选择；只有形似候选键的过期/非法值才 fail-closed。
+    if (descriptor) return { descriptor, invalid: false, reasonCode: 'none' };
+    return trimmed.startsWith('candidate-') ? { invalid: true, reasonCode: 'selection_invalid' } : { invalid: false, reasonCode: 'selection_replaced' };
+  }
+
+  /** 对过期或非法候选选择 fail-closed，不触发语义路由或插件执行。 */
+  public async rejectSelection(userText: string, reasonCode: string): Promise<TurnResult> {
+    const reply = '这个选项已失效，请从当前列出的选项中重新选择。';
+    this.replies.pushMessages(userText, reply);
+    return { status: 'clarification', reply, route: { status: 'rejected', reasonCode, semanticIntent: 'unknown', semanticConfidence: 0 }, reasonCode };
+  }
   /**
    * 确认或取消当前待确认动作。
    *
@@ -248,7 +286,6 @@ export class IarSandboxSession extends SandboxSessionCore {
     if (!accepted) return this.cancelConfirmation(action);
     return this.executeConfirmation(action);
   }
-
   /** 取消当前动作并先投影工作流事件。
    * @param action - 用户取消的待确认动作
    * @returns 取消结果

@@ -35,7 +35,15 @@ function start(args: string[], key: string, port: number): Record<string, unknow
   assert.equal(child.stdout, '');
   assert.ok(child.stderr.length > 0, '启动后应有安全启动状态');
   assert.ok(!child.stderr.includes(secret));
-  return JSON.parse(child.stderr) as Record<string, unknown>;
+  return parseStartupLog(child.stderr);
+}
+
+/** 启动器的异步安全日志可能先输出无上下文的降级告警，测试只读取受控启动事件。 */
+function parseStartupLog(stderr: string): Record<string, unknown> {
+  const records = stderr.split('\n').filter((line) => line.startsWith('{')).map((line) => JSON.parse(line) as Record<string, unknown>);
+  const startup = records.find((record) => record.event === 'sandbox.start' || record.event === 'sandbox.start_failed');
+  assert.ok(startup);
+  return startup;
 }
 
 /**
@@ -84,7 +92,7 @@ test('启动失败只输出安全固定分类', () => {
   assert.equal(child.status, 1);
   assert.equal(child.stdout, '');
   assert.doesNotMatch(child.stderr, /RangeError|ERR_SOCKET_BAD_PORT|private-startup-key-sentinel/);
-  assert.deepEqual(JSON.parse(child.stderr), { level: 'warn', event: 'sandbox.start_failed', outcome: 'startup_failed' });
+  assert.deepEqual(parseStartupLog(child.stderr), { level: 'warn', event: 'sandbox.start_failed', outcome: 'startup_failed' });
 });
 
 /**
@@ -104,9 +112,7 @@ test('端口占用输出 port_in_use 及恢复提示', async () => {
     const env = { ...process.env, IAR_SANDBOX_PORT: String(address.port), IAR_LLM_API_KEY: 'CHANGE_ME', IAR_MODEL_API_KEY: 'CHANGE_ME' };
     const child = spawnSync(process.execPath, ['scripts/run-agent-sandbox.mjs', '--brain', 'scripted'], { encoding: 'utf8', env, timeout: 2000 });
     assert.equal(child.status, 1);
-    const logLine = child.stderr.split('\n').find((line) => line.startsWith('{'));
-    assert.ok(logLine);
-    assert.deepEqual(JSON.parse(logLine), { level: 'warn', event: 'sandbox.start_failed', outcome: 'port_in_use' });
+    assert.deepEqual(parseStartupLog(child.stderr), { level: 'warn', event: 'sandbox.start_failed', outcome: 'port_in_use' });
     assert.match(child.stderr, /端口.*占用|IAR_SANDBOX_PORT/);
     assert.doesNotMatch(child.stderr, /EADDRINUSE|private|Error:/);
   } finally {
@@ -129,7 +135,7 @@ function checkArgumentFailure(args: string[], outcome: string): void {
   assert.equal(child.stdout, '');
   assert.ok(!child.stderr.includes(secret));
   assert.match(child.stderr, /^\{/);
-  assert.deepEqual(JSON.parse(child.stderr), { level: 'warn', event: 'sandbox.start_failed', outcome });
+  assert.deepEqual(parseStartupLog(child.stderr), { level: 'warn', event: 'sandbox.start_failed', outcome });
 }
 
 /** 非法模式包含敏感哨兵时也只能输出固定错误枚举。 */
@@ -153,7 +159,7 @@ test('启动前配置读取失败不输出自由错误', () => {
       { cwd: directory, encoding: 'utf8', timeout: 2000 });
     assert.equal(child.status, 1);
     assert.equal(child.stdout, '');
-    assert.deepEqual(JSON.parse(child.stderr), { level: 'warn', event: 'sandbox.start_failed', outcome: 'startup_failed' });
+    assert.deepEqual(parseStartupLog(child.stderr), { level: 'warn', event: 'sandbox.start_failed', outcome: 'startup_failed' });
   } finally { rmdirSync(dotEnv); rmdirSync(directory); }
 });
 

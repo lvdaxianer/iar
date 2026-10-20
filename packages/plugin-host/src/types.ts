@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import type { ActionType, ContractErrorResult, EventEnvelope, PluginManifest, RiskLevel } from '@iar/contracts';
+import type { ActionType, ContractErrorResult, EventEnvelope, PluginManifest, PluginOperation, RiskLevel } from '@iar/contracts';
 import type { PluginHandler, PluginRegistration } from '@iar/plugin-sdk';
 
 /**
@@ -54,6 +54,7 @@ export type PluginDescriptor = {
     capabilities: string[];
     riskLevel: RiskLevel;
     requiresConfirmation: boolean;
+    operations: PluginOperation[];
   };
 };
 

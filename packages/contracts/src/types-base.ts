@@ -36,6 +36,16 @@ export const ACTION_TYPES = ['query', 'create', 'update', 'delete', 'transfer', 
 /** Function/Plugin Manifest 声明的固定动作类型。 */
 export type ActionType = typeof ACTION_TYPES[number];
 
+/** Function Plugin 可选的操作描述，供路由和回复层理解能力边界。 */
+export type PluginOperation = {
+  /** 传给 Handler 的稳定操作名。 */
+  name: string;
+  /** read 不产生副作用，action 需要沿用 Plugin policy。 */
+  kind: 'read' | 'action';
+  /** 面向模型和用户的能力描述。 */
+  description: string;
+};
+
 /** 插件的业务或系统实现类型。 */
 export type PluginKind = 'function' | 'system';
 
@@ -105,6 +115,8 @@ export type FunctionPluginManifest = {
   description: string;
   // actionTypes 是模型筛选 Plugin 后可继续选择的动作范围。
   actionTypes: ActionType[];
+  // 操作描述由插件声明，运行时不维护业务目录。
+  operations?: readonly PluginOperation[];
   // 能力不能由模型动态扩展。
   capabilities: string[];
   // 输入输出 Schema 是插件调用边界。

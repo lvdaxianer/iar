@@ -22,6 +22,9 @@ export const MAX_CLARIFICATION_OPTIONS = 12;
 /** 连续未解决状态允许保存的最大次数。 */
 export const MAX_UNRESOLVED_STREAK = 8;
 
+/** 连续无法解决时升级为动态候选选择的默认次数。 */
+export const DEFAULT_UNRESOLVED_STREAK_THRESHOLD = 2;
+
 /** 澄清原因和候选版本的长度边界。 */
 export const MAX_CLARIFICATION_REASON_LENGTH = 120;
 export const MAX_CANDIDATE_VERSION_LENGTH = 200;
