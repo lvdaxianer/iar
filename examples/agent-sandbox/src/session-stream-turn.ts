@@ -31,7 +31,7 @@ export type StreamTurnContext = {
   prepareAndExecute: (context: { runId: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext }) => Promise<ExecuteTurnOutcome>;
   /** 兜底与执行后回复分别保留增量回调和超限错误。 */
   fallbackReplyStreamed: (context: { traceId: string; runId: string; userText: string; reasonCode: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[]; resolvedReferences?: ResolvedFactReference[] }, onDelta: (delta: string) => void) => Promise<string>;
-  generateReplyStreamed: (context: { traceId: string; runId: string; userText: string; action: ActionDefinition; actionResult: ActionResult; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[] }, onDelta: (delta: string) => void) => Promise<string>;
+  generateReplyStreamed: (context: { traceId: string; runId: string; userText: string; action: ActionDefinition; actionResult: ActionResult; operationKind: 'read' | 'action'; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[] }, onDelta: (delta: string) => void) => Promise<string>;
   currentBehaviorContext: () => BehaviorContext;
   /** 仅完整回复可写入宿主持有的历史。 */
   pushMessages: (userText: string, reply: string) => void;
@@ -164,7 +164,7 @@ export class SandboxSessionStreamTurn {
     });
     if (reply === undefined) return { status: 'failed', reply: '模型回复超限，回复未完成。', route: evidence, reasonCode: 'model_response_too_large' };
     this.context.pushMessages(userText, reply);
-    return { status: 'clarification', reply, route: evidence, reasonCode: evidence.reasonCode };
+    return { status: 'clarification', reply, route: evidence, reasonCode: evidence.reasonCode, ...(resolvedReferences && resolvedReferences.length > 0 ? { disposition: 'context_answered' as const } : {}) };
   }
 
   /** 将动作终态转换为流式结果，已执行时继续回复阶段。
@@ -176,6 +176,7 @@ export class SandboxSessionStreamTurn {
   protected async finishStreamOutcome(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; evidence: RouteEvidence; outcome: ExecuteTurnOutcome }): Promise<TurnResult> {
     const { userText, evidence, outcome } = context;
     if (outcome.status === 'awaiting_confirmation') {
+      evidence.operationKind = outcome.operationKind;
       await this.context.resetClarification();
       this.context.pushMessages(userText, outcome.reply);
       return { status: 'awaiting_confirmation', reply: outcome.reply, route: evidence, pending: summarizeAction(outcome.action) };
@@ -197,9 +198,10 @@ export class SandboxSessionStreamTurn {
    */
   protected async finishStreamExecution(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; evidence: RouteEvidence; outcome: Extract<ExecuteTurnOutcome, { status: 'executed' }> }): Promise<TurnResult> {
     const { userText, traceId, emit, evidence, outcome } = context;
+    evidence.operationKind = outcome.operationKind;
     await this.context.resetClarification();
     emit({ type: 'stage', stage: 'response' });
-    const reply = await trackModelResponseLimit(() => this.context.generateReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, action: outcome.action, actionResult: outcome.actionResult, behaviorContext: this.context.currentBehaviorContext(), recentMessages: this.context.recentMessages, functionDescriptors: this.context.functionDescriptors }, (delta) => emit({ type: 'delta', text: delta }))).catch((error: unknown) => {
+    const reply = await trackModelResponseLimit(() => this.context.generateReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, action: outcome.action, actionResult: outcome.actionResult, operationKind: outcome.operationKind, behaviorContext: this.context.currentBehaviorContext(), recentMessages: this.context.recentMessages, functionDescriptors: this.context.functionDescriptors }, (delta) => emit({ type: 'delta', text: delta }))).catch((error: unknown) => {
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
     });

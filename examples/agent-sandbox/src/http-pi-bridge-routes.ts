@@ -102,7 +102,7 @@ async function handleState(session: IarSandboxSession, sessionId: string): Promi
 function toInputResponse(sessionId: string, result: TurnResult): BridgeInputResponse {
   if (result.status === 'pass_through') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'pass_through', route: toRouteEvidence(result.route), capabilityContext: result.capabilityContext, replySource: result.replySource ?? 'pi_agent' };
   if (result.status === 'awaiting_confirmation') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'awaiting_confirmation', reply: result.reply, pending: toPendingAction(result.pending), route: toRouteEvidence(result.route), replySource: result.replySource ?? 'none' };
-  if (result.status === 'clarification') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'clarification', reply: result.reply, reasonCode: result.reasonCode, route: toRouteEvidence(result.route), replySource: result.replySource ?? 'response_model' };
+  if (result.status === 'clarification') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: result.disposition ?? 'clarification', reply: result.reply, reasonCode: result.reasonCode, route: toRouteEvidence(result.route), replySource: result.replySource ?? 'response_model' };
   if (result.status === 'executed') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'handled', reply: result.reply, ...(result.reasonCode === undefined ? {} : { reasonCode: result.reasonCode }), route: toRouteEvidence(result.route), replySource: result.replySource ?? 'response_model' };
   if (result.status === 'failed') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'handled', reply: result.reply, reasonCode: result.reasonCode, route: toRouteEvidence(result.route), replySource: result.replySource ?? 'none' };
   // bridge 会话不挂载进程内 Pi 委托，agent 终态只出现在网页会话，属于协议不变量破坏。
@@ -117,7 +117,7 @@ function toConfirmResponse(sessionId: string, result: ConfirmResult): BridgeConf
 
 /** 只公开路由摘要，禁止暴露模型和 Action 输入。 */
 function toRouteEvidence(route: RouteEvidence): BridgeRouteEvidence {
-  return { status: route.status, reasonCode: route.reasonCode, semanticIntent: route.semanticIntent, semanticConfidence: route.semanticConfidence, ...(route.functionId === undefined ? {} : { functionId: route.functionId }), ...(route.pluginId === undefined ? {} : { pluginId: route.pluginId }) };
+  return { status: route.status, reasonCode: route.reasonCode, semanticIntent: route.semanticIntent, semanticConfidence: route.semanticConfidence, ...(route.functionId === undefined ? {} : { functionId: route.functionId }), ...(route.pluginId === undefined ? {} : { pluginId: route.pluginId }), ...(route.operationKind === undefined ? {} : { operationKind: route.operationKind }) };
 }
 
 /** 从公开 pending 摘要去除 Action input。 */

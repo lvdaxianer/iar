@@ -13,7 +13,7 @@ import { DEFAULT_UNRESOLVED_STREAK_THRESHOLD, MAX_UNRESOLVED_STREAK, type Action
 import type { PluginDescriptor } from '@iar/plugins';
 import { confirmationScopeHash } from '@iar/runtime';
 import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
-import { buildEvidence, summarizeAction } from './session-helpers.js';
+import { buildEvidence, sandboxOperationKind, summarizeAction } from './session-helpers.js';
 import { createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
 import { finishConfirmedAction, pendingBridgeResult, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection } from './session-turn-helpers.js';
 import { withConfirmReplySource, withReplySource, type CompactResult, type ConfirmResult, type ExecuteTurnOutcome, type ExtractFrameOutcome, type RouteEvidence, type StreamEvent, type TurnResult } from './session-types.js';
@@ -79,7 +79,6 @@ export class IarSandboxSession extends SandboxSessionCore {
       set compactCount(value) { session.compactCount = value; }
     });
   }
-
   /** 压缩当前会话，并保留原有公开入口。
    * @returns 压缩结果
    * @author lvdaxianer@yeah.net
@@ -114,7 +113,6 @@ export class IarSandboxSession extends SandboxSessionCore {
       piAgent: this.piAgent
     });
   }
-
   /** 在当前会话中执行流式对话并发送阶段与终态。
    * @param text - 用户输入
    * @param emit - 流式事件接收器
@@ -222,7 +220,7 @@ export class IarSandboxSession extends SandboxSessionCore {
     });
     if (reply === undefined) return { status: 'failed', reply: '模型回复超限，回复未完成。', route: evidence, reasonCode: 'model_response_too_large' };
     this.replies.pushMessages(userText, reply);
-    return { status: 'clarification', reply, route: evidence, reasonCode: evidence.reasonCode };
+    return { status: 'clarification', reply, route: evidence, reasonCode: evidence.reasonCode, ...(resolvedReferences && resolvedReferences.length > 0 ? { disposition: 'context_answered' as const } : {}) };
   }
   /**
    * 将动作阶段各终态转换成普通对话结果。
@@ -235,6 +233,7 @@ export class IarSandboxSession extends SandboxSessionCore {
     const { userText, traceId, evidence, outcome } = context;
     // 尚未执行的终态先写入对话历史，不生成动作回复。
     if (outcome.status === 'awaiting_confirmation') {
+      evidence.operationKind = outcome.operationKind;
       await this.resetClarification();
       this.replies.pushMessages(userText, outcome.reply);
       return { status: 'awaiting_confirmation', reply: outcome.reply, route: evidence, pending: summarizeAction(outcome.action) };
@@ -258,7 +257,8 @@ export class IarSandboxSession extends SandboxSessionCore {
     const { userText, traceId, evidence, outcome } = context;
     // 动作已经落地后，模型回复失败也必须保留 executed 事实，禁止重试动作。
     await this.resetClarification();
-    const reply = await trackModelResponseLimit(() => this.replies.generateReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: this.projector.current(), recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), action: outcome.action, actionResult: outcome.actionResult })).catch((error: unknown) => {
+    evidence.operationKind = outcome.operationKind;
+    const reply = await trackModelResponseLimit(() => this.replies.generateReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: this.projector.current(), recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), action: outcome.action, actionResult: outcome.actionResult, operationKind: outcome.operationKind })).catch((error: unknown) => {
       // 非超限错误保持原有传播方式。
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
@@ -267,7 +267,6 @@ export class IarSandboxSession extends SandboxSessionCore {
     if (reply.length > 0) this.replies.pushMessages(userText, reply);
     return { status: 'executed', reply, route: evidence, actionResult: outcome.actionResult };
   }
-
   /** 累加未解决状态，达到阈值时将当前授权候选转换为动态选择。 */
   public async markUnresolved(reasonCode: string, pendingReference?: PendingReference): Promise<void> {
     const current = this.projector.current();
@@ -345,6 +344,7 @@ export class IarSandboxSession extends SandboxSessionCore {
     this.pending = null;
     this.workflow.transition({ runId, event: 'complete' });
     await this.drainWorkflowEvents();
-    return finishConfirmedAction({ replies: this.replies, projector: this.projector, recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), turnCount: this.turnCount }, action, executed.value);
+    const operationKind = resolved.ok ? sandboxOperationKind(action.functionId, action.input, resolved.value.functions.get(action.functionId)?.operations ?? []) : 'action';
+    return finishConfirmedAction({ replies: this.replies, projector: this.projector, recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), turnCount: this.turnCount }, action, executed.value, operationKind);
   }
 }

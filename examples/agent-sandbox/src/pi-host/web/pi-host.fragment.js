@@ -7,7 +7,7 @@
   const PI_HOST_HISTORY_LIMIT = 100;
   const PI_HOST_EVENT_LIMIT = 8;
   const PI_HOST_SESSION_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
-  const PI_HOST_DISPOSITION_META = { handled: '已执行', awaiting_confirmation: '等待确认', clarification: '需要澄清', cancelled: '已取消', pass_through: '已通过' };
+  const PI_HOST_DISPOSITION_META = { handled: '已执行', awaiting_confirmation: '等待确认', clarification: '需要澄清', context_answered: '已根据上下文回答', cancelled: '已取消', pass_through: '已通过' };
   const PI_HOST_REPLY_SOURCE_META = { direct_function: 'Function 直出', response_model: 'Response Model', pi_agent: 'Pi Agent', none: '无回复' };
   const PI_HOST_WELCOME = '你好，这里是 Pi × IAR 前置意图路由演示。本页与 8787 IAR Agent Sandbox 共用同一套界面与渲染资源，仅底层协议不同：每轮输入先经 Pi input hook 交给 IAR 意图识别与 Plugin/Function 动态路由，命中即展示 IAR 结果并阻断 Pi Agent；未命中才由进程内 Pi Agent 流式回答。右侧可查看调用链、路由证据与会话信息。';
   let piHostMessagesEl = document.getElementById('messages');
@@ -157,6 +157,7 @@
   function updatePiHostRoutePanel(route) {
     document.getElementById('routeFunction').textContent = route.functionId || '-';
     document.getElementById('routePlugin').textContent = route.pluginId || '-';
+    document.getElementById('routeOperation').textContent = route.operationKind || '-';
     document.getElementById('routeStatus').textContent = route.disposition || '-';
     document.getElementById('routeReplySource').textContent = PI_HOST_REPLY_SOURCE_META[route.replySource] || route.replySource || '-';
     document.getElementById('routeConfidence').textContent = route.semanticIntent ? route.semanticIntent + '（' + Math.round((route.semanticConfidence || 0) * 100) + '%）' : '-';
@@ -277,7 +278,7 @@
     var meta = piHostEntryMeta(data);
     if (piHostBubble && piHostExpectingEntry) streamPiHostEntryText(data.content, meta);
     else { appendMsg('bot', data.content, meta); recordPiHostConversation('bot', data.content, meta); }
-    if (data.disposition === 'handled') highlightPiHostFlow(['input', 'hook', 'iar', 'handled']);
+    if (data.disposition === 'handled' || data.disposition === 'context_answered') highlightPiHostFlow(['input', 'hook', 'iar', 'handled']);
     return true;
   }
 

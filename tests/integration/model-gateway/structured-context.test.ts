@@ -269,6 +269,7 @@ test('scripted semantic fallback answers a verified follow-up without repeating 
     const followUp = await session.turn('告诉我刚才的工单单号');
     const after = await session.state();
     assert.equal(followUp.status, 'clarification');
+    if (followUp.status === 'clarification') assert.equal(followUp.disposition, 'context_answered');
     assert.match(followUp.reply, new RegExp(String(ticketId)));
     assert.equal(after.stats.eventCount, before.stats.eventCount);
     assert.equal(after.pending, null);
@@ -296,6 +297,7 @@ test('scripted fallback resolves the previous fact record instead of returning t
 
     const followUp = await session.turn('告诉我这个的上一个工单编号');
     assert.equal(followUp.status, 'clarification');
+    if (followUp.status === 'clarification') assert.equal(followUp.disposition, 'context_answered');
     assert.match(followUp.reply, new RegExp(String(first)));
     assert.doesNotMatch(followUp.reply, new RegExp(String(second)));
   } finally {

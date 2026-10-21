@@ -10,7 +10,7 @@
 export const PI_BRIDGE_VERSION = 'iar.pi-bridge/v1' as const;
 
 /** Pi 输入在 IAR 边界上的唯一处置结果。 */
-export type BridgeDisposition = 'pass_through' | 'handled' | 'clarification' | 'awaiting_confirmation';
+export type BridgeDisposition = 'pass_through' | 'handled' | 'clarification' | 'context_answered' | 'awaiting_confirmation';
 
 /** 公开回复来源，区分 IAR 直出、回复模型和 Pi Agent。 */
 export type BridgeReplySource = 'direct_function' | 'response_model' | 'pi_agent' | 'none';
@@ -28,7 +28,7 @@ export type BridgeOpenRequest = { piSessionId: PiSessionId; iarSessionId?: IarSe
 export type BridgeOpenResponse = { version: typeof PI_BRIDGE_VERSION; piSessionId: PiSessionId; iarSessionId: IarSessionId; resumed: boolean };
 
 /** 路由公开证据，不包含模型原文、权限或敏感输入。 */
-export type BridgeRouteEvidence = { status: string; reasonCode: string; semanticIntent: string; semanticConfidence: number; functionId?: string; pluginId?: string };
+export type BridgeRouteEvidence = { status: string; reasonCode: string; semanticIntent: string; semanticConfidence: number; functionId?: string; pluginId?: string; operationKind?: 'read' | 'action' };
 
 /** pass-through 交给下游模型的有界能力描述。 */
 export type BridgeCapabilityDescriptor = { functionId: string; pluginId: string; description: string; actionTypes: string[] };
@@ -59,7 +59,7 @@ export type BridgeErrorResponse = { version: typeof PI_BRIDGE_VERSION; code: str
 
 /** 判断未知值是否为合法桥接 disposition。 */
 export function isBridgeDisposition(value: unknown): value is BridgeDisposition {
-  return value === 'pass_through' || value === 'handled' || value === 'clarification' || value === 'awaiting_confirmation';
+  return value === 'pass_through' || value === 'handled' || value === 'clarification' || value === 'context_answered' || value === 'awaiting_confirmation';
 }
 
 /** 判断未知值是否为合法回复来源。 */
