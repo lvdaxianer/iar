@@ -12,6 +12,9 @@ export const PI_BRIDGE_VERSION = 'iar.pi-bridge/v1' as const;
 /** Pi 输入在 IAR 边界上的唯一处置结果。 */
 export type BridgeDisposition = 'pass_through' | 'handled' | 'clarification' | 'awaiting_confirmation';
 
+/** 公开回复来源，区分 IAR 直出、回复模型和 Pi Agent。 */
+export type BridgeReplySource = 'direct_function' | 'response_model' | 'pi_agent' | 'none';
+
 /** Pi 会话标识的有界字符串类型。 */
 export type PiSessionId = string;
 
@@ -40,13 +43,13 @@ export type BridgePendingAction = { actionId: string; runId: string; functionId:
 export type BridgeInputRequest = { text: string; requestId?: string };
 
 /** 输入响应。 */
-export type BridgeInputResponse = { version: typeof PI_BRIDGE_VERSION; iarSessionId: IarSessionId; disposition: BridgeDisposition; reply?: string; reasonCode?: string; route?: BridgeRouteEvidence; pending?: BridgePendingAction; capabilityContext?: BridgeCapabilityContext };
+export type BridgeInputResponse = { version: typeof PI_BRIDGE_VERSION; iarSessionId: IarSessionId; disposition: BridgeDisposition; reply?: string; reasonCode?: string; route?: BridgeRouteEvidence; pending?: BridgePendingAction; capabilityContext?: BridgeCapabilityContext; replySource?: BridgeReplySource };
 
 /** 确认或取消请求。 */
 export type BridgeConfirmRequest = { actionId: string; accepted: boolean; requestId?: string };
 
 /** 确认或取消响应。 */
-export type BridgeConfirmResponse = { version: typeof PI_BRIDGE_VERSION; iarSessionId: IarSessionId; disposition: 'handled'; reply: string; reasonCode?: string; pending?: BridgePendingAction };
+export type BridgeConfirmResponse = { version: typeof PI_BRIDGE_VERSION; iarSessionId: IarSessionId; disposition: 'handled'; reply: string; reasonCode?: string; pending?: BridgePendingAction; replySource?: BridgeReplySource };
 
 /** 状态响应只返回扩展驱动下一步所需的最小字段。 */
 export type BridgeStateResponse = { version: typeof PI_BRIDGE_VERSION; iarSessionId: IarSessionId; pending?: BridgePendingAction };
@@ -57,4 +60,9 @@ export type BridgeErrorResponse = { version: typeof PI_BRIDGE_VERSION; code: str
 /** 判断未知值是否为合法桥接 disposition。 */
 export function isBridgeDisposition(value: unknown): value is BridgeDisposition {
   return value === 'pass_through' || value === 'handled' || value === 'clarification' || value === 'awaiting_confirmation';
+}
+
+/** 判断未知值是否为合法回复来源。 */
+export function isBridgeReplySource(value: unknown): value is BridgeReplySource {
+  return value === 'direct_function' || value === 'response_model' || value === 'pi_agent' || value === 'none';
 }

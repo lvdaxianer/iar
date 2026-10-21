@@ -8,11 +8,12 @@ test('IAR bridge client sends bounded input and validates the response', async (
     baseUrl: 'http://iar.test/',
     fetch: async (input, options) => {
       calls.push({ url: String(input), body: String(options?.body ?? '') });
-      return Response.json({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-1', disposition: 'pass_through' });
+      return Response.json({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-1', disposition: 'pass_through', replySource: 'pi_agent' });
     }
   });
   const result = await client.input('iar-1', '普通问题');
   assert.equal(result.disposition, 'pass_through');
+  assert.equal(result.replySource, 'pi_agent');
   assert.equal(calls[0]?.url, 'http://iar.test/api/bridge/v1/sessions/iar-1/input');
   assert.deepEqual(JSON.parse(calls[0]?.body ?? '{}'), { text: '普通问题' });
 });
@@ -40,6 +41,14 @@ test('IAR bridge client rejects oversized pass-through capability context', asyn
       disposition: 'pass_through',
       capabilityContext: { functionDescriptors: Array.from({ length: 129 }, (_, index) => ({ functionId: `f-${index}`, pluginId: 'p', description: '可查询', actionTypes: ['query'] })) }
     })
+  });
+  await assert.rejects(() => client.input('iar-1', '普通问题'), (error: unknown) => error instanceof BridgeClientError && error.code === 'invalid_bridge_response');
+});
+
+test('IAR bridge client rejects an unknown reply source', async () => {
+  const client = new IarBridgeClient({
+    baseUrl: 'http://iar.test',
+    fetch: async () => Response.json({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-1', disposition: 'handled', reply: '已处理', replySource: 'unknown' })
   });
   await assert.rejects(() => client.input('iar-1', '普通问题'), (error: unknown) => error instanceof BridgeClientError && error.code === 'invalid_bridge_response');
 });
@@ -92,7 +101,7 @@ test('Pi extension continues pass-through and handles IAR results', async () => 
   let inputCalls = 0;
   const responses: BridgeInputResponse[] = [
     { version: PI_BRIDGE_VERSION, iarSessionId: 'iar-1', disposition: 'pass_through' },
-    { version: PI_BRIDGE_VERSION, iarSessionId: 'iar-1', disposition: 'awaiting_confirmation', reply: '请确认', pending: { actionId: 'action-1', runId: 'run-1', functionId: 'f', pluginId: 'p', riskLevel: 'high', confirmationRequired: true } }
+    { version: PI_BRIDGE_VERSION, iarSessionId: 'iar-1', disposition: 'awaiting_confirmation', reply: '请确认', replySource: 'none', pending: { actionId: 'action-1', runId: 'run-1', functionId: 'f', pluginId: 'p', riskLevel: 'high', confirmationRequired: true } }
   ];
   const fakeClient = {
     openSession: async () => ({ version: PI_BRIDGE_VERSION, piSessionId: 'pi-1', iarSessionId: 'iar-1', resumed: false }),
@@ -112,10 +121,10 @@ test('Pi extension continues pass-through and handles IAR results', async () => 
   assert.deepEqual(await handlers.get('input')?.({ text: '普通问题', source: 'interactive' }, context), { action: 'continue' });
   assert.deepEqual(await handlers.get('input')?.({ text: '执行动作', source: 'interactive' }, context), { action: 'handled' });
   assert.equal(entries.length, 1);
-  assert.deepEqual(entries[0], { customType: 'iar-bridge', data: { content: '请确认', disposition: 'awaiting_confirmation' } });
+  assert.deepEqual(entries[0], { customType: 'iar-bridge', data: { content: '请确认', disposition: 'awaiting_confirmation', replySource: 'none' } });
   assert.equal(renderers.has('iar-bridge'), true);
   const rendered = renderers.get('iar-bridge')?.({ data: entries[0]?.data }, { expanded: false }, {});
-  assert.deepEqual(rendered?.render(80), ['[IAR awaiting_confirmation] 请确认']);
+  assert.deepEqual(rendered?.render(80), ['[IAR awaiting_confirmation · none] 请确认']);
   const unsafe = renderers.get('iar-bridge')?.({ data: { content: `\u001b[31m${'x'.repeat(5000)}\u001b[0m`, disposition: 'handled' } }, { expanded: false }, {});
   assert.equal(unsafe?.render(80).some((line) => line.includes('\u001b')), false);
   assert.equal(unsafe?.render(80).join('').length <= 4096 + '[IAR handled] '.length, true);

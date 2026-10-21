@@ -19,6 +19,9 @@ export type SandboxMode = 'brain' | 'scripted';
 /** sandbox 可选的决策 backend；默认保留 JEV 优先解析。 */
 export type SandboxDecisionBackend = DecisionBackend;
 
+/** 用户可观测的回复来源，值域与 Pi bridge 保持稳定。 */
+export type ReplySource = 'direct_function' | 'response_model' | 'pi_agent' | 'none';
+
 /** 路由证据摘要，供调试面板展示。 */
 export type RouteEvidence = {
   /** 路由终态。 */
@@ -64,12 +67,12 @@ export type PendingActionSummary = {
 
 /** 单轮对话结果联合。 */
 export type TurnResult =
-  | { status: 'pass_through'; route: RouteEvidence; capabilityContext: PassThroughCapabilityContext }
-  | { status: 'agent'; reply: string; route: RouteEvidence }
-  | { status: 'executed'; reply: string; route: RouteEvidence; actionResult: ActionResult; reasonCode?: string }
-  | { status: 'awaiting_confirmation'; reply: string; route: RouteEvidence; pending: PendingActionSummary }
-  | { status: 'clarification'; reply: string; route: RouteEvidence; reasonCode: string }
-  | { status: 'failed'; reply: string; route: RouteEvidence; reasonCode: string };
+  | { status: 'pass_through'; route: RouteEvidence; capabilityContext: PassThroughCapabilityContext; replySource?: ReplySource }
+  | { status: 'agent'; reply: string; route: RouteEvidence; replySource?: ReplySource }
+  | { status: 'executed'; reply: string; route: RouteEvidence; actionResult: ActionResult; reasonCode?: string; replySource?: ReplySource }
+  | { status: 'awaiting_confirmation'; reply: string; route: RouteEvidence; pending: PendingActionSummary; replySource?: ReplySource }
+  | { status: 'clarification'; reply: string; route: RouteEvidence; reasonCode: string; replySource?: ReplySource }
+  | { status: 'failed'; reply: string; route: RouteEvidence; reasonCode: string; replySource?: ReplySource };
 
 /** 流式输出的阶段标识。 */
 export type TurnStage = 'semantic' | 'route' | 'action' | 'response';
@@ -106,9 +109,32 @@ export type ExecuteTurnOutcome =
 
 /** 确认操作结果联合。 */
 export type ConfirmResult =
-  | { status: 'executed'; reply: string; actionResult: ActionResult; reasonCode?: string }
-  | { status: 'cancelled'; reply: string }
-  | { status: 'failed'; reply: string; reasonCode: string };
+  | { status: 'executed'; reply: string; actionResult: ActionResult; reasonCode?: string; replySource?: ReplySource }
+  | { status: 'cancelled'; reply: string; replySource?: ReplySource }
+  | { status: 'failed'; reply: string; reasonCode: string; replySource?: ReplySource };
+
+/** 按已校验的 Function 响应模式映射实际回复来源。 */
+export function replySourceForActionResult(actionResult: ActionResult): ReplySource {
+  if (actionResult.response?.mode === 'direct') return 'direct_function';
+  if (actionResult.response?.mode === 'none') return 'none';
+  return 'response_model';
+}
+
+/** 在公开会话边界补齐回复来源，兼容内部旧的结果构造路径。 */
+export function withReplySource(result: TurnResult): TurnResult {
+  if (result.replySource !== undefined) return result;
+  if (result.status === 'pass_through' || result.status === 'agent') return { ...result, replySource: 'pi_agent' };
+  if (result.status === 'executed') return { ...result, replySource: replySourceForActionResult(result.actionResult) };
+  if (result.status === 'clarification') return { ...result, replySource: 'response_model' };
+  return { ...result, replySource: 'none' };
+}
+
+/** 在确认边界补齐回复来源，避免确认响应缺少可观测来源。 */
+export function withConfirmReplySource(result: ConfirmResult): ConfirmResult {
+  if (result.replySource !== undefined) return result;
+  if (result.status === 'executed') return { ...result, replySource: replySourceForActionResult(result.actionResult) };
+  return { ...result, replySource: 'none' };
+}
 
 /** 上下文压缩结果。 */
 export type CompactResult = {

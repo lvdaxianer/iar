@@ -6,7 +6,7 @@
  * @date 2026-10-20
  */
 import { BridgeClientError, IarBridgeClient, type IarBridgeClientLike, type BridgeLogger } from './client.js';
-import type { BridgeInputResponse } from './protocol.js';
+import { isBridgeReplySource, type BridgeInputResponse, type BridgeReplySource } from './protocol.js';
 
 /** Pi 输入事件的最小结构。 */
 export type PiInputEvent = { text: string; source: 'interactive' | 'rpc' | 'extension' };
@@ -107,7 +107,7 @@ async function confirmPending(pi: PiExtensionAPI, client: IarBridgeClientLike, s
   try {
     const response = await client.confirm(state.iarSessionId, state.pendingActionId, accepted);
     state.pendingActionId = response.pending?.actionId;
-    presentMessage(pi, context, response.reply, response.reasonCode ?? (accepted ? 'confirmed' : 'cancelled'));
+    presentMessage(pi, context, response.reply, response.reasonCode ?? (accepted ? 'confirmed' : 'cancelled'), response.replySource);
   } catch (error) {
     state.isAvailable = false;
     if (error instanceof BridgeClientError && error.code === 'bridge_rejected') context.ui.notify('IAR 拒绝了当前确认请求。', 'warning');
@@ -119,14 +119,14 @@ async function confirmPending(pi: PiExtensionAPI, client: IarBridgeClientLike, s
 function presentResponse(pi: PiExtensionAPI, state: ExtensionState, response: BridgeInputResponse, context: PiExtensionContext): PiInputResult {
   if (response.disposition === 'pass_through') return { action: 'continue' };
   state.pendingActionId = response.pending?.actionId;
-  presentMessage(pi, context, response.reply ?? 'IAR 已处理当前请求。', response.disposition);
+  presentMessage(pi, context, response.reply ?? 'IAR 已处理当前请求。', response.disposition, response.replySource);
   return { action: 'handled' };
 }
 
 /** 展示不进入后续 Agent context 的 IAR custom entry。 */
-function presentMessage(pi: PiExtensionAPI, context: PiExtensionContext, content: string, disposition: string): void {
+function presentMessage(pi: PiExtensionAPI, context: PiExtensionContext, content: string, disposition: string, replySource?: BridgeReplySource): void {
   const safeContent = sanitizeDisplayText(content);
-  pi.appendEntry('iar-bridge', { content: safeContent, disposition: sanitizeDisplayText(disposition) });
+  pi.appendEntry('iar-bridge', { content: safeContent, disposition: sanitizeDisplayText(disposition), ...(replySource === undefined ? {} : { replySource }) });
   if (context.mode !== undefined && context.mode !== 'tui') context.ui.notify(safeContent, 'info');
 }
 
@@ -134,16 +134,17 @@ function presentMessage(pi: PiExtensionAPI, context: PiExtensionContext, content
 function renderBridgeEntry(entry: { data?: unknown }): PiEntryComponent | undefined {
   const data = readBridgeEntryData(entry.data);
   if (!data) return undefined;
-  const text = `[IAR ${data.disposition}] ${data.content}`;
+  const text = `[IAR ${data.disposition}${data.replySource === undefined ? '' : ` · ${data.replySource}`}] ${data.content}`;
   return { render: (width) => wrapDisplayText(text, width), invalidate: () => {} };
 }
 
 /** 读取 entry 数据并拒绝不符合扩展契约的值。 */
-function readBridgeEntryData(value: unknown): { content: string; disposition: string } | undefined {
+function readBridgeEntryData(value: unknown): { content: string; disposition: string; replySource?: BridgeReplySource } | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
   if (typeof record.content !== 'string' || typeof record.disposition !== 'string') return undefined;
-  return { content: sanitizeDisplayText(record.content), disposition: sanitizeDisplayText(record.disposition) };
+  if (record.replySource !== undefined && !isBridgeReplySource(record.replySource)) return undefined;
+  return { content: sanitizeDisplayText(record.content), disposition: sanitizeDisplayText(record.disposition), ...(record.replySource === undefined ? {} : { replySource: record.replySource }) };
 }
 
 /** 移除终端控制字符并限制展示长度，避免异常回复影响 Pi UI。 */

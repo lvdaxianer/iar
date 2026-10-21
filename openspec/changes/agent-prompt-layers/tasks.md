@@ -38,7 +38,7 @@
 
 ## 3. 回复来源可观测性与页面展示
 
-- [ ] 3.1 为 TurnResult、Pi bridge payload 和 HTTP/SSE 映射增加受控 `replySource` 枚举，分别标记 `direct_function`、`response_model`、`pi_agent`、`none`；测试验证 self-introduction 返回 `response_model`，direct/none/pass-through 分别返回正确来源且不泄露 Prompt 原文。
+- [x] 3.1 为 TurnResult、Pi bridge payload 和 HTTP/SSE 映射增加受控 `replySource` 枚举，分别标记 `direct_function`、`response_model`、`pi_agent`、`none`；测试验证 self-introduction 返回 `response_model`，direct/none/pass-through 分别返回正确来源且不泄露 Prompt 原文。
 
   - 任务边界：只修改内部结果类型、bridge 映射和 API 契约测试。
   - 允许文件：`examples/agent-sandbox/src/session-types.ts`、`examples/agent-sandbox/src/session.ts`、`examples/agent-sandbox/src/http-pi-bridge-routes.ts`、`examples/agent-sandbox/src/pi-host/**`、相关测试。

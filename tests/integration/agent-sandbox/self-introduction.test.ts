@@ -5,6 +5,7 @@ import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult } from '@iar/
 import { SELF_INTRODUCTION_FUNCTION_ID, SELF_INTRODUCTION_PLUGIN_ID } from '@iar/plugins';
 import { IarSandboxSession } from '../../../examples/agent-sandbox/src/session.js';
 import { buildResponseSystemPrompt } from '../../../examples/agent-sandbox/src/models/model-input-transport.js';
+import { withReplySource } from '../../../examples/agent-sandbox/src/session-types.js';
 
 /** 构造不涉及真实执行的回复测试动作。 */
 function replyAction(): ActionDefinition {
@@ -23,6 +24,7 @@ test('self-introduction intent executes the built-in Plugin and uses scoped conf
   assert.equal(result.status, 'executed');
   if (result.status !== 'executed') return;
   assert.equal(result.route.functionId, SELF_INTRODUCTION_FUNCTION_ID);
+  assert.equal(result.replySource, 'response_model');
   assert.match(result.reply, /先说结论，再列能力/);
   assert.match(result.reply, /数据集成管理/);
   assert.doesNotMatch(result.reply, /平台使用 FAQ/);
@@ -66,6 +68,9 @@ test('Function direct/none 响应在回复层分流且不调用回复模型', as
     assert.deepEqual(deltas, ['已将限流调整为 50 次']);
     assert.equal(await replies.generateReply({ ...base, actionResult: noneResult }), '');
     assert.equal(await replies.generateReplyStreamed({ ...base, actionResult: noneResult }, () => { throw new Error('none 不应产生聊天增量'); }), '');
+    const route = { status: 'matched', reasonCode: 'matched', semanticIntent: 'test', semanticConfidence: 1 };
+    assert.equal(withReplySource({ status: 'executed', reply: '直出', route, actionResult: directResult }).replySource, 'direct_function');
+    assert.equal(withReplySource({ status: 'executed', reply: '', route, actionResult: noneResult }).replySource, 'none');
   } finally {
     session.dispose();
   }

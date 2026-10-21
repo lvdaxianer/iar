@@ -7,7 +7,7 @@ import type { ActionDefinition, ActionResult, BehaviorContext, PendingReference,
 import type { SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
 import type { PluginDescriptor } from '@iar/plugins';
-import type { ExecuteTurnOutcome, ExtractFrameOutcome, ReferenceResolution, ResolvedFactReference, RouteEvidence, StreamEvent, TurnResult } from './session-types.js';
+import { withReplySource, type ExecuteTurnOutcome, type ExtractFrameOutcome, type ReferenceResolution, type ResolvedFactReference, type RouteEvidence, type StreamEvent, type TurnResult } from './session-types.js';
 
 /** 流式编排所需的会话能力，状态和资源仍由宿主唯一持有。 */
 export type StreamTurnContext = {
@@ -76,12 +76,12 @@ export class SandboxSessionStreamTurn {
     const behaviorContext = this.context.currentBehaviorContext();
     const selection = this.context.resolveSelection(userText, behaviorContext);
     if (selection.invalid) {
-      const result = await this.context.rejectSelection(userText, selection.reasonCode);
+      const result = withReplySource(await this.context.rejectSelection(userText, selection.reasonCode));
       emit({ type: 'done', result });
       return result;
     }
     const extracted = await this.context.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext, this.context.recentMessages, selection.descriptor);
-    const result = await this.finishStreamExtraction({ userText, traceId, emit, behaviorContext, extracted, ...(selection.descriptor === undefined ? {} : { selectedDescriptor: selection.descriptor }) });
+    const result = withReplySource(await this.finishStreamExtraction({ userText, traceId, emit, behaviorContext, extracted, ...(selection.descriptor === undefined ? {} : { selectedDescriptor: selection.descriptor }) }));
     emit({ type: 'done', result });
     return result;
   }

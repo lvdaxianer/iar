@@ -23,7 +23,7 @@ function makeFakeBridge(overrides: { input?: (text: string) => BridgeInputRespon
     input: async (_sessionId, text) => {
       if (overrides.failOpen) throw new BridgeClientError('bridge_unavailable', 'IAR 不可用', true);
       if (overrides.input) return overrides.input(text);
-      if (isBusiness(text)) return { version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo', disposition: 'handled', reply: '已受理：' + text, route: businessRoute() };
+      if (isBusiness(text)) return { version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo', disposition: 'handled', reply: '已受理：' + text, replySource: 'response_model', route: businessRoute() };
       return { version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo', disposition: 'pass_through', route: { status: 'noul', reasonCode: 'no_candidate', semanticIntent: 'unknown', semanticConfidence: 0.2 } };
     },
     confirm: async (_sessionId, actionId, accepted): Promise<BridgeConfirmResponse> => {
@@ -68,7 +68,7 @@ test('Pi host session routes business input to IAR and blocks the Pi Agent', asy
   assert.deepEqual(result, { action: 'handled' });
   assert.deepEqual(probe.piRuns, []);
   assert.equal(probe.entries.length, 1);
-  assert.deepEqual(probe.entries[0], { customType: 'iar-bridge', data: { content: '已受理：把订单接口的限流阈值调到每秒 50 次', disposition: 'handled' } });
+  assert.deepEqual(probe.entries[0], { customType: 'iar-bridge', data: { content: '已受理：把订单接口的限流阈值调到每秒 50 次', disposition: 'handled', replySource: 'response_model' } });
   assert.equal(probe.routes.length, 1);
   assert.equal(probe.routes[0]?.functionId, 'api.gateway');
   assert.equal(probe.routes[0]?.disposition, 'handled');

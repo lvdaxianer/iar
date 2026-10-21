@@ -16,8 +16,8 @@ import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
 import { createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
 import { finishConfirmedAction, pendingBridgeResult, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection } from './session-turn-helpers.js';
-import type { CompactResult, ConfirmResult, ExecuteTurnOutcome, ExtractFrameOutcome, RouteEvidence, StreamEvent, TurnResult } from './session-types.js';
-export type { CompactResult, ConfirmResult, PendingActionSummary, RouteEvidence, SandboxDecisionBackend, SandboxMode, SandboxState, StreamEvent, TurnResult, TurnStage } from './session-types.js';
+import { withConfirmReplySource, withReplySource, type CompactResult, type ConfirmResult, type ExecuteTurnOutcome, type ExtractFrameOutcome, type RouteEvidence, type StreamEvent, type TurnResult } from './session-types.js';
+export type { CompactResult, ConfirmResult, PendingActionSummary, ReplySource, RouteEvidence, SandboxDecisionBackend, SandboxMode, SandboxState, StreamEvent, TurnResult, TurnStage } from './session-types.js';
 /** 公开会话对话和确认入口。
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
@@ -123,7 +123,7 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @date 2026-10-19
    */
   public turnStreamed(text: string, emit: (event: StreamEvent) => void): Promise<TurnResult> {
-    return this.whenReady().then(() => this.streaming.turnStreamed(text, emit)).then((result) => recordAgentExchange(this.piAgent, text, result));
+    return this.whenReady().then(() => this.streaming.turnStreamed(text, emit)).then((result) => recordAgentExchange(this.piAgent, text, withReplySource(result)));
   }
   /**
    * 执行一轮对话：抽取 → 路由 → 策略/确认 → 执行 → 回复生成。
@@ -134,7 +134,7 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @date 2026-10-18
    */
   public async turn(text: string): Promise<TurnResult> {
-    return recordAgentExchange(this.piAgent, text, await this.turnInternal(text, false));
+    return recordAgentExchange(this.piAgent, text, withReplySource(await this.turnInternal(text, false)));
   }
 
   /**
@@ -146,7 +146,7 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @date 2026-10-20
    */
   public async bridgeTurn(text: string): Promise<TurnResult> {
-    return this.turnInternal(text, true);
+    return withReplySource(await this.turnInternal(text, true));
   }
 
   /**
@@ -305,7 +305,7 @@ export class IarSandboxSession extends SandboxSessionCore {
     const { action } = this.pending;
     // 取消路径不调用执行器，避免产生副作用。
     const result = accepted ? await this.executeConfirmation(action) : await this.cancelConfirmation(action);
-    return recordAgentExchange(this.piAgent, accepted ? '（确认执行）' : '（取消操作）', result);
+    return recordAgentExchange(this.piAgent, accepted ? '（确认执行）' : '（取消操作）', withConfirmReplySource(result));
   }
   /** 取消当前动作并先投影工作流事件。
    * @param action - 用户取消的待确认动作

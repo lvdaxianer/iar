@@ -5,7 +5,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-20
  */
-import { PI_BRIDGE_VERSION, isBridgeDisposition, type BridgeCapabilityContext, type BridgeConfirmRequest, type BridgeConfirmResponse, type BridgeInputRequest, type BridgeInputResponse, type BridgeOpenRequest, type BridgeOpenResponse, type BridgePendingAction, type BridgeStateResponse, type IarSessionId } from './protocol.js';
+import { PI_BRIDGE_VERSION, isBridgeDisposition, isBridgeReplySource, type BridgeCapabilityContext, type BridgeConfirmRequest, type BridgeConfirmResponse, type BridgeInputRequest, type BridgeInputResponse, type BridgeOpenRequest, type BridgeOpenResponse, type BridgePendingAction, type BridgeStateResponse, type IarSessionId } from './protocol.js';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_TIMEOUT_MS = 60_000;
@@ -173,7 +173,8 @@ function validateInputResponse(value: unknown): BridgeInputResponse {
   const record = validateCommonResponse(value);
   if (!isBridgeDisposition(record.disposition)) throw new BridgeClientError('invalid_bridge_response', 'IAR 桥接响应无效。', false);
   const capabilityContext = record.capabilityContext === undefined ? undefined : validateCapabilityContext(record.capabilityContext);
-  return { version: PI_BRIDGE_VERSION, iarSessionId: record.iarSessionId, disposition: record.disposition, ...optionalString(record, 'reply'), ...optionalString(record, 'reasonCode'), ...(record.pending === undefined ? {} : { pending: validatePending(record.pending) }), ...(capabilityContext === undefined ? {} : { capabilityContext }) };
+  const replySource = optionalReplySource(record);
+  return { version: PI_BRIDGE_VERSION, iarSessionId: record.iarSessionId, disposition: record.disposition, ...optionalString(record, 'reply'), ...optionalString(record, 'reasonCode'), ...(record.pending === undefined ? {} : { pending: validatePending(record.pending) }), ...(capabilityContext === undefined ? {} : { capabilityContext }), ...(replySource === undefined ? {} : { replySource }) };
 }
 
 /** 校验 pass-through 能力上下文的有界公开字段。 */
@@ -192,7 +193,8 @@ function validateCapabilityContext(value: unknown): BridgeCapabilityContext {
 function validateConfirmResponse(value: unknown): BridgeConfirmResponse {
   const record = validateCommonResponse(value);
   if (!isString(record.reply)) throw new BridgeClientError('invalid_bridge_response', 'IAR 桥接响应无效。', false);
-  return { version: PI_BRIDGE_VERSION, iarSessionId: record.iarSessionId, disposition: 'handled', reply: record.reply, ...optionalString(record, 'reasonCode'), ...(record.pending === undefined ? {} : { pending: validatePending(record.pending) }) };
+  const replySource = optionalReplySource(record);
+  return { version: PI_BRIDGE_VERSION, iarSessionId: record.iarSessionId, disposition: 'handled', reply: record.reply, ...optionalString(record, 'reasonCode'), ...(record.pending === undefined ? {} : { pending: validatePending(record.pending) }), ...(replySource === undefined ? {} : { replySource }) };
 }
 
 /** 校验状态响应。 */
@@ -219,6 +221,11 @@ function validatePending(value: unknown): BridgePendingAction {
 /** 读取可选字符串字段。 */
 function optionalString(record: Record<string, unknown>, key: string): Record<string, string> {
   return record[key] === undefined ? {} : isString(record[key]) ? { [key]: record[key] } : failResponse();
+}
+
+/** 读取可选回复来源，保留旧版 Bridge 响应兼容性。 */
+function optionalReplySource(record: Record<string, unknown>): import('./protocol.js').BridgeReplySource | undefined {
+  return record.replySource === undefined ? undefined : isBridgeReplySource(record.replySource) ? record.replySource : failResponse();
 }
 
 /** 返回永远不会成功的响应构造分支。 */
