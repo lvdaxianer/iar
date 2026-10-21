@@ -25,17 +25,20 @@ const MAX_LOG_QUEUE = 128;
 const MAX_LOG_WRITE_MS = 1000;
 /** 日志中允许出现的枚举字符串。 */
 const SAFE_VALUES: Readonly<Record<string, readonly string[]>> = {
-  level: ['info', 'warn', 'debug'], event: ['http.request.start', 'http.request.end', 'http.stream', 'model.http', 'sandbox.start', 'sandbox.start_failed', 'sandbox.shutdown_failed', 'sandbox.snapshot'],
+  level: ['trace', 'info', 'warn', 'error', 'debug'], event: ['http.request.start', 'http.request.end', 'http.stream', 'model.http', 'iar.turn.stage', 'iar.turn.completed', 'model.reasoning', 'sandbox.start', 'sandbox.start_failed', 'sandbox.shutdown_failed', 'sandbox.snapshot'],
   outcome: ['network_error', 'http_error', 'invalid_response', 'timeout', 'aborted', 'slow', 'success', 'stream_failed', 'stream_write_failed', 'startup_failed', 'port_in_use', 'shutdown_failed', 'invalid_mode', 'missing_api_key', 'snapshot_failed'],
   target: ['model.chat.completions'], method: ['GET', 'POST', 'HEAD', 'OPTIONS', 'PUT', 'PATCH', 'DELETE', 'OTHER'],
   path: ['/', '/api/chat', '/api/confirm', '/api/compact', '/api/state', '/api/reset', 'unknown',
     '/api/sessions', '/api/sessions/:sessionId', '/api/sessions/:sessionId/chat', '/api/sessions/:sessionId/confirm',
     '/api/sessions/:sessionId/compact', '/api/sessions/:sessionId/state', '/api/sessions/:sessionId/reset', '/api/sessions/:sessionId/resume',
     '/api/bridge/v1/sessions', '/api/bridge/v1/sessions/:sessionId/input', '/api/bridge/v1/sessions/:sessionId/confirm', '/api/bridge/v1/sessions/:sessionId/state'],
+  stage: ['semantic.extract', 'route.select', 'action.execute', 'response.reasoning', 'response.generate'],
+  status: ['completed', 'failed', 'skipped'],
+  modelRole: ['semantic.extract', 'response.generate'],
   host: ['127.0.0.1'], mode: ['brain', 'scripted'], selection: ['explicit', 'configured', 'fallback']
 };
 /** 允许输出的数字字段。 */
-const SAFE_NUMBERS = new Set(['startTime', 'endTime', 'durationMs', 'status']);
+const SAFE_NUMBERS = new Set(['startTime', 'endTime', 'durationMs', 'firstTokenMs', 'status']);
 /** HTTP 状态码的合法范围。 */
 const MIN_HTTP_STATUS = 100;
 const MAX_HTTP_STATUS = 599;
@@ -80,7 +83,7 @@ export function runWithModelLogContext<T>(traceId: string, next: () => T): T {
  */
 function isSafeEntry([key, value]: [string, unknown]): boolean {
   // 数字、标识和有限枚举分别验证，其他内容全部丢弃。
-  if (key === 'status') return typeof value === 'number' && Number.isInteger(value) && value >= MIN_HTTP_STATUS && value <= MAX_HTTP_STATUS;
+  if (key === 'status') return (typeof value === 'number' && Number.isInteger(value) && value >= MIN_HTTP_STATUS && value <= MAX_HTTP_STATUS) || (typeof value === 'string' && (SAFE_VALUES.status?.includes(value) ?? false));
   // 监听端口只能是有效 TCP 端口，不能用数字携带任意数据。
   if (key === 'port') return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 65535;
   // 时间和耗时只接受非负安全整数。
@@ -106,8 +109,31 @@ export function createSafeLogSink(writer: SafeLogWriter, capacity: number, timeo
     serialize: (record) => JSON.stringify(Object.fromEntries(Object.entries(record).filter(isSafeEntry))) });
 }
 
-/** 当前进程的默认安全接收器。 */
-let sink = createSafeLogSink(defaultLogWriter, MAX_LOG_QUEUE);
+/**
+ * 创建中文与英文并列的可读日志写入器。
+ *
+ * 输入必须已经经过安全接收器的白名单序列化；解析失败时原样转发，避免日志适配器影响业务。
+ * @param writer - 最终字节写入器
+ * @returns 双语格式写入器
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-22
+ */
+export function createBilingualLogWriter(writer: SafeLogWriter): SafeLogWriter {
+  return (buffer, done) => {
+    try {
+      const record = JSON.parse(buffer.toString('utf8')) as Record<string, unknown>;
+      writer(Buffer.from(`${formatBilingualLogLine(record)}\n`), done);
+    } catch {
+      writer(buffer, done);
+    }
+  };
+}
+
+/**
+ * 当前进程的默认安全接收器；IAR_LOG_FORMAT=pretty 时启用双语终端输出。
+ */
+const initialWriter = process.env.IAR_LOG_FORMAT === 'pretty' ? createBilingualLogWriter(defaultLogWriter) : defaultLogWriter;
+let sink = createSafeLogSink(initialWriter, MAX_LOG_QUEUE);
 
 /**
  * 在空闲时安装宿主专用异步写入边界，不关闭宿主资源。
@@ -163,6 +189,28 @@ export function safeLogIsIdleForTesting(): boolean { return sink.isIdle(); }
  */
 export function writeSafeLog(record: Record<string, unknown>): void {
   sink.write(record);
+}
+
+/**
+ * 将安全白名单中的结构化日志转换为双语单行摘要。
+ *
+ * 该函数只消费已允许的字段，未知字段和自由文本不会进入结果，方便终端直接阅读。
+ * @param record - 待格式化的结构化日志
+ * @returns 双语日志行
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-22
+ */
+export function formatBilingualLogLine(record: Record<string, unknown>): string {
+  const safe = Object.fromEntries(Object.entries(record).filter(isSafeEntry));
+  const event = typeof safe.event === 'string' ? safe.event : 'iar.observability';
+  const label = event === 'iar.turn.stage' ? '阶段耗时 / Stage timing' : event === 'iar.turn.completed' ? '轮次完成 / Turn completed' : event === 'model.reasoning' ? '模型思考 / Model reasoning' : '运行事件 / Runtime event';
+  const stage = typeof safe.stage === 'string' ? ` stage=${safe.stage}` : '';
+  const status = typeof safe.status === 'string' ? ` status=${safe.status}` : '';
+  const duration = typeof safe.durationMs === 'number' ? ` duration=${safe.durationMs}ms` : '';
+  const firstToken = typeof safe.firstTokenMs === 'number' ? ` firstToken=${safe.firstTokenMs}ms` : '';
+  const level = typeof safe.level === 'string' ? safe.level.toUpperCase() : 'INFO';
+  const trace = typeof safe.traceId === 'string' ? ` traceId=${safe.traceId}` : '';
+  return `${level} ${label}${stage}${status}${duration}${firstToken}${trace}`;
 }
 
 /**

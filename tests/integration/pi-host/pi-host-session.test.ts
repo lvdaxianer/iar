@@ -40,6 +40,7 @@ function makeProbe(options: { client: IarBridgeClientLike; piAgent?: PiAgentDele
   const notifications: Array<{ message: string; type: string }> = [];
   const routes: PiHostRouteInfo[] = [];
   const confirms: Array<unknown> = [];
+  const timings: Array<unknown> = [];
   const deltas: string[] = [];
   const piDones: string[] = [];
   const recorded: Array<{ userText: string; reply: string }> = [];
@@ -49,6 +50,7 @@ function makeProbe(options: { client: IarBridgeClientLike; piAgent?: PiAgentDele
     onNotify: (message, type) => { notifications.push({ message, type }); },
     onRoute: (route) => { routes.push(route); },
     onConfirm: (pending) => { confirms.push(pending); },
+    onTiming: (timing) => { timings.push(timing); },
     onPiDelta: (delta) => { deltas.push(delta); },
     onPiDone: (reply) => { piDones.push(reply); }
   };
@@ -58,7 +60,7 @@ function makeProbe(options: { client: IarBridgeClientLike; piAgent?: PiAgentDele
     reset: () => {}
   };
   const session = new PiHostSession({ sessionId: 'pi-demo', mode: 'scripted', client: options.client, piAgent, events });
-  return { session, entries, notifications, routes, confirms, deltas, piDones, recorded, piRuns };
+  return { session, entries, notifications, routes, confirms, timings, deltas, piDones, recorded, piRuns };
 }
 
 test('Pi host session routes business input to IAR and blocks the Pi Agent', async () => {
@@ -75,6 +77,14 @@ test('Pi host session routes business input to IAR and blocks the Pi Agent', asy
   assert.equal(probe.routes[0]?.replySource, 'response_model');
   // handled 轮次以备注进入 Pi 侧 transcript，后续追问才有上下文。
   assert.deepEqual(probe.recorded, [{ userText: '把订单接口的限流阈值调到每秒 50 次', reply: '已受理：把订单接口的限流阈值调到每秒 50 次' }]);
+});
+
+test('Pi host session forwards bridge timing to the UI event boundary', async () => {
+  const timing = { traceId: 'trace-1', durationMs: 120, stages: [{ stage: 'semantic.extract' as const, status: 'completed' as const, durationMs: 40 }] };
+  const probe = makeProbe({ client: makeFakeBridge({ input: () => ({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo', disposition: 'handled', reply: '已查询', timing }) }) });
+  await probe.session.start();
+  await probe.session.handleUserInput('查询状态');
+  assert.deepEqual(probe.timings, [timing]);
 });
 
 test('Pi host session lets the Pi Agent answer non-business input', async () => {

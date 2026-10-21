@@ -107,6 +107,7 @@ export function buildPiHostApp(options: PiHostServerOptions): { app: FastifyInst
       onEntry: emit('entry'),
       onNotify: (message, type) => { for (const client of clients.get(sessionId) ?? []) client.send('notify', { message, type }); },
       onRoute: emit('route'),
+      onTiming: emit('timing'),
       onConfirm: emit('confirm'),
       onPiDelta: emit('piDelta'),
       onPiDone: emit('piDone')

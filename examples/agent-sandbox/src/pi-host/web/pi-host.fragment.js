@@ -20,6 +20,7 @@
   let piHostExpectingEntry = false;
   let piHostEventSource = null;
   let piHostEvents = [];
+  let piHostTurnStartedAt = 0;
 
   /** 读取本标签页的 Pi 会话标识；缺失、损坏或不合法时创建新标识。
    * 标识只进入请求参数与会话面板，不写入前端日志。
@@ -162,6 +163,28 @@
     document.getElementById('routeReplySource').textContent = PI_HOST_REPLY_SOURCE_META[route.replySource] || route.replySource || '-';
     document.getElementById('routeConfidence').textContent = route.semanticIntent ? route.semanticIntent + '（' + Math.round((route.semanticConfidence || 0) * 100) + '%）' : '-';
     document.getElementById('routeScore').textContent = route.reasonCode || '-';
+  }
+
+  /**
+   * 展示服务端阶段耗时，原始 thinking 不进入日志或计时面板。
+   */
+  function updatePiHostTimingPanel(timing) {
+    if (!timing || typeof timing !== 'object') return;
+    document.getElementById('timingTotal').textContent = typeof timing.durationMs === 'number' ? timing.durationMs + 'ms' : '-';
+    var list = document.getElementById('timingList');
+    list.innerHTML = '';
+    (Array.isArray(timing.stages) ? timing.stages : []).forEach(function (stage) {
+      var item = document.createElement('li');
+      item.textContent = (stage.stage || '-') + ' · ' + (stage.durationMs || 0) + 'ms' + (stage.firstTokenMs === undefined ? '' : ' · 首 token / first token ' + stage.firstTokenMs + 'ms');
+      list.appendChild(item);
+    });
+  }
+
+  /**
+   * 记录浏览器可见的端到端耗时，帮助区分服务端耗时与网络/渲染耗时。
+   */
+  function updatePiHostClientTiming() {
+    if (piHostTurnStartedAt > 0) document.getElementById('timingClientTotal').textContent = (Date.now() - piHostTurnStartedAt) + 'ms';
   }
 
   /** 创建 Pi Agent 流式气泡，带 Thinking 指示器（三点动画）；
@@ -359,6 +382,7 @@
    */
   function submitPiHostTurn(text) {
     setPiHostBusy(true);
+    piHostTurnStartedAt = Date.now();
     appendMsg('user', text);
     recordPiHostConversation('user', text);
     highlightPiHostFlow(['input']);
@@ -406,6 +430,12 @@
       highlightPiHostFlow(['input', 'hook', 'iar']);
       recordPiHostEvent('路由', piHostPendingRoute.disposition || '-');
     });
+    es.addEventListener('timing', function (event) {
+      var timing;
+      try { timing = JSON.parse(event.data); } catch (err) { return; }
+      updatePiHostTimingPanel(timing);
+      recordPiHostEvent('耗时', (timing.durationMs || 0) + 'ms');
+    });
     es.addEventListener('entry', function (event) {
       var entry;
       try { entry = JSON.parse(event.data); } catch (err) { return; }
@@ -425,6 +455,7 @@
     es.addEventListener('piDelta', function (event) { appendPiHostDelta(JSON.parse(event.data)); });
     es.addEventListener('piDone', function (event) {
       finalizePiHostBubble(JSON.parse(event.data));
+      updatePiHostClientTiming();
       highlightPiHostFlow(['input', 'hook', 'iar', 'continue']);
       setPiHostBusy(false);
       recordPiHostEvent('Pi', '回答完成');
@@ -442,6 +473,9 @@
     document.getElementById('eventList').innerHTML = '';
     document.getElementById('sessionJson').textContent = '{}';
     updatePiHostRoutePanel({});
+    document.getElementById('timingTotal').textContent = '-';
+    document.getElementById('timingClientTotal').textContent = '-';
+    document.getElementById('timingList').innerHTML = '';
     highlightPiHostFlow([]);
   }
 

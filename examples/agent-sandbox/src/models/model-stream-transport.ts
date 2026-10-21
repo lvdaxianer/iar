@@ -9,14 +9,14 @@ import { logModelInvalidResponse, logModelNetworkFailure, logModelSuccess } from
 import { cancelModelBody, countModelBytes, fetchModelResponse, ModelResponseLimitError, type ModelTransportRequest } from './model-transport.js';
 
 /** SSE 帧最小形状。 */
-type StreamChunk = { choices?: Array<{ delta?: { content?: unknown } }> };
+type StreamChunk = { choices?: Array<{ delta?: { content?: unknown; reasoning_content?: unknown; reasoning?: unknown } }> };
 export type StreamResponseEnvelope = {
   schemaVersion: 'iar.response/v1';
   text: string;
   clarification?: ClarificationMetadata;
 };
 /** 流读取状态，仅用于本次调用。 */
-type StreamState = { pending: string; chunks: string[]; onDelta: (delta: string) => void; mode: 'unknown' | 'text' | 'structured'; probe: string };
+type StreamState = { pending: string; chunks: string[]; onDelta: (delta: string) => void; onReasoningDelta: (delta: string) => void; mode: 'unknown' | 'text' | 'structured'; probe: string };
 
 /**
  * 调用模型流式接口并返回完整正文。
@@ -27,7 +27,7 @@ type StreamState = { pending: string; chunks: string[]; onDelta: (delta: string)
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export async function callModelStream(request: ModelTransportRequest, onDelta: (delta: string) => void): Promise<string | StreamResponseEnvelope> {
+export async function callModelStream(request: ModelTransportRequest, onDelta: (delta: string) => void, onReasoningDelta: (delta: string) => void = () => undefined): Promise<string | StreamResponseEnvelope> {
   const startTime = Date.now();
   const response = await fetchModelResponse(request, true, startTime);
   // 无响应流属于无效响应。
@@ -35,7 +35,7 @@ export async function callModelStream(request: ModelTransportRequest, onDelta: (
     logModelInvalidResponse(startTime, response.status);
     throw new ModelProviderError('provider_failed');
   }
-  const content = await readModelStream(response.body, onDelta, { startTime, signal: request.signal, status: response.status });
+  const content = await readModelStream(response.body, onDelta, onReasoningDelta, { startTime, signal: request.signal, status: response.status });
   // 空流无法生成回复。
   if (content.length === 0) {
     logModelInvalidResponse(startTime, response.status);
@@ -60,10 +60,10 @@ export async function callModelStream(request: ModelTransportRequest, onDelta: (
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-async function readModelStream(body: ReadableStream<Uint8Array>, onDelta: (delta: string) => void,
+async function readModelStream(body: ReadableStream<Uint8Array>, onDelta: (delta: string) => void, onReasoningDelta: (delta: string) => void,
   timing: { startTime: number; signal: AbortSignal; status: number }): Promise<string> {
   const reader = body.getReader();
-  const state: StreamState = { pending: '', chunks: [], onDelta, mode: 'unknown', probe: '' };
+  const state: StreamState = { pending: '', chunks: [], onDelta, onReasoningDelta, mode: 'unknown', probe: '' };
   try {
     await consumeStream(reader, state);
   } catch (error) {
@@ -185,6 +185,9 @@ function processStreamLine(state: StreamState, line: string): void {
     // 沿用原协议对异常帧的跳过策略。
     return;
   }
+  const reasoning = chunk.choices?.[0]?.delta?.reasoning_content ?? chunk.choices?.[0]?.delta?.reasoning;
+  // thinking 只通过独立回调交付，不混入最终正文或结构化探测缓存。
+  if (typeof reasoning === 'string' && reasoning.length > 0) state.onReasoningDelta(reasoning);
   const delta = chunk.choices?.[0]?.delta?.content;
   // 有效文本才交给界面并加入最终结果。
   if (typeof delta === 'string' && delta.length > 0) deliverDelta(state, delta);

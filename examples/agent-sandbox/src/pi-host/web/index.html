@@ -63,6 +63,14 @@
       <ul id="eventList" class="events" style="margin-top:8px"></ul>
     </div>
     <div>
+      <h2>耗时 / Timing</h2>
+      <dl class="kv" style="margin-top:8px">
+        <dt>服务端总耗时</dt><dd id="timingTotal">-</dd>
+        <dt>客户端总耗时</dt><dd id="timingClientTotal">-</dd>
+      </dl>
+      <ul id="timingList" class="events" style="margin-top:8px"></ul>
+    </div>
+    <div>
       <h2>会话操作</h2>
       <!-- 清空建立全新会话：删除本页历史并换新会话标识，服务端旧会话随连接关闭释放。 -->
       <div class="toolbar" style="margin-top:8px">

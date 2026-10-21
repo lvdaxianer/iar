@@ -127,7 +127,7 @@ export class SandboxSessionReplies {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public async fallbackReplyStreamed(context: FallbackContext, onDelta: (delta: string) => void): Promise<string> {
+  public async fallbackReplyStreamed(context: FallbackContext, onDelta: (delta: string) => void, onReasoningDelta: (delta: string) => void = () => undefined): Promise<string> {
     const { traceId, runId, userText, behaviorContext, recentMessages, functionDescriptors, reasonCode, resolvedReferences, referenceCandidates } = context;
     if (this.context.mode !== 'brain' || !(this.context.brainProvider instanceof OpenAICompatibleModelProvider)) {
       const reply = await this.fallbackReply(context);
@@ -145,7 +145,7 @@ export class SandboxSessionReplies {
       ...(referenceCandidates === undefined ? {} : { referenceCandidates })
     };
     const fallback = () => this.fallbackReply(context);
-    return streamModelReply({ provider: this.context.brainProvider, profile: this.context.registry.forRole('response.generate'), traceId, runId, input, onDelta, onClarification: (clarification) => this.persistClarification(behaviorContext, clarification), onInvalid: fallback, onFailure: fallback });
+    return streamModelReply({ provider: this.context.brainProvider, profile: this.context.registry.forRole('response.generate'), traceId, runId, input, onDelta, onReasoningDelta, onClarification: (clarification) => this.persistClarification(behaviorContext, clarification), onInvalid: fallback, onFailure: fallback });
   }
 
 
@@ -197,7 +197,7 @@ export class SandboxSessionReplies {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public async generateReplyStreamed(context: ActionReplyContext, onDelta: (delta: string) => void): Promise<string> {
+  public async generateReplyStreamed(context: ActionReplyContext, onDelta: (delta: string) => void, onReasoningDelta: (delta: string) => void = () => undefined): Promise<string> {
     const direct = this.streamedDirectReply(context, onDelta);
     if (direct !== undefined) return direct;
     const { traceId, runId, behaviorContext } = context;
@@ -206,7 +206,7 @@ export class SandboxSessionReplies {
       onDelta(reply);
       return reply;
     }
-    return streamModelReply({ provider: this.context.brainProvider, profile: this.context.registry.forRole('response.generate'), traceId, runId, input: this.actionReplyModelInput(context), onDelta, onClarification: (clarification) => this.persistClarification(behaviorContext, clarification),
+    return streamModelReply({ provider: this.context.brainProvider, profile: this.context.registry.forRole('response.generate'), traceId, runId, input: this.actionReplyModelInput(context), onDelta, onReasoningDelta, onClarification: (clarification) => this.persistClarification(behaviorContext, clarification),
       onInvalid: async () => this.modelFailureReply(context, 'model.schema_invalid'), onFailure: () => this.generateReply(context) });
   }
 

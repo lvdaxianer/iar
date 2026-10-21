@@ -17,7 +17,7 @@ import type { StreamEvent } from '../../../examples/agent-sandbox/src/session.js
  * scripted 模式让结果不依赖外部模型网络或不确定的生成内容。
  * 普通入口和流式入口都必须报告动作已执行，避免路由实现分叉。
  * 阶段顺序覆盖语义、路由、动作和回复四个调用边界。
- * done 必须是最后一个事件，且承载的结果与返回值完全一致。
+ * timing 必须在 done 前到达；done 必须是最后一个事件，且承载的结果与返回值完全一致。
  * 至少一个 delta 确保测试确实经历了流式正文输出路径。
  * finally 释放会话工作线程，即使事件断言失败也不会挂住进程。
  */
@@ -34,6 +34,9 @@ test('普通与流式对话保留执行结果及阶段顺序', async () => {
     assert.equal(events.at(-1)?.type, 'done');
     assert.deepEqual(events.at(-1)?.type === 'done' ? events.at(-1) : undefined, { type: 'done', result: streamed });
     assert.ok(events.some((event) => event.type === 'delta'));
+    const timingIndex = events.findIndex((event) => event.type === 'timing');
+    const doneIndex = events.findIndex((event) => event.type === 'done');
+    assert.ok(timingIndex >= 0 && timingIndex < doneIndex, 'timing 必须先于 done 发送');
   } finally { session.dispose(); }
 });
 

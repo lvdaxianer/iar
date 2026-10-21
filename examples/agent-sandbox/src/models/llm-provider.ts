@@ -111,13 +111,13 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public async completeStreamed(request: ModelProviderRequest, onDelta: (delta: string) => void): Promise<unknown> {
+  public async completeStreamed(request: ModelProviderRequest, onDelta: (delta: string) => void, onReasoningDelta: (delta: string) => void = () => undefined): Promise<unknown> {
     if (request.profile.role !== 'response.generate') throw new ModelProviderError('provider_failed');
     const connection = this.resolveConnection(request.profile);
     if (!connection.apiKey || !connection.baseUrl) throw new ModelProviderError('provider_unavailable');
     // 流式场景直接输出正文（非 JSON 契约），accumulate 全文原样返回，由调用方兜底解析。
     const prompt = this.buildStreamPrompt(request);
-    return await runWithModelLogContext(request.traceId, () => callModelStream({ connection, ...prompt, signal: request.signal }, onDelta));
+    return await runWithModelLogContext(request.traceId, () => callModelStream({ connection, ...prompt, signal: request.signal }, onDelta, onReasoningDelta));
   }
 
   /**

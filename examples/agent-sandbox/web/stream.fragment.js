@@ -30,6 +30,7 @@
     return {
       setStage: function (stage) { if (!state.gotDelta && STAGE_LABELS[stage]) state.stageText.textContent = '· ' + STAGE_LABELS[stage]; },
       appendDelta: function (text) { appendStreamDelta(state, text); },
+      appendReasoning: function (text) { appendStreamReasoning(state, text); },
       finalize: function (result) { finalizeStreamBubble(state, result); },
       remove: function () { div.remove(); }
     };
@@ -65,6 +66,41 @@
     if (!state.gotDelta) { state.gotDelta = true; state.stageEl.remove(); }
     state.textEl.textContent += text;
     messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  /**
+   * 原样展示模型 thinking，使用 pre 纯文本出口，不伪装成 Markdown 或答案。
+   */
+  function appendStreamReasoning(state, text) {
+    if (!state.reasoningEl) {
+      var details = document.createElement('details');
+      details.className = 'reasoning';
+      details.open = true;
+      var summary = document.createElement('summary');
+      summary.textContent = '原始思考 / Raw thinking';
+      var body = document.createElement('pre');
+      details.appendChild(summary);
+      details.appendChild(body);
+      state.div.insertBefore(details, state.textEl);
+      state.reasoningEl = body;
+    }
+    state.reasoningEl.textContent += text;
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  /**
+   * 更新右侧总耗时和阶段耗时，所有值来自服务端有界 timing 摘要。
+   */
+  function renderStreamTiming(summary) {
+    if (!summary || typeof summary !== 'object') return;
+    document.getElementById('timingTotal').textContent = typeof summary.durationMs === 'number' ? summary.durationMs + 'ms' : '-';
+    var list = document.getElementById('timingList');
+    list.innerHTML = '';
+    (Array.isArray(summary.stages) ? summary.stages : []).forEach(function (stage) {
+      var item = document.createElement('li');
+      item.textContent = (stage.stage || '-') + ' · ' + (stage.durationMs || 0) + 'ms';
+      list.appendChild(item);
+    });
   }
 
   /** 展示终态；超限时用明确的不完整说明替换截断内容。
@@ -164,6 +200,8 @@
     try { event = JSON.parse(line.slice('data: '.length)); } catch (err) { return; }
     if (event.type === 'stage') state.bubble.setStage(event.stage);
     else if (event.type === 'delta') state.bubble.appendDelta(event.text);
+    else if (event.type === 'reasoningDelta') state.bubble.appendReasoning(event.text);
+    else if (event.type === 'timing') renderStreamTiming(event.summary);
     else if (event.type === 'done') state.result = event.result;
     else if (event.type === 'error') state.bubble.appendDelta(event.message || '处理出错');
   }
