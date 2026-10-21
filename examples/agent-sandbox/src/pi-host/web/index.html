@@ -118,12 +118,13 @@
     transcript.scrollTop = transcript.scrollHeight;
   }
 
-  function renderEntry(data) {
+  function renderEntry(entry) {
+    const data = (entry && typeof entry === 'object' && 'data' in entry && entry.data && typeof entry.data === 'object') ? entry.data : {};
     const route = pendingRoute && pendingRoute.disposition === data.disposition ? pendingRoute : null;
     pendingRoute = null;
     const el = document.createElement('div');
     el.className = 'iar-entry';
-    el.innerHTML = `<div class="head">[IAR ${esc(data.disposition)}]<span class="disposition ${esc(data.disposition)}">${esc(data.disposition)}</span></div>`
+    el.innerHTML = `<div class="head">[IAR ${esc(data.disposition || 'handled')}]<span class="disposition ${esc(data.disposition || '')}">${esc(data.disposition || '')}</span></div>`
       + `<div class="body">${esc(data.content || '')}</div>`
       + (route ? `<div class="route">意图 ${esc(route.semanticIntent)}（${(route.semanticConfidence * 100).toFixed(0)}%）· Function ${esc(route.functionId || '—')} → Plugin ${esc(route.pluginId || '—')} · ${esc(route.reasonCode)}</div>` : '');
     transcript.appendChild(el);
