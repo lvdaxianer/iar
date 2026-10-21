@@ -215,6 +215,7 @@
   function renderPiHostEntry(entry) {
     var data = (entry && typeof entry === 'object' && 'data' in entry && entry.data && typeof entry.data === 'object') ? entry.data : null;
     if (!data || entry.customType !== 'iar-bridge' || typeof data.content !== 'string') return false;
+    removePiHostBubble();
     var meta = PI_HOST_DISPOSITION_META[data.disposition] || data.disposition || '已执行';
     if (data.disposition === 'handled' && piHostPendingRoute && piHostPendingRoute.functionId) meta += ' · ' + piHostPendingRoute.functionId;
     appendMsg('bot', data.content, meta);
@@ -226,6 +227,13 @@
   /** 移除全部确认卡片；新确认事件或清空事件都走这里。 */
   function clearPiHostConfirmBoxes() {
     document.querySelectorAll('.confirm-box').forEach(function (box) { box.remove(); });
+  }
+
+  /** 移除当前气泡（IAR 命中或请求失败时），避免残留空的 Thinking 指示器。 */
+  function removePiHostBubble() {
+    if (!piHostBubble) return;
+    piHostBubble.div.remove();
+    piHostBubble = null;
   }
 
   /** 展示待确认动作卡片，确认/取消回到 IAR 权威会话。
@@ -296,9 +304,11 @@
     appendMsg('user', text);
     recordPiHostConversation('user', text);
     highlightPiHostFlow(['input']);
+    createPiHostBubble();
     piHostPost('/api/pi-host/chat', { session: piHostSessionId, text: text })
       .then(function (result) { if (result && result.action === 'handled') setPiHostBusy(false); })
       .catch(function () {
+        removePiHostBubble();
         piHostInputEl.value = text;
         appendMsg('bot', '请求未完成，结果可能未知；请检查状态后再重试。', '失败');
         setPiHostBusy(false);
@@ -344,6 +354,7 @@
     });
     es.addEventListener('notify', function (event) {
       var notification = JSON.parse(event.data);
+      if (piHostBubble && !piHostBubble.gotDelta) removePiHostBubble();
       appendMsg('bot', notification.message, notification.type === 'error' ? '错误' : '提示');
       recordPiHostEvent('通知', notification.message.slice(0, 24));
     });
