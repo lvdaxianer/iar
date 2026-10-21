@@ -24,6 +24,7 @@ test('self-introduction intent executes the built-in Plugin and uses scoped conf
   assert.equal(result.status, 'executed');
   if (result.status !== 'executed') return;
   assert.equal(result.route.functionId, SELF_INTRODUCTION_FUNCTION_ID);
+  assert.equal(result.route.operationKind, 'read');
   assert.equal(result.replySource, 'response_model');
   assert.match(result.reply, /先说结论，再列能力/);
   assert.match(result.reply, /数据集成管理/);
@@ -61,7 +62,7 @@ test('Function direct/none 响应在回复层分流且不调用回复模型', as
     const action = replyAction();
     const directResult: ActionResult = { schemaVersion: SCHEMA_VERSIONS.action, actionId: action.actionId, status: 'succeeded', output: { accepted: true }, response: { schemaVersion: 'iar.function-response/v1', mode: 'direct', text: '已将限流调整为 50 次' } };
     const noneResult: ActionResult = { schemaVersion: SCHEMA_VERSIONS.action, actionId: action.actionId, status: 'succeeded', output: { accepted: true }, response: { schemaVersion: 'iar.function-response/v1', mode: 'none', ui: { kind: 'confirmation' } } };
-    const base = { traceId: 'trace-reply-test', runId: action.runId, userText: '执行动作', behaviorContext: context, recentMessages: [], functionDescriptors: [], action };
+    const base = { traceId: 'trace-reply-test', runId: action.runId, userText: '执行动作', behaviorContext: context, recentMessages: [], functionDescriptors: [], action, operationKind: 'action' as const };
     assert.equal(await replies.generateReply({ ...base, actionResult: directResult }), '已将限流调整为 50 次');
     const deltas: string[] = [];
     assert.equal(await replies.generateReplyStreamed({ ...base, actionResult: directResult }, (delta) => deltas.push(delta)), '已将限流调整为 50 次');
@@ -84,14 +85,34 @@ test('self-introduction model 输入携带 Agent 总体提示词和 Plugin 附�
     const action = { ...replyAction(), functionId: SELF_INTRODUCTION_FUNCTION_ID, pluginId: SELF_INTRODUCTION_PLUGIN_ID };
     const input = replies.actionReplyModelInput({
       traceId: 'trace-self-introduction-model', runId: action.runId, userText: '介绍下自己', behaviorContext, recentMessages: [], functionDescriptors: [], action,
+      operationKind: 'read',
       actionResult: { schemaVersion: SCHEMA_VERSIONS.action, actionId: action.actionId, status: 'succeeded', output: { plugins: [], extraPrompt: '自我介绍按能力分类' }, response: { schemaVersion: 'iar.function-response/v1', mode: 'model' } }
     });
     assert.equal(input.agentPrompt, '所有回复先说结论');
+    assert.equal(input.operationKind, 'read');
     assert.equal(input.supplementaryPrompt, '自我介绍按能力分类');
     const prompt = buildResponseSystemPrompt(input);
     assert.match(prompt, /所有回复先说结论/);
     assert.match(prompt, /自我介绍按能力分类/);
     assert.ok(prompt.indexOf('所有回复先说结论') < prompt.indexOf('自我介绍按能力分类'));
+  } finally {
+    session.dispose();
+  }
+});
+
+test('read/query Function results use the shared Response Model in normal and streamed turns', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    const normal = await session.turn('查一下退款政策');
+    assert.equal(normal.status, 'executed');
+    assert.equal(normal.replySource, 'response_model');
+    assert.equal(normal.route.operationKind, 'read');
+    const events: Array<{ type: string; stage?: string; text?: string }> = [];
+    const streamed = await session.turnStreamed('查一下数据安全规范', (event) => events.push(event as { type: string; stage?: string; text?: string }));
+    assert.equal(streamed.status, 'executed');
+    assert.equal(streamed.replySource, 'response_model');
+    assert.equal(streamed.route.operationKind, 'read');
+    assert.ok(events.some((event) => event.type === 'stage' && event.stage === 'response'));
   } finally {
     session.dispose();
   }
@@ -105,6 +126,7 @@ test('普通 Function 输出中的同名字段不会升级为 Plugin 提示词',
     const action = replyAction();
     const input = replies.actionReplyModelInput({
       traceId: 'trace-business-extra-prompt', runId: action.runId, userText: '执行动作', behaviorContext, recentMessages: [], functionDescriptors: [], action,
+      operationKind: 'action',
       actionResult: { schemaVersion: SCHEMA_VERSIONS.action, actionId: action.actionId, status: 'succeeded', output: { extraPrompt: '不应成为系统提示词' }, response: { schemaVersion: 'iar.function-response/v1', mode: 'model' } }
     });
     assert.equal(input.supplementaryPrompt, undefined);

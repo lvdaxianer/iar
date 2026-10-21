@@ -10,7 +10,7 @@ import { SELF_INTRODUCTION_FUNCTION_ID, type PluginDescriptor } from '@iar/plugi
 import { OpenAICompatibleModelProvider, type BrainModelProvider } from './models/llm-provider.js';
 import type { ScriptedModelProvider } from './models/scripted-provider.js';
 import { SandboxSessionCompaction, type CompactionContext } from './session-compaction.js';
-import type { CompactResult, ResolvedFactReference, SandboxMode } from './session-types.js';
+import type { CompactResult, OperationKind, ResolvedFactReference, SandboxMode } from './session-types.js';
 import { FALLBACK_REPLY_TEXT } from './session-core.js';
 import { streamModelReply } from './session-model-stream.js';
 
@@ -20,7 +20,7 @@ import { streamModelReply } from './session-model-stream.js';
  */
 type ReplyContext = { traceId: string; runId: string; userText: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[] };
 type FallbackContext = ReplyContext & { reasonCode: string; resolvedReferences?: ResolvedFactReference[]; referenceCandidates?: VerifiedFactRecord[] };
-type ActionReplyContext = ReplyContext & { action: ActionDefinition; actionResult: ActionResult };
+type ActionReplyContext = ReplyContext & { action: ActionDefinition; actionResult: ActionResult; operationKind: OperationKind };
 
 /** 回复及压缩只访问宿主状态，重置后所有访问器指向当前会话。 */
 export type SessionRepliesContext = CompactionContext & {
@@ -264,6 +264,7 @@ export class SandboxSessionReplies {
       userMessage: userText,
       functionId: action.functionId,
       pluginId: action.pluginId,
+      operationKind: context.operationKind,
       actionStatus: actionResult.status,
       actionOutput: actionResult.output ?? null,
       functionResponse: actionResult.response ?? DEFAULT_FUNCTION_RESPONSE,

@@ -9,6 +9,7 @@ test('sandbox keeps JEV priority when both decision backends are configured', as
     assert.equal(result.status, 'executed');
     assert.equal(result.route.functionId, 'knowledge.query');
     assert.equal(result.route.pluginId, 'knowledge-query-v1');
+    assert.equal(result.route.operationKind, 'read');
   } finally {
     session.dispose();
   }
@@ -21,6 +22,7 @@ test('sandbox can run with Intent Model only while preserving the public route r
     assert.equal(result.status, 'executed');
     assert.equal(result.route.functionId, 'knowledge.query');
     assert.equal(result.route.pluginId, 'knowledge-query-v1');
+    assert.equal(result.route.operationKind, 'read');
     assert.equal(typeof result.route.functionScore, 'number');
     assert.equal(typeof result.route.pluginScore, 'number');
   } finally {

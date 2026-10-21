@@ -78,7 +78,28 @@ Operation 是 Function 内的动作目录：
 
 `read` 表示只读能力；`action` 表示可能产生副作用，必须进入既有 Policy/confirmation 流程。Operation 名称不能重复，目录只用于当前 Function 的候选解释、策略判断和执行边界。
 
-## 5. 意图识别和动态路由
+## 5. 固定响应信封和回复模型
+
+Handler 的输出必须携带固定的 `FunctionResponse` 信封：
+
+```ts
+type FunctionResponse =
+  | { schemaVersion: 'iar.function-response/v1'; mode: 'model'; ui?: JsonValue }
+  | { schemaVersion: 'iar.function-response/v1'; mode: 'direct'; text: string; ui?: JsonValue }
+  | { schemaVersion: 'iar.function-response/v1'; mode: 'none'; ui?: JsonValue };
+```
+
+响应模式的边界由运行时按已选中的 Operation 决定，而不是由 Handler 自己声明：
+
+- `read`/query 结果必须使用 `mode: 'model'`，运行时会把经过输入/输出 Schema 校验的结构化结果交给 Response Model 汇总后再回复用户；自我介绍也走这条路径。
+- `action` 结果可以使用 `model`、`direct` 或 `none`。确认、表单和纯 UI 状态通常使用 `none`；完整且有界的固定回执才使用 `direct`。
+- 查询 Function 返回 `direct` 或 `none` 会在执行边界 fail-closed，不会进入 Workflow 或聊天回复。
+
+Response Model 的提示词按三层组合：Runtime 固定安全与 Markdown/JSON 输出协议、创建 Agent 时的 `systemPrompt` 总体提示词、当前 Function/Plugin 的 `supplementaryPrompt` 附加提示词。用户只能通过 Agent 配置或受控 Plugin 配置输入后两层，不能覆盖 Runtime 安全规则。
+
+如果用户追问刚刚已经确认的结果，运行时只把 `factHistory` 中带来源的可信事实交给 Response Model，不重新执行 Function，也不会把模型生成的自然语言写回事实链；唯一回答标记为 `context_answered`，事实不足或有歧义仍标记为 `clarification`。
+
+## 6. 意图识别和动态路由
 
 意图识别输出的 `intent` 使用 Function ID，例如 `ticket.create`。模型只能从当前路由请求提供的有限候选中选择，不能发明 Function 或 Plugin。
 
@@ -90,7 +111,7 @@ Operation 是 Function 内的动作目录：
 - 候选在等待确认期间失效时拒绝执行，不自动切换到其他 Plugin。
 - 普通入口、流式入口、会话恢复和 Pi Bridge 共用同一个会话状态机。
 
-## 6. 新增 Function 检查清单
+## 7. 新增 Function 检查清单
 
 - [ ] 在已有业务 Plugin 包中用 `defineFunction` 定义 Function。
 - [ ] `functionId`、动作类型、输入输出 Schema 和 Operation 目录完整且稳定。
@@ -100,5 +121,6 @@ Operation 是 Function 内的动作目录：
 - [ ] 将 Function 放入 Plugin 的 `functions` 数组，再通过 `createIarRuntime` 注册。
 - [ ] 为正常路由、动态候选、确认、恢复和 Handler ownership 增加测试。
 - [ ] 确认模型输入中只出现当前有限候选，不把注册表或原始消息直接交给模型。
+- [ ] 查询/读取 Operation 返回 `mode: 'model'`，确认或表单等动作明确选择 `direct` 或 `none`。
 
 不要再维护 `functionIds` 宿主白名单，也不要把 `functionId` 写回 Plugin Manifest 顶层；Function 的存在和归属由 Plugin 包本身定义。

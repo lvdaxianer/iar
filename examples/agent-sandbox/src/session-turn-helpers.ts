@@ -10,7 +10,7 @@ import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { resolveSandboxTraceId, writeSafeLog } from './safe-log.js';
 import type { SandboxSessionReplies } from './session-replies.js';
 import { hasVerifiedFactsForFollowUp } from './session-clarification.js';
-import type { ConfirmResult, PassThroughCapabilityContext, RouteEvidence, TurnResult } from './session-types.js';
+import type { ConfirmResult, OperationKind, PassThroughCapabilityContext, RouteEvidence, TurnResult } from './session-types.js';
 
 /** 构造待确认期间的 bridge 澄清结果。 */
 export function pendingBridgeResult(): TurnResult {
@@ -95,8 +95,8 @@ export function rejectSelection(replies: Pick<SandboxSessionReplies, 'pushMessag
 }
 
 /** 为已确认执行的动作生成回复，超限时保留成功状态。 */
-export async function finishConfirmedAction(context: { replies: SandboxSessionReplies; projector: { current(): BehaviorContext }; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[]; turnCount: number }, action: ActionDefinition, actionResult: ActionResult): Promise<ConfirmResult> {
-  const reply = await trackModelResponseLimit(() => context.replies.generateReply({ traceId: resolveSandboxTraceId(`trace-sandbox-confirm-${String(context.turnCount)}`), runId: action.runId, userText: '（确认执行）', behaviorContext: context.projector.current(), recentMessages: context.recentMessages, functionDescriptors: context.functionDescriptors, action, actionResult })).catch((error: unknown) => {
+export async function finishConfirmedAction(context: { replies: SandboxSessionReplies; projector: { current(): BehaviorContext }; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[]; turnCount: number }, action: ActionDefinition, actionResult: ActionResult, operationKind: OperationKind): Promise<ConfirmResult> {
+  const reply = await trackModelResponseLimit(() => context.replies.generateReply({ traceId: resolveSandboxTraceId(`trace-sandbox-confirm-${String(context.turnCount)}`), runId: action.runId, userText: '（确认执行）', behaviorContext: context.projector.current(), recentMessages: context.recentMessages, functionDescriptors: context.functionDescriptors, action, actionResult, operationKind })).catch((error: unknown) => {
     if (!(error instanceof ModelResponseLimitError)) throw error;
     return undefined;
   });

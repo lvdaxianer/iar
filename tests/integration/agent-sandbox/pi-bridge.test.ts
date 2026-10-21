@@ -31,8 +31,16 @@ test('IAR bridge handles business input and protects confirmation isolation', as
   const server = await startBridgeServer();
   try {
     const first = await openBridgeSession(server, 'pi-session-a');
+    const intro = await server.app.inject({ method: 'POST', url: `/api/bridge/v1/sessions/${first}/input`, payload: { text: '介绍一下自己' } });
+    const introBody = intro.json() as { disposition: string; replySource: string; route: { functionId?: string; pluginId?: string; operationKind?: string } };
+    assert.equal(introBody.disposition, 'handled');
+    assert.equal(introBody.replySource, 'response_model');
+    assert.equal(introBody.route.functionId, SELF_INTRODUCTION_FUNCTION_ID);
+    assert.equal(introBody.route.pluginId, 'iar.self-introduction');
+    assert.equal(introBody.route.operationKind, 'read');
     const handled = await server.app.inject({ method: 'POST', url: `/api/bridge/v1/sessions/${first}/input`, payload: { text: '查一下退款政策' } });
     assert.equal(handled.statusCode, 200); assert.equal(handled.json().disposition, 'handled'); assert.equal(handled.json().replySource, 'response_model');
+    assert.equal(handled.json().route.operationKind, 'read');
     const pendingResponse = await server.app.inject({ method: 'POST', url: `/api/bridge/v1/sessions/${first}/input`, payload: { text: '帮我创建工单' } });
     const pending = pendingResponse.json() as { disposition: string; pending: { actionId: string } };
     assert.equal(pending.disposition, 'awaiting_confirmation');

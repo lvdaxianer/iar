@@ -177,9 +177,10 @@ export class SandboxSessionRouting {
       ? { input: buildSelfIntroductionInput(this.context.pluginHost.allDescriptors(), this.context.configuration.selfIntroduction.extraPrompt) }
       : buildActionInput(route.functionId, frame.slots, userText, frame.action, behaviorContext, functionRecord.operations);
     if ('missing' in built) return { status: 'clarification', reply: `还缺少必要信息（${built.missing.join('、')}），请补充完整后再试。`, reasonCode: 'slots_missing' };
+    const operationKind = sandboxOperationKind(route.functionId, built.input, functionRecord.operations);
     const action = this.createAction({ runId, functionId: route.functionId, pluginId: route.pluginId, input: built.input, policy: manifest.policy, operations: functionRecord.operations });
     await this.appendDecisionEvent({ runId, frame, route, input: built.input });
-    return this.executePreparedAction(action, manifest.capabilities);
+    return this.executePreparedAction(action, manifest.capabilities, operationKind);
   }
 
   /** 按插件策略生成动作，读取操作保持低风险。
@@ -210,7 +211,7 @@ export class SandboxSessionRouting {
    * @returns 动作的执行状态
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  private async executePreparedAction(action: ActionDefinition, capabilities: string[]): Promise<ExecuteTurnOutcome> {
+  private async executePreparedAction(action: ActionDefinition, capabilities: string[], operationKind: 'read' | 'action'): Promise<ExecuteTurnOutcome> {
     const runId = action.runId;
     // 每个回合使用独立 Workflow 实例，事件写入共享 EventLog 以保证全局唯一 ID。
     this.context.workflow = this.context.createWorkflow();
@@ -225,10 +226,10 @@ export class SandboxSessionRouting {
       executor: this.context.createExecutor()
     });
     await this.context.drainWorkflowEvents();
-    if (!executed.ok) return this.failedPreparedAction(action, executed.reasonCode);
+    if (!executed.ok) return this.failedPreparedAction(action, executed.reasonCode, operationKind);
     this.context.workflow.transition({ runId, event: 'complete' });
     await this.context.drainWorkflowEvents();
-    return { status: 'executed', action, actionResult: executed.value };
+    return { status: 'executed', action, actionResult: executed.value, operationKind };
   }
 
   /** 将工作流拒绝映射为待确认或稳定失败结果。
@@ -238,12 +239,12 @@ export class SandboxSessionRouting {
    * @returns 待确认或失败结果
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  private failedPreparedAction(action: ActionDefinition, reasonCode: string): ExecuteTurnOutcome {
+  private failedPreparedAction(action: ActionDefinition, reasonCode: string, operationKind: 'read' | 'action'): ExecuteTurnOutcome {
     if (reasonCode === 'confirmation_required') {
       this.context.pending = { action };
       const resolved = this.context.pluginHost.resolveCandidate(action.functionId, action.pluginId);
       const descriptor = resolved.ok && resolved.value.manifest.pluginKind === 'business' ? resolved.value.functions.get(action.functionId)?.definition : undefined;
-      return { status: 'awaiting_confirmation', action, reply: `即将执行高风险操作「${describeAction(action, descriptor)}」（插件 ${action.pluginId}），需要你的确认。` };
+      return { status: 'awaiting_confirmation', action, reply: `即将执行高风险操作「${describeAction(action, descriptor)}」（插件 ${action.pluginId}），需要你的确认。`, operationKind };
     }
     return { status: 'failed', reply: `动作被拒绝：${reasonCode}`, reasonCode };
   }

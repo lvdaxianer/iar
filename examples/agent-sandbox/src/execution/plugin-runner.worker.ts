@@ -12,6 +12,7 @@ import { validateFunctionHandlerResult, validateJsonSchemaValue, type JsonValue 
 import type { FunctionHandlerContext, FunctionHandlerResult } from '@iar/plugin';
 import { parentPort, workerData } from 'node:worker_threads';
 import { sandboxPluginRegistry } from './plugin-registry.js';
+import { validateResponsePolicy } from './response-policy.js';
 
 /** 主线程发来的插件执行请求。 */
 type RunnerRequest = {
@@ -65,7 +66,11 @@ async function handle(request: RunnerRequest): Promise<void> {
       const outputValidation = resultValidation.ok
         ? validateJsonSchemaValue(functionRegistration.definition.outputSchema, resultValidation.value.output)
         : undefined;
+      const policyValidation = resultValidation.ok && outputValidation?.ok
+        ? validateResponsePolicy(request.input, functionRegistration.operations, resultValidation.value.response)
+        : undefined;
       if (!resultValidation.ok || !outputValidation?.ok) response = { ok: false, error: '插件输出不符合 Function Schema' };
+      else if (!policyValidation?.ok) response = { ok: false, error: '插件响应模式不符合 Operation 策略' };
       else response = { ok: true, result: resultValidation.value };
     }
   } catch (error) {

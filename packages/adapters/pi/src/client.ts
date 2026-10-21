@@ -5,7 +5,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-20
  */
-import { PI_BRIDGE_VERSION, isBridgeDisposition, isBridgeReplySource, type BridgeCapabilityContext, type BridgeConfirmRequest, type BridgeConfirmResponse, type BridgeInputRequest, type BridgeInputResponse, type BridgeOpenRequest, type BridgeOpenResponse, type BridgePendingAction, type BridgeStateResponse, type IarSessionId } from './protocol.js';
+import { PI_BRIDGE_VERSION, isBridgeDisposition, isBridgeReplySource, type BridgeCapabilityContext, type BridgeConfirmRequest, type BridgeConfirmResponse, type BridgeInputRequest, type BridgeInputResponse, type BridgeOpenRequest, type BridgeOpenResponse, type BridgePendingAction, type BridgeRouteEvidence, type BridgeStateResponse, type IarSessionId } from './protocol.js';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_TIMEOUT_MS = 60_000;
@@ -174,7 +174,23 @@ function validateInputResponse(value: unknown): BridgeInputResponse {
   if (!isBridgeDisposition(record.disposition)) throw new BridgeClientError('invalid_bridge_response', 'IAR 桥接响应无效。', false);
   const capabilityContext = record.capabilityContext === undefined ? undefined : validateCapabilityContext(record.capabilityContext);
   const replySource = optionalReplySource(record);
-  return { version: PI_BRIDGE_VERSION, iarSessionId: record.iarSessionId, disposition: record.disposition, ...optionalString(record, 'reply'), ...optionalString(record, 'reasonCode'), ...(record.pending === undefined ? {} : { pending: validatePending(record.pending) }), ...(capabilityContext === undefined ? {} : { capabilityContext }), ...(replySource === undefined ? {} : { replySource }) };
+  const route = record.route === undefined ? undefined : validateRoute(record.route);
+  return { version: PI_BRIDGE_VERSION, iarSessionId: record.iarSessionId, disposition: record.disposition, ...optionalString(record, 'reply'), ...optionalString(record, 'reasonCode'), ...(route === undefined ? {} : { route }), ...(record.pending === undefined ? {} : { pending: validatePending(record.pending) }), ...(capabilityContext === undefined ? {} : { capabilityContext }), ...(replySource === undefined ? {} : { replySource }) };
+}
+
+/** 校验公开路由证据，禁止 Bridge 携带原始模型上下文。 */
+function validateRoute(value: unknown): BridgeRouteEvidence {
+  const record = asRecord(value);
+  if (!isBoundedString(record.status, 64) || !isBoundedString(record.reasonCode, 128) || !isBoundedString(record.semanticIntent, 256) || typeof record.semanticConfidence !== 'number' || record.semanticConfidence < 0 || record.semanticConfidence > 1) throw new BridgeClientError('invalid_bridge_response', 'IAR 路由证据无效。', false);
+  if (record.operationKind !== undefined && record.operationKind !== 'read' && record.operationKind !== 'action') throw new BridgeClientError('invalid_bridge_response', 'IAR 路由证据无效。', false);
+  return { status: record.status, reasonCode: record.reasonCode, semanticIntent: record.semanticIntent, semanticConfidence: record.semanticConfidence, ...(optionalBounded(record, 'functionId', 256)), ...(optionalBounded(record, 'pluginId', 256)), ...(record.operationKind === undefined ? {} : { operationKind: record.operationKind }) };
+}
+
+/** 读取路由证据中的可选标识。 */
+function optionalBounded(record: Record<string, unknown>, key: string, maxLength: number): Record<string, string> {
+  if (record[key] === undefined) return {};
+  if (!isBoundedString(record[key], maxLength)) throw new BridgeClientError('invalid_bridge_response', 'IAR 路由证据无效。', false);
+  return { [key]: record[key] };
 }
 
 /** 校验 pass-through 能力上下文的有界公开字段。 */

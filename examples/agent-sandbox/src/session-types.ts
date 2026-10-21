@@ -22,6 +22,9 @@ export type SandboxDecisionBackend = DecisionBackend;
 /** 用户可观测的回复来源，值域与 Pi bridge 保持稳定。 */
 export type ReplySource = 'direct_function' | 'response_model' | 'pi_agent' | 'none';
 
+/** 运行时选中的 Function Operation 类型。 */
+export type OperationKind = 'read' | 'action';
+
 /** 路由证据摘要，供调试面板展示。 */
 export type RouteEvidence = {
   /** 路由终态。 */
@@ -36,6 +39,8 @@ export type RouteEvidence = {
   functionId?: string;
   /** Plugin 选择。 */
   pluginId?: string;
+  /** 选中的 Operation 类型，供回复来源和 Bridge 观察。 */
+  operationKind?: OperationKind;
   /** Function 决策分数。 */
   functionScore?: number;
   /** Plugin 决策分数。 */
@@ -71,7 +76,7 @@ export type TurnResult =
   | { status: 'agent'; reply: string; route: RouteEvidence; replySource?: ReplySource }
   | { status: 'executed'; reply: string; route: RouteEvidence; actionResult: ActionResult; reasonCode?: string; replySource?: ReplySource }
   | { status: 'awaiting_confirmation'; reply: string; route: RouteEvidence; pending: PendingActionSummary; replySource?: ReplySource }
-  | { status: 'clarification'; reply: string; route: RouteEvidence; reasonCode: string; replySource?: ReplySource }
+  | { status: 'clarification'; reply: string; route: RouteEvidence; reasonCode: string; disposition?: 'context_answered'; replySource?: ReplySource }
   | { status: 'failed'; reply: string; route: RouteEvidence; reasonCode: string; replySource?: ReplySource };
 
 /** 流式输出的阶段标识。 */
@@ -102,8 +107,8 @@ export type ReferenceResolution =
 
 /** 单轮执行阶段的内部结果联合。 */
 export type ExecuteTurnOutcome =
-  | { status: 'executed'; action: ActionDefinition; actionResult: ActionResult }
-  | { status: 'awaiting_confirmation'; action: ActionDefinition; reply: string }
+  | { status: 'executed'; action: ActionDefinition; actionResult: ActionResult; operationKind: OperationKind }
+  | { status: 'awaiting_confirmation'; action: ActionDefinition; reply: string; operationKind: OperationKind }
   | { status: 'clarification'; reply: string; reasonCode: string }
   | { status: 'failed'; reply: string; reasonCode: string };
 
