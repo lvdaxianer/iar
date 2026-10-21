@@ -53,6 +53,7 @@ for (const { directory, manifest } of manifests) {
     import: './dist/index.js',
   }, `${name} root exports must expose only its compiled public entrypoint`);
   assert.deepEqual(manifest.files, ['dist'], `${name} files must publish only dist`);
+  if (name === '@iar/runtime') assert.notEqual(manifest.private, true, '@iar/runtime must be publishable');
   assertTarget(directory, name, 'main', manifest.main);
   assertTarget(directory, name, 'types', manifest.types);
 
@@ -84,6 +85,10 @@ for (const { directory, manifest } of manifests) {
   const worker = join(directory, 'dist', 'worker.js');
   if (existsSync(worker)) assert.ok(paths.includes('dist/worker.js'), `${name} tarball must contain its worker`);
   console.log(`verified ${name} (${paths.length} packed files)`);
+}
+
+for (const publicEntry of ['@iar/plugin', '@iar/runtime']) {
+  assert.ok(manifests.some(({ manifest }) => manifest.name === publicEntry), `${publicEntry} must have a publishable package manifest`);
 }
 
 const representative = manifests.find(({ manifest }) => manifest.name === '@iar/contracts');
