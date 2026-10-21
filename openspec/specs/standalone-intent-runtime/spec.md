@@ -5,7 +5,7 @@
 
 ## Purpose
 
-定义独立 IAR Runtime 的公共入口、宿主适配器隔离和可替换基础设施边界。
+定义独立 IAR Runtime 的公共入口、宿主适配器隔离、Agent 级 Plugin 配置和可替换基础设施边界。
 
 ## Requirements
 
