@@ -20,7 +20,12 @@
 
 ### Requirement: Package registration is atomic
 
-统一入口 SHALL 在任何 Plugin 或其 Function 校验失败时拒绝整个插件包，并且不得留下部分 Plugin、Function、Handler 或生命周期状态。
+统一入口 SHALL 在任何 Plugin、Function、输入 Schema、输出 Schema、响应契约或 Handler 校验失败时拒绝整个插件包，并且不得留下部分 Plugin、Function、Handler 或生命周期状态。
+
+#### Scenario: Invalid Function response contract rejects the package
+
+- **WHEN** 插件包中的一个 Function 缺少合法的响应契约、声明未知回复模式或其输入/输出 Schema 不能被编译
+- **THEN** 整个插件包注册失败，其他 Function 也不会进入当前路由索引
 
 #### Scenario: One invalid Function rejects the package
 
@@ -48,7 +53,12 @@
 
 ### Requirement: Unified entry owns lifecycle activation
 
-统一入口 SHALL 接收插件包集合，完成校验、安装和启用；业务方不需要手动维护 `functionIds` 或逐个调用 Host 注册步骤。
+统一入口 SHALL 接收插件包集合，完成输入/输出 Schema 和响应契约校验、安装和启用；业务方不需要手动维护 `functionIds` 或逐个调用 Host 注册步骤。
+
+#### Scenario: Startup validates custom Function contracts
+
+- **WHEN** 应用启动并加载自定义 Plugin Function
+- **THEN** 每个 Function 的 Handler、输入 Schema、输出 Schema 和响应契约在注册提交前完成校验，失败时返回稳定初始化错误且不暴露部分初始化的运行时
 
 #### Scenario: Application starts with registered packages
 

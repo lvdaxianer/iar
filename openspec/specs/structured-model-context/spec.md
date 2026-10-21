@@ -90,7 +90,17 @@ The system SHALL persist accepted messages and structured context through the co
 
 ### Requirement: Model calls receive structured conversational context
 
-The system SHALL include current routing scope, verified facts, pending clarification, bounded recent messages and the current user message in applicable model calls. The current Agent's enabled and authorized capability descriptions SHALL be included as bounded model context for semantic extraction, fallback replies and Pi delegation. Recent messages SHALL be labeled untrusted, bounded by count and size, and non-authoritative. Self-introduction responses SHALL also receive the bounded capability inventory and Agent supplementary prompt; compaction SHALL exclude raw message history.
+The system SHALL include current routing scope, verified facts, pending clarification, bounded recent messages and the current user message in applicable model calls. Only Function results whose validated response mode is `model` SHALL enter response generation; `direct` and `none` results SHALL preserve their declared non-model boundaries. The current Agent's enabled and authorized capability descriptions SHALL be included as bounded model context for semantic extraction, fallback replies and Pi delegation. Recent messages SHALL be labeled untrusted, bounded by count and size, and non-authoritative. Self-introduction responses SHALL also receive the bounded capability inventory and Agent supplementary prompt; compaction SHALL exclude raw message history.
+
+#### Scenario: Direct result skips response generation
+
+- **WHEN** a Function returns a valid `direct` response
+- **THEN** the runtime returns its bounded text without sending the Function output to the response model
+
+#### Scenario: UI-only result skips chat generation
+
+- **WHEN** a Function returns a valid `none` response for confirmation or form state
+- **THEN** the runtime updates the structured host state without appending a normal assistant message
 
 #### Scenario: A later question is processed
 
