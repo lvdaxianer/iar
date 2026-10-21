@@ -42,6 +42,7 @@ test('Pi host 页面拼装为自包含响应并保留共用资源字节', () => 
   assert.equal([...page].filter((character) => character === '\0').length, 4);
   assert.ok(page.includes('id="messages"'));
   assert.ok(page.includes('id="flowList"'));
+  assert.ok(page.includes('id="routeReplySource"'));
   assert.ok(page.includes('\'use strict\';'));
 });
 
@@ -54,6 +55,9 @@ test('Pi host 协议适配片段校验 IAR entry 信封后再渲染', () => {
   assert.match(adapter, /try \{ entry = JSON\.parse\(event\.data\); \} catch \(err\) \{ return; \}/);
   assert.match(adapter, /entry\.customType !== 'iar-bridge'/);
   assert.match(adapter, /typeof data\.content !== 'string'/);
+  assert.match(adapter, /PI_HOST_REPLY_SOURCE_META/);
+  assert.match(adapter, /routeReplySource/);
+  assert.match(adapter, /data\.replySource/);
   assert.match(adapter, /renderPiHostEntry\(entry\)/);
 });
 

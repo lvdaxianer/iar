@@ -82,14 +82,17 @@
   function finalizeStreamBubble(state, result) {
     state.stageEl.remove();
     if (!result) return;
+    lastReplySource = { direct_function: 'Function 直出', response_model: 'Response Model', pi_agent: 'Pi Agent', none: '无回复' }[result.replySource] || null;
     if ((state.textEl.textContent.length === 0 || result.reasonCode === 'model_response_too_large') && result.reply) state.textEl.textContent = result.reply;
     var rawText = state.textEl.textContent;
     state.textEl.innerHTML = renderMarkdown(rawText);
-    var metaText = result.reasonCode === 'model_response_too_large' && result.status === 'executed' ? '已执行 · 回复不完整' : result.status === 'executed'
-      ? '已执行 · ' + (result.route && result.route.functionId ? result.route.functionId : '')
-      : result.status === 'awaiting_confirmation' ? '等待确认'
-      : result.status === 'agent' ? 'Pi 兜底'
-      : result.status === 'clarification' ? '需要澄清' : '失败';
+    var sourceMeta = lastReplySource || '来源未知';
+    document.getElementById('routeReplySource').textContent = sourceMeta;
+    var metaText = result.reasonCode === 'model_response_too_large' && result.status === 'executed' ? '已执行 · 回复不完整 · ' + sourceMeta : result.status === 'executed'
+      ? '已执行 · ' + (result.route && result.route.functionId ? result.route.functionId : '') + ' · ' + sourceMeta
+      : result.status === 'awaiting_confirmation' ? '等待确认 · ' + sourceMeta
+      : result.status === 'agent' ? 'Pi 兜底 · ' + sourceMeta
+      : result.status === 'clarification' ? '需要澄清 · ' + sourceMeta : '失败 · ' + sourceMeta;
     appendMessageMeta(state.div, metaText);
     recordConversation('bot', rawText, metaText);
     messagesEl.scrollTop = messagesEl.scrollHeight;

@@ -131,6 +131,8 @@ function assertSelfContainedPage(body: string): void {
   assert.equal([...body].filter((character) => character === '\0').length, 4);
   assert.ok(body.includes('function initializeSession()'));
   assert.ok(body.includes('function renderMarkdown(src)'));
+  assert.ok(body.includes('id="routeReplySource"'));
+  assert.match(body, /response_model: 'Response Model'/);
 }
 
 /** 根据源文件顺序独立计算响应，保护启动时拼装契约。

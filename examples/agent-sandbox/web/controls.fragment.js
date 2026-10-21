@@ -1,3 +1,5 @@
+  let lastReplySource = null;
+
   /** 展示确认结果并写入本地历史，三种终态对应原有展示文案。
    * 执行与取消共用动作标识，结果文字直接来自服务端响应。
    * @param confirmResult - 服务端确认终态
@@ -122,6 +124,8 @@
       clearConversation(sessionId);
       messagesEl.innerHTML = '';
       pendingRunId = null;
+      lastReplySource = null;
+      document.getElementById('routeReplySource').textContent = '-';
       appendMsg('bot', '会话已重置，开始新的对话吧。');
       recordConversation('bot', '会话已重置，开始新的对话吧。');
       document.getElementById('compactResult').className = '';
@@ -142,6 +146,8 @@
     if (oldLease) oldLease.release();
     messagesEl.innerHTML = '';
     pendingRunId = null;
+    lastReplySource = null;
+    document.getElementById('routeReplySource').textContent = '-';
     document.getElementById('compactResult').className = '';
     appendMsg('bot', '新会话已建立，原会话已保留在会话列表中。');
     recordConversation('bot', '新会话已建立，原会话已保留在会话列表中。');
@@ -210,6 +216,7 @@
     document.getElementById('routeFunction').textContent = route.functionId || '-';
     document.getElementById('routePlugin').textContent = route.pluginId || '-';
     document.getElementById('routeStatus').textContent = state.context.workflow.status + ' / ' + state.context.workflow.currentStep;
+    document.getElementById('routeReplySource').textContent = lastReplySource || '-';
     document.getElementById('routeConfidence').textContent = state.context.intent && state.context.intent !== 'unknown' ? state.context.intent : '-';
     var score = state.context.action && state.context.action.name !== 'unknown' ? state.context.action.name + '（' + state.context.action.status + '）' : '-';
     document.getElementById('routeScore').textContent = score;
