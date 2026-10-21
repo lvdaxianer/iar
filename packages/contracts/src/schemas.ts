@@ -6,6 +6,7 @@
  */
 import type { TSchema } from '@sinclair/typebox';
 import { CompactionReferenceSchema, CompactionResultSchema } from './schema-compaction.js';
+import { FunctionHandlerResultSchema, FunctionResponseSchema, MAX_FUNCTION_RESPONSE_TEXT_LENGTH, MAX_FUNCTION_RESPONSE_UI_BYTES } from './schema-function-response.js';
 import { ClarificationStateSchema, PendingReferenceSchema, RecentMessagePolicySchema, VerifiedFactHistorySchema, VerifiedFactRecordSchema } from './schema-context.js';
 import {
   // Action 请求 Schema。
@@ -83,6 +84,10 @@ export const CONTRACT_SCHEMAS = {
   event: EventEnvelopeSchema,
   // Function 路由能力。
   function: FunctionDefinitionSchema,
+  // Function 固定回复信封。
+  functionResponse: FunctionResponseSchema,
+  // Function Handler 固定输出外壳。
+  functionResult: FunctionHandlerResultSchema,
   // 可安装插件能力。
   pluginManifest: PluginManifestSchema,
   // Function/Plugin 规则。
@@ -103,6 +108,10 @@ export const CONTRACT_SCHEMAS = {
 export {
   // 基础能力和插件 Manifest。
   FunctionDefinitionSchema,
+  FunctionHandlerResultSchema,
+  FunctionResponseSchema,
+  MAX_FUNCTION_RESPONSE_TEXT_LENGTH,
+  MAX_FUNCTION_RESPONSE_UI_BYTES,
   BusinessPluginManifestSchema,
   JsonSchemaSchema,
   JsonValueSchema,

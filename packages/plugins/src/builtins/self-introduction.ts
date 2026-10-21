@@ -15,6 +15,12 @@ const MAX_INTRODUCTION_PLUGINS = 128;
 /** 单条能力描述的最大字符数。 */
 const MAX_PLUGIN_DESCRIPTION_LENGTH = 400;
 
+/** 自我介绍成功后交给回复模型汇总。 */
+const SELF_INTRODUCTION_MODEL_RESPONSE = { schemaVersion: SCHEMA_VERSIONS.functionResponse, mode: 'model' } as const;
+
+/** 自我介绍输入非法时不生成聊天回复。 */
+const SELF_INTRODUCTION_NONE_RESPONSE = { schemaVersion: SCHEMA_VERSIONS.functionResponse, mode: 'none' } as const;
+
 /** 自我介绍输入中的能力摘要。 */
 type IntroductionPlugin = { pluginId: string; functionId: string; description: string };
 
@@ -49,7 +55,7 @@ const selfIntroductionHandler: FunctionHandler = async (input: JsonValue) => {
   try {
     const request = parseIntroductionInput(input);
     if (!request) return invalidIntroductionInput();
-    return { output: request as unknown as JsonValue, status: 'succeeded' };
+    return { output: request as unknown as JsonValue, status: 'succeeded', response: SELF_INTRODUCTION_MODEL_RESPONSE };
   } catch {
     return invalidIntroductionInput();
   }
@@ -68,7 +74,7 @@ export const selfIntroductionPlugin: PluginPackage = {
  * @date 2026-10-21
  */
 function invalidIntroductionInput(): FunctionHandlerResult {
-  return { output: { errorCode: SELF_INTRODUCTION_INVALID_INPUT_CODE }, status: 'failed', errorCode: SELF_INTRODUCTION_INVALID_INPUT_CODE };
+  return { output: { errorCode: SELF_INTRODUCTION_INVALID_INPUT_CODE }, status: 'failed', errorCode: SELF_INTRODUCTION_INVALID_INPUT_CODE, response: SELF_INTRODUCTION_NONE_RESPONSE };
 }
 
 /** 构造有限字段的 JSON Schema，避免输入和输出契约重复漂移。

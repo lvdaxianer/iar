@@ -61,7 +61,7 @@ async function assertSuccessfulExecution(record: PluginRecord): Promise<void> {
   // Handler 返回值先通过类型断言，再交给 Manifest Schema 校验。
   assert.ok(execution);
   assertOutputSchema(execution.output);
-  assert.deepEqual(execution, { output: { accepted: true, serviceId: 'test1' }, status: 'succeeded' });
+  assert.deepEqual(execution, { output: { accepted: true, serviceId: 'test1' }, status: 'succeeded', response: { schemaVersion: 'iar.function-response/v1', mode: 'model' } });
 }
 
 /**

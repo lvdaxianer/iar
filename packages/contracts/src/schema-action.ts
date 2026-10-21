@@ -7,6 +7,7 @@
 import { Type } from '@sinclair/typebox';
 import { ERROR_CODES } from './errors.js';
 import { JsonValueSchema, RiskLevelSchema } from './schema-primitives.js';
+import { FunctionResponseSchema } from './schema-function-response.js';
 import { SCHEMA_VERSIONS } from './versions.js';
 
 /** 待执行的副作用 Action。 */
@@ -48,7 +49,9 @@ export const ActionResultSchema = Type.Object({
   // output 只能携带可重放 JSON。
   output: Type.Optional(JsonValueSchema),
   // errorCode 使用稳定错误码。
-  errorCode: Type.Optional(Type.String({ minLength: 1 }))
+  errorCode: Type.Optional(Type.String({ minLength: 1 })),
+  // response 只携带已校验的用户回复分流信息。
+  response: Type.Optional(FunctionResponseSchema)
 }, { additionalProperties: false });
 
 /** 结构化 Decision 结果，不能直接授予执行权限。 */

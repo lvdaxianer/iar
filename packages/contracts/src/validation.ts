@@ -6,16 +6,20 @@
  */
 import { type ErrorObject, type ValidateFunction } from 'ajv';
 import { Ajv2020 } from 'ajv/dist/2020.js';
+import { MAX_FUNCTION_RESPONSE_UI_BYTES } from './schema-function-response.js';
 import { ContractValidationError, ERROR_CODES, type ContractErrorResult, type ContractIssue, type ErrorCode } from './errors.js';
 import { CompactionEventPayloadSchema, CompactionFailedEventPayloadSchema } from './schema-compaction.js';
 import { CONTRACT_SCHEMAS } from './schemas.js';
-import type { PluginManifest } from './types.js';
+import type { FunctionResponse, JsonSchema, JsonValue, PluginManifest } from './types.js';
 import { IAR_API_VERSION, SCHEMA_VERSIONS } from './versions.js';
 
 /** 表示校验成功或失败的显式结果，避免以 null 表示失败。 */
 export type ValidationResult<T> =
   | { ok: true; value: T }
   | { ok: false; error: ContractErrorResult };
+
+/** 按 Schema 对象身份缓存编译结果，避免每次 Function 调用重复创建 Ajv。 */
+const JSON_SCHEMA_VALIDATORS = new WeakMap<object, ValidateFunction>();
 
 /** 表示公开的契约 Schema 名称。 */
 export type ContractName = keyof typeof CONTRACT_SCHEMAS;
@@ -141,6 +145,8 @@ function validateContractVersion(name: ContractName, input: unknown): ContractEr
  * @date 2026-10-17
  */
 function validateValidatedContract(name: ContractName, input: unknown): ValidationResult<unknown> {
+  const responseIssues = responseSemanticIssues(name, input);
+  if (responseIssues.length > 0) return { ok: false, error: validationError(responseIssues) };
   const issues = validateContractSchemas(name, input);
   // 嵌入 Schema 错误使用独立错误码，便于安装路径处理。
   if (issues.length > 0) return { ok: false, error: validationError(issues, ERROR_CODES.INVALID_EMBEDDED_SCHEMA) };
@@ -150,6 +156,16 @@ function validateValidatedContract(name: ContractName, input: unknown): Validati
   // 跨字段关系失败时拒绝 Manifest，但保留字段级诊断。
   if (relationIssues.length > 0) return { ok: false, error: validationError(relationIssues) };
   return { ok: true, value: input };
+}
+
+/** 校验固定回复中的递归 JSON 数据和资源边界。 */
+function responseSemanticIssues(name: ContractName, input: unknown): ContractIssue[] {
+  const response = name === 'functionResponse' ? input : isRecord(input) && input.response !== undefined ? input.response : undefined;
+  if (response === undefined) return [];
+  if (!isRecord(response) || (response.ui !== undefined && !isJsonValue(response.ui))) return [{ path: '/response/ui', keyword: 'type', message: 'UI 数据必须是 JSON 值' }];
+  return response.ui !== undefined && jsonBytes(response.ui) > MAX_FUNCTION_RESPONSE_UI_BYTES
+    ? [{ path: '/response/ui', keyword: 'maxBytes', message: 'UI 数据超过大小上限' }]
+    : [];
 }
 
 /** 按事件名称校验上下文压缩事件的专用载荷。 */
@@ -238,11 +254,70 @@ function validateEmbeddedSchema(value: unknown, field: string): ContractIssue[] 
     if (!isRecord(value) || !contractAjv.validateSchema(value)) {
       return [{ path: `/${field}`, keyword: 'schema', message: '嵌入的 JSON Schema 无效' }];
     }
+    compileJsonSchema(value);
   } catch {
     // 未知 $schema 引用等 Ajv 异常也转换成稳定错误，而不向上泄漏实现异常。
     return [{ path: `/${field}`, keyword: 'schema', message: '嵌入的 JSON Schema 无效' }];
   }
   return [];
+}
+
+/** 编译并验证一个 Plugin 声明的 JSON Schema 数据值。 */
+export function validateJsonSchemaValue(schema: JsonSchema, value: unknown): ValidationResult<JsonValue> {
+  try {
+    const validator = compileJsonSchema(schema);
+    if (!validator(value)) return { ok: false, error: validationError(toIssues(validator.errors)) };
+    return { ok: true, value: structuredClone(value) as JsonValue };
+  } catch {
+    return { ok: false, error: validationError([{ path: '/', keyword: 'schema', message: 'JSON Schema 无法编译' }], ERROR_CODES.INVALID_EMBEDDED_SCHEMA) };
+  }
+}
+
+/** 编译并缓存一个 JSON Schema，调用方只负责处理其校验结果。 */
+function compileJsonSchema(schema: JsonSchema): ValidateFunction {
+  const cached = JSON_SCHEMA_VALIDATORS.get(schema);
+  if (cached) return cached;
+  const validator = new Ajv2020({ allErrors: true, strict: false }).compile(schema);
+  JSON_SCHEMA_VALIDATORS.set(schema, validator);
+  return validator;
+}
+
+/** 验证 Function 的固定回复信封。 */
+export function validateFunctionResponse(input: unknown): ValidationResult<FunctionResponse> {
+  const result = validateContract('functionResponse', input);
+  if (!result.ok) return { ok: false, error: result.error };
+  if (!isRecord(input) || !['direct', 'model', 'none'].includes(String(input.mode)) || input.ui !== undefined && !isJsonValue(input.ui)) return { ok: false, error: validationError([{ path: '/mode', keyword: 'enum', message: '回复模式或 UI 数据无效' }]) };
+  if (input.ui !== undefined && jsonBytes(input.ui) > MAX_FUNCTION_RESPONSE_UI_BYTES) return { ok: false, error: validationError([{ path: '/ui', keyword: 'maxBytes', message: 'UI 数据超过大小上限' }]) };
+  return { ok: true, value: structuredClone(result.value) as FunctionResponse };
+}
+
+/** 判断值是否为可安全进入 Function 响应信封的 JSON 值。 */
+function isJsonValue(value: unknown): value is JsonValue {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  return isRecord(value) && Object.values(value).every(isJsonValue);
+}
+
+/** 验证 Function Handler 的固定输出外壳。 */
+export function validateFunctionHandlerResult(input: unknown): ValidationResult<{ output: JsonValue; status: 'succeeded' | 'failed'; errorCode?: string; response: FunctionResponse }> {
+  const result = validateContract('functionResult', input);
+  if (!result.ok) return { ok: false, error: result.error };
+  const raw = result.value as { output?: unknown; status?: unknown; errorCode?: string; response?: unknown };
+  if (!isJsonValue(raw.output)) return { ok: false, error: validationError([{ path: '/output', keyword: 'type', message: 'Function 输出必须是 JSON 值' }]) };
+  const value = raw as { output: JsonValue; status: 'succeeded' | 'failed'; errorCode?: string; response: FunctionResponse };
+  const response = validateFunctionResponse(value.response);
+  if (!response.ok) return response;
+  return { ok: true, value: { ...structuredClone(value), response: response.value } };
+}
+
+/** 计算 JSON 值的 UTF-8 大小，异常值按无穷大处理。 */
+function jsonBytes(value: unknown): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(value), 'utf8');
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
 }
 
 /**

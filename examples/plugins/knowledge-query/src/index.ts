@@ -86,8 +86,8 @@ function queryInput(input: JsonValue): { query: string; topK: number } | undefin
 export const knowledgeQueryHandler: FunctionHandler = async (input) => {
   // 输入校验先于任何业务输出，避免错误路径复制原始请求。
   const request = queryInput(input);
-  if (!request) return { output: { accepted: false, errorCode: 'knowledge.invalid_input' }, status: 'failed', errorCode: 'knowledge.invalid_input' };
-  return { output: { accepted: true, answer: '这是本地 knowledge contract fixture 的确定性摘要。', citations: [{ sourceId: 'knowledge.fixture', snippet: '该回答来自本地 contract fixture。' }], confidence: 0.95 }, status: 'succeeded' };
+  if (!request) return { output: { accepted: false, errorCode: 'knowledge.invalid_input' }, status: 'failed', errorCode: 'knowledge.invalid_input', response: { schemaVersion: SCHEMA_VERSIONS.functionResponse, mode: 'model' } };
+  return { output: { accepted: true, answer: '这是本地 knowledge contract fixture 的确定性摘要。', citations: [{ sourceId: 'knowledge.fixture', snippet: '该回答来自本地 contract fixture。' }], confidence: 0.95 }, status: 'succeeded', response: { schemaVersion: SCHEMA_VERSIONS.functionResponse, mode: 'model' } };
 };
 
 /**

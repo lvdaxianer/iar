@@ -4,7 +4,7 @@ import test from 'node:test';
 import { defineFunction, definePlugin, type FunctionHandler } from '@iar/plugin';
 import { ContractValidationError, SCHEMA_VERSIONS, type FunctionDefinition } from '@iar/contracts';
 
-const handler: FunctionHandler = async () => ({ output: { ok: true }, status: 'succeeded' });
+const handler: FunctionHandler = async () => ({ output: { ok: true }, status: 'succeeded', response: { schemaVersion: 'iar.function-response/v1', mode: 'model' } });
 
 /** 构造测试用 Function 定义，保持每个测试只关注注册层行为。 */
 function functionDefinition(functionId: string, overrides: Partial<FunctionDefinition> = {}): FunctionDefinition {

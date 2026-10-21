@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import type { ActionType, JsonValue, RiskLevel } from './types-base.js';
+import type { ActionType, FunctionResponse, JsonValue, RiskLevel } from './types-base.js';
 import type { WorkflowStatus } from './types-routing.js';
 
 /** 最近消息窗口允许的最大消息数量。 */
@@ -73,6 +73,8 @@ export type ActionResult = {
   output?: JsonValue;
   // errorCode 是稳定错误码。
   errorCode?: string;
+  // response 是已由 Function 校验的回复分流信封。
+  response?: FunctionResponse;
 };
 
 /** 决策对象的类型。 */

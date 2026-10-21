@@ -146,10 +146,10 @@ const fakeStopHandler: FunctionHandler = async (input) => {
   const serviceId = serviceIdOf(input);
   if (!serviceId) {
     // 错误码稳定且不暴露原始输入。
-    return { output: { accepted: false, errorCode: 'fake.invalid_service_id' }, status: 'failed', errorCode: 'fake.invalid_service_id' };
+    return { output: { accepted: false, errorCode: 'fake.invalid_service_id' }, status: 'failed', errorCode: 'fake.invalid_service_id', response: { schemaVersion: SCHEMA_VERSIONS.functionResponse, mode: 'model' } };
   }
   // 成功结果严格对应 outputSchema 的第一分支。
-  return { output: { accepted: true, serviceId }, status: 'succeeded' };
+  return { output: { accepted: true, serviceId }, status: 'succeeded', response: { schemaVersion: SCHEMA_VERSIONS.functionResponse, mode: 'model' } };
 };
 
 /** 可直接交给 PluginHost.install 的 fake plugin 注册对象。 */

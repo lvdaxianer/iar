@@ -204,7 +204,7 @@ export class SandboxSessionStreamTurn {
       return undefined;
     });
     if (reply === undefined) return { status: 'executed', reply: '动作已执行，但模型回复超限且不完整，请勿重复执行。', route: evidence, actionResult: outcome.actionResult, reasonCode: 'model_response_too_large' };
-    this.context.pushMessages(userText, reply);
+    if (reply.length > 0) this.context.pushMessages(userText, reply);
     return { status: 'executed', reply, route: evidence, actionResult: outcome.actionResult };
   }
 

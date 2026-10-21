@@ -8,7 +8,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import { MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, type BusinessPluginManifest, type FunctionDefinition, type JsonValue, type PluginOperation } from '@iar/contracts';
+import { MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, SCHEMA_VERSIONS, TRUSTED_FACT_KEY_PATTERN, type BusinessPluginManifest, type FunctionDefinition, type JsonValue, type PluginOperation } from '@iar/contracts';
 import { definePlugin, type FunctionHandler, type FunctionHandlerResult, type PluginPackage } from '@iar/plugin';
 
 /** Function 操作类型：read 免确认直接执行，action 需走确认流。 */
@@ -113,7 +113,7 @@ export function findSandboxOperation(operations: readonly SandboxOperation[], na
  */
 export function succeed(operation: string, payload: Record<string, JsonValue>, declaredFacts: Record<string, JsonValue> = {}): FunctionHandlerResult {
   const facts = selectTrustedFacts(declaredFacts);
-  return { status: 'succeeded', output: { accepted: true, operation, ...payload, facts } };
+  return { status: 'succeeded', output: { accepted: true, operation, ...payload, facts }, response: { schemaVersion: SCHEMA_VERSIONS.functionResponse, mode: 'model' } };
 }
 
 /** 只把短小 JSON 原子字段复制到通用事实信封。 */
@@ -140,7 +140,7 @@ function isTrustedFactKey(value: string): boolean {
  * @date 2026-10-18
  */
 export function fail(errorCode: string): FunctionHandlerResult {
-  return { status: 'failed', output: { accepted: false, errorCode }, errorCode };
+  return { status: 'failed', output: { accepted: false, errorCode }, errorCode, response: { schemaVersion: SCHEMA_VERSIONS.functionResponse, mode: 'model' } };
 }
 
 /**

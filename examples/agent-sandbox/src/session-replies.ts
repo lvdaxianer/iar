@@ -3,7 +3,7 @@
  * @date 2026-10-18
  */
 import { randomUUID } from 'node:crypto';
-import type { ActionDefinition, ActionResult, BehaviorContext, JsonValue, PendingInput, VerifiedFactRecord } from '@iar/contracts';
+import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type BehaviorContext, type FunctionResponse, type JsonValue, type PendingInput, type VerifiedFactRecord } from '@iar/contracts';
 import { ResponseGeneratorAdapter, type ClarificationMetadata, type ModelGateway, type ModelProfileRegistry } from '@iar/runtime';
 import type { SessionMessage } from '@iar/storage';
 import type { PluginDescriptor } from '@iar/plugins';
@@ -40,6 +40,9 @@ export type SessionRepliesContext = CompactionContext & {
 };
 
 type ScriptedReply = { text: string; clarification?: ClarificationMetadata };
+
+/** 缺省的模型汇总回复模式，兼容没有附加 Function envelope 的旧 Action。 */
+const DEFAULT_FUNCTION_RESPONSE: FunctionResponse = { schemaVersion: SCHEMA_VERSIONS.functionResponse, mode: 'model' };
 
 /** 模型回复和最近消息历史。
  * @author lvdaxianer@yeah.net
@@ -192,24 +195,16 @@ export class SandboxSessionReplies {
    * @date 2026-10-18
    */
   public async generateReplyStreamed(context: ActionReplyContext, onDelta: (delta: string) => void): Promise<string> {
-    const { traceId, runId, userText, behaviorContext, recentMessages, functionDescriptors, action, actionResult } = context;
+    const direct = this.streamedDirectReply(context, onDelta);
+    if (direct !== undefined) return direct;
+    const { traceId, runId, behaviorContext } = context;
     if (this.context.mode !== 'brain' || !(this.context.brainProvider instanceof OpenAICompatibleModelProvider)) {
       const reply = await this.generateReply(context);
       onDelta(reply);
       return reply;
     }
-    const input: JsonValue = {
-      userMessage: userText,
-      functionId: action.functionId,
-      pluginId: action.pluginId,
-      actionStatus: actionResult.status,
-      actionOutput: actionResult.output ?? null,
-      behaviorContext,
-      recentMessages,
-      functionDescriptors
-    };
-    return streamModelReply({ provider: this.context.brainProvider, profile: this.context.registry.forRole('response.generate'), traceId, runId, input, onDelta, onClarification: (clarification) => this.persistClarification(behaviorContext, clarification),
-      onInvalid: async () => `动作已执行（${action.functionId}），但回复生成失败（model.schema_invalid）。`, onFailure: () => this.generateReply(context) });
+    return streamModelReply({ provider: this.context.brainProvider, profile: this.context.registry.forRole('response.generate'), traceId, runId, input: this.actionReplyModelInput(context), onDelta, onClarification: (clarification) => this.persistClarification(behaviorContext, clarification),
+      onInvalid: async () => this.modelFailureReply(context, 'model.schema_invalid'), onFailure: () => this.generateReply(context) });
   }
 
 
@@ -224,24 +219,44 @@ export class SandboxSessionReplies {
    * @date 2026-10-17
    */
   public async generateReply(context: ActionReplyContext): Promise<string> {
-    const { traceId, runId, userText, behaviorContext, recentMessages, functionDescriptors, action, actionResult } = context;
+    const direct = this.directReply(context);
+    if (direct !== undefined) return direct;
+    const { traceId, runId, behaviorContext } = context;
     const generated = await new ResponseGeneratorAdapter(this.context.gateway).generate({
       traceId,
       runId,
-      input: {
-        userMessage: userText,
-        functionId: action.functionId,
-        pluginId: action.pluginId,
-        actionStatus: actionResult.status,
-        actionOutput: actionResult.output ?? null,
-        behaviorContext,
-        recentMessages,
-        functionDescriptors
-      }
+      input: this.actionReplyModelInput(context)
     });
-    if (!generated.ok) return `动作已执行（${action.functionId}），但回复生成失败（${generated.error.code}）。`;
+    if (!generated.ok) return this.modelFailureReply(context, generated.error.code);
     await this.persistClarification(behaviorContext, generated.value.clarification);
     return generated.value.text;
+  }
+
+  /** 返回直出或无聊天回复，未命中时交给模型路径。 */
+  private directReply(context: ActionReplyContext): string | undefined {
+    const response = context.actionResult.response;
+    if (response?.mode === 'direct') return response.text;
+    if (response?.mode === 'none') return '';
+    return undefined;
+  }
+
+  /** 流式返回直出文本，并保持 none 不产生聊天增量。 */
+  private streamedDirectReply(context: ActionReplyContext, onDelta: (delta: string) => void): string | undefined {
+    const reply = this.directReply(context);
+    if (context.actionResult.response?.mode === 'direct') onDelta(reply ?? '');
+    return reply;
+  }
+
+  /** 生成回复模型失败时不混淆动作成功与动作失败。 */
+  private modelFailureReply(context: ActionReplyContext, errorCode: string): string {
+    const action = context.actionResult.status === 'failed' ? `动作执行失败（${context.action.functionId}）` : `动作已执行（${context.action.functionId}）`;
+    return `${action}，但回复生成失败（${errorCode}）。`;
+  }
+
+  /** 构造只包含已校验 Function 输出的数据上下文。 */
+  private actionReplyModelInput(context: ActionReplyContext): JsonValue {
+    const { userText, behaviorContext, recentMessages, functionDescriptors, action, actionResult } = context;
+    return { userMessage: userText, functionId: action.functionId, pluginId: action.pluginId, actionStatus: actionResult.status, actionOutput: actionResult.output ?? null, functionResponse: actionResult.response ?? DEFAULT_FUNCTION_RESPONSE, behaviorContext, recentMessages, functionDescriptors };
   }
 
 

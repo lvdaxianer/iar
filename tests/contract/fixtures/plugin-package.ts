@@ -26,6 +26,6 @@ export function pluginPackage(manifest: BusinessPluginManifest, functionId = 'di
     ...functionOverrides,
   };
   const operations: PluginOperation[] = [{ name: 'execute', kind: 'action', description: '执行测试能力' }];
-  const handler: FunctionHandler = async () => ({ output: null, status: 'succeeded' });
+  const handler: FunctionHandler = async () => ({ output: null, status: 'succeeded', response: { schemaVersion: 'iar.function-response/v1', mode: 'model' } });
   return { ...manifest, manifest, functions: [{ definition, operations, handler }] };
 }

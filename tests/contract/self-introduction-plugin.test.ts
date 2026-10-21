@@ -31,7 +31,8 @@ test('内置自我介绍 Plugin 聚合插件描述并保留额外提示词', asy
     output: {
       plugins: [{ pluginId: 'ticket-plugin', functionId: 'ticket.query', description: '查询工单' }],
       extraPrompt: '语气更简洁'
-    }
+    },
+    response: { schemaVersion: 'iar.function-response/v1', mode: 'model' }
   });
 });
 
@@ -39,7 +40,7 @@ test('自我介绍 Plugin 对不受信任的能力输入 fail-closed', async () 
   const registration = selfIntroductionPlugin.functions[0];
   assert.ok(registration);
   const result = await registration.handler({ plugins: [{ pluginId: 'plugin', functionId: 'function', description: '' }] }, { pluginId: SELF_INTRODUCTION_PLUGIN_ID, functionId: SELF_INTRODUCTION_FUNCTION_ID, runId: 'run-2', correlationId: 'run-2' });
-  assert.deepEqual(result, { status: 'failed', output: { errorCode: 'self_introduction.invalid_input' }, errorCode: 'self_introduction.invalid_input' });
+  assert.deepEqual(result, { status: 'failed', output: { errorCode: 'self_introduction.invalid_input' }, errorCode: 'self_introduction.invalid_input', response: { schemaVersion: 'iar.function-response/v1', mode: 'none' } });
 });
 
 test('新建 Agent 默认安装自我介绍 Plugin，并持久化关闭项与提示词配置', () => {

@@ -58,7 +58,7 @@ type ManifestFixture = Record<string, unknown> & {
  * @date 2026-10-17
  */
 function assertPublicSchemaNames(): void {
-  const expectedNames = ['action', 'actionResult', 'behaviorContext', 'compactionResult', 'decision', 'error', 'event', 'function', 'pluginManifest', 'rule', 'workflow'];
+  const expectedNames = ['action', 'actionResult', 'behaviorContext', 'compactionResult', 'decision', 'error', 'event', 'function', 'functionResponse', 'functionResult', 'pluginManifest', 'rule', 'workflow'];
   assert.deepEqual(Object.keys(CONTRACT_SCHEMAS).sort(), expectedNames.sort());
 }
 

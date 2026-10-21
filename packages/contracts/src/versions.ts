@@ -20,6 +20,7 @@ export const SCHEMA_VERSIONS = {
   error: 'iar.error/v1',
   event: 'iar.event/v1',
   function: 'iar.function/v1',
+  functionResponse: 'iar.function-response/v1',
   pluginManifest: 'iar.plugin-manifest/v1',
   rule: 'iar.rule/v1',
   workflow: 'iar.workflow/v1'

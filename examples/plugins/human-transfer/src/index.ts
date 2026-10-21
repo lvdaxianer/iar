@@ -82,8 +82,8 @@ function transferInput(input: JsonValue): { reason: string; summary: string } | 
  */
 export const humanTransferHandler: FunctionHandler = async (input) => {
   // 输入校验失败只能返回稳定错误码，不能返回转交说明或凭据。
-  if (!transferInput(input)) return { output: { accepted: false, errorCode: 'human.invalid_input' }, status: 'failed', errorCode: 'human.invalid_input' };
-  return { output: { accepted: true, queue: 'human.support', handoffId: 'handoff-fixture-1' }, status: 'succeeded' };
+  if (!transferInput(input)) return { output: { accepted: false, errorCode: 'human.invalid_input' }, status: 'failed', errorCode: 'human.invalid_input', response: { schemaVersion: SCHEMA_VERSIONS.functionResponse, mode: 'model' } };
+  return { output: { accepted: true, queue: 'human.support', handoffId: 'handoff-fixture-1' }, status: 'succeeded', response: { schemaVersion: SCHEMA_VERSIONS.functionResponse, mode: 'model' } };
 };
 
 /**

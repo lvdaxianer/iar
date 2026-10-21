@@ -8,7 +8,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import type { JsonValue } from '@iar/contracts';
+import { validateFunctionHandlerResult, validateJsonSchemaValue, type JsonValue } from '@iar/contracts';
 import type { FunctionHandlerContext, FunctionHandlerResult } from '@iar/plugin';
 import { parentPort, workerData } from 'node:worker_threads';
 import { sandboxPluginRegistry } from './plugin-registry.js';
@@ -57,9 +57,16 @@ async function handle(request: RunnerRequest): Promise<void> {
     const functionRegistration = registration?.functions.find((item) => item.definition.functionId === request.context.functionId);
     if (!functionRegistration || typeof functionRegistration.handler !== 'function') {
       response = { ok: false, error: `插件不可用: ${request.pluginId}` };
+    } else if (!validateJsonSchemaValue(functionRegistration.definition.inputSchema, request.input).ok) {
+      response = { ok: false, error: '插件输入不符合 Function Schema' };
     } else {
       const result = await functionRegistration.handler(structuredClone(request.input), structuredClone(request.context));
-      response = { ok: true, result };
+      const resultValidation = validateFunctionHandlerResult(result);
+      const outputValidation = resultValidation.ok
+        ? validateJsonSchemaValue(functionRegistration.definition.outputSchema, resultValidation.value.output)
+        : undefined;
+      if (!resultValidation.ok || !outputValidation?.ok) response = { ok: false, error: '插件输出不符合 Function Schema' };
+      else response = { ok: true, result: resultValidation.value };
     }
   } catch (error) {
     // worker 侧异常只回传稳定摘要，不带堆栈。

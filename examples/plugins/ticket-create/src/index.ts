@@ -83,8 +83,8 @@ function ticketInput(input: JsonValue): { title: string; description: string; pr
  */
 export const ticketCreateHandler: FunctionHandler = async (input) => {
   // 输入校验失败只能返回稳定错误码，不能返回标题或描述。
-  if (!ticketInput(input)) return { output: { accepted: false, errorCode: 'ticket.invalid_input' }, status: 'failed', errorCode: 'ticket.invalid_input' };
-  return { output: { accepted: true, ticketId: 'ticket-fixture-1', status: 'created' }, status: 'succeeded' };
+  if (!ticketInput(input)) return { output: { accepted: false, errorCode: 'ticket.invalid_input' }, status: 'failed', errorCode: 'ticket.invalid_input', response: { schemaVersion: SCHEMA_VERSIONS.functionResponse, mode: 'model' } };
+  return { output: { accepted: true, ticketId: 'ticket-fixture-1', status: 'created' }, status: 'succeeded', response: { schemaVersion: SCHEMA_VERSIONS.functionResponse, mode: 'model' } };
 };
 
 /**

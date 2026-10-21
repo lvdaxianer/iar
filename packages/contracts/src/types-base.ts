@@ -12,6 +12,15 @@ export type JsonValue = string | number | boolean | null | JsonValue[] | { [key:
 /** 嵌入式 JSON Schema 文档，具体语义由 Ajv 校验。 */
 export type JsonSchema = Record<string, unknown>;
 
+/** Function 结果交给宿主后的固定回复分流模式。 */
+export type FunctionResponseMode = 'model' | 'direct' | 'none';
+
+/** Function 的固定回复信封，不携带执行权限。 */
+export type FunctionResponse =
+  | { schemaVersion: typeof import('./versions.js').SCHEMA_VERSIONS.functionResponse; mode: 'model'; ui?: JsonValue }
+  | { schemaVersion: typeof import('./versions.js').SCHEMA_VERSIONS.functionResponse; mode: 'direct'; text: string; ui?: JsonValue }
+  | { schemaVersion: typeof import('./versions.js').SCHEMA_VERSIONS.functionResponse; mode: 'none'; ui?: JsonValue };
+
 /** 事实键只允许稳定 ASCII 标识，避免把控制字符或提示词片段带入上下文。 */
 export const TRUSTED_FACT_KEY_PATTERN = '^[A-Za-z][A-Za-z0-9_.:-]{0,319}$';
 

@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-21
  */
-import type { FunctionDefinition, JsonValue, PluginManifest, PluginOperation } from '@iar/contracts';
+import type { FunctionDefinition, FunctionResponse, JsonValue, PluginManifest, PluginOperation } from '@iar/contracts';
 
 /**
  * Function Handler 的执行结果。
@@ -12,6 +12,7 @@ import type { FunctionDefinition, JsonValue, PluginManifest, PluginOperation } f
  * @property output - 必须可以安全序列化的 JSON 输出
  * @property status - 执行成功或失败
  * @property errorCode - 失败路径使用的稳定错误码
+ * @property response - 固定的模型、直出或无聊天回复信封
  * @author lvdaxianer@yeah.net
  * @date 2026-10-21
  */
@@ -19,6 +20,7 @@ export type FunctionHandlerResult = {
   output: JsonValue;
   status: 'succeeded' | 'failed';
   errorCode?: string;
+  response: FunctionResponse;
 };
 
 /**

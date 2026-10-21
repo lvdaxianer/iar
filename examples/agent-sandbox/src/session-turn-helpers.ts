@@ -101,6 +101,6 @@ export async function finishConfirmedAction(context: { replies: SandboxSessionRe
     return undefined;
   });
   if (reply === undefined) return { status: 'executed', reply: '动作已执行，但模型回复超限且不完整，请勿重复执行。', actionResult, reasonCode: 'model_response_too_large' };
-  context.replies.pushAssistantMessage(reply);
+  if (reply.length > 0) context.replies.pushAssistantMessage(reply);
   return { status: 'executed', reply, actionResult };
 }

@@ -492,8 +492,8 @@ export class SandboxSessionCore {
     try {
       const pluginId = resolved.value.manifest.pluginId;
       const result = this.bridge.run(pluginId, action.input, { pluginId, functionId: action.functionId, runId: action.runId, correlationId: SESSION_CORRELATION_ID });
-      if (result.status === 'succeeded') return { schemaVersion: SCHEMA_VERSIONS.action, actionId: action.actionId, status: 'succeeded', output: result.output };
-      return { schemaVersion: SCHEMA_VERSIONS.action, actionId: action.actionId, status: 'failed', errorCode: result.errorCode ?? 'plugin.failed' };
+      if (result.status === 'succeeded') return { schemaVersion: SCHEMA_VERSIONS.action, actionId: action.actionId, status: 'succeeded', output: result.output, response: result.response };
+      return { schemaVersion: SCHEMA_VERSIONS.action, actionId: action.actionId, status: 'failed', errorCode: result.errorCode ?? 'plugin.failed', response: result.response };
     } catch {
       // 执行桥失败统一转为稳定错误，不泄漏原始异常。
       return { schemaVersion: SCHEMA_VERSIONS.action, actionId: action.actionId, status: 'failed', errorCode: 'plugin.executor_failed' };
