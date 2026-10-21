@@ -61,14 +61,26 @@ if (mode === 'real' && !hasApiKey) {
   await exitStartupFailure('missing_api_key');
 }
 
-/** 依次启动 bridge 服务端与 Pi 宿主演示页；任一步失败即收敛并退出。 */
+/** 依次启动 bridge 服务端与 Pi 宿主演示页；任一步失败即收敛并退出。
+ * 缺省端口被占用时回退为独立演示页模式，复用已在运行的 bridge。 */
 async function startDemo() {
-  const sandbox = await startSandboxServer({ mode: mode === 'real' ? 'brain' : 'scripted' });
+  const sandboxPortExplicit = process.env.IAR_SANDBOX_PORT !== undefined && process.env.IAR_SANDBOX_PORT.length > 0;
   try {
-    const piHost = await startPiHostServer({ mode: mode === 'real' ? 'brain' : 'scripted', bridgeUrl: `http://127.0.0.1:${String(sandbox.port)}` });
-    return { sandbox, piHost };
+    const sandbox = await startSandboxServer({ mode: mode === 'real' ? 'brain' : 'scripted' });
+    try {
+      const piHost = await startPiHostServer({ mode: mode === 'real' ? 'brain' : 'scripted', bridgeUrl: `http://127.0.0.1:${String(sandbox.port)}` });
+      return { sandbox, piHost };
+    } catch (error) {
+      await sandbox.close().catch(() => undefined);
+      throw error;
+    }
   } catch (error) {
-    await sandbox.close().catch(() => undefined);
+    // 仅缺省端口被占用才回退；显式端口冲突按启动失败处理。
+    if (!sandboxPortExplicit && error && typeof error === 'object' && error.code === 'EADDRINUSE') {
+      process.stderr.write('8787 已有服务在运行，回退为独立演示页模式，复用现有 bridge。\n');
+      const piHost = await startPiHostServer({ mode: mode === 'real' ? 'brain' : 'scripted', bridgeUrl: process.env.IAR_PI_BRIDGE_URL ?? 'http://127.0.0.1:8787' });
+      return { sandbox: undefined, piHost };
+    }
     throw error;
   }
 }
@@ -84,7 +96,7 @@ const shutdown = async () => {
   try {
     if (demo) {
       await demo.piHost.close();
-      await demo.sandbox.close();
+      await demo.sandbox?.close();
     }
   } catch {
     writeSafeLog({ level: 'warn', event: 'sandbox.shutdown_failed', outcome: 'shutdown_failed' });
@@ -99,7 +111,8 @@ process.on('SIGTERM', shutdown);
 const demo = await demoStarting;
 if (demo) {
   const selection = forcedMode ? 'explicit' : hasApiKey ? 'configured' : 'fallback';
-  writeSafeLog({ level: 'info', event: 'sandbox.start', host: '127.0.0.1', port: demo.sandbox.port, mode: demo.sandbox.mode, selection });
+  if (demo.sandbox) writeSafeLog({ level: 'info', event: 'sandbox.start', host: '127.0.0.1', port: demo.sandbox.port, mode: demo.sandbox.mode, selection });
   writeSafeLog({ level: 'info', event: 'sandbox.pi_host_start', host: '127.0.0.1', port: demo.piHost.port, mode: demo.piHost.mode, selection });
-  process.stderr.write(`Pi 宿主演示页: http://127.0.0.1:${String(demo.piHost.port)}  （bridge: http://127.0.0.1:${String(demo.sandbox.port)}）\n`);
+  const bridgeHint = demo.sandbox ? `http://127.0.0.1:${String(demo.sandbox.port)}` : '(复用已有 bridge)';
+  process.stderr.write(`Pi 宿主演示页: http://127.0.0.1:${String(demo.piHost.port)}  bridge: ${bridgeHint}\n`);
 }
