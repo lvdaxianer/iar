@@ -56,10 +56,10 @@ export function createIarExtension(options: IarExtensionOptions = {}): (pi: PiEx
  * @date 2026-10-20
  */
 async function registerExtension(pi: PiExtensionAPI, client: IarBridgeClientLike, unavailableAction: 'handled' | 'continue'): Promise<void> {
-  const state = { iarSessionId: undefined as string | undefined, pendingActionId: undefined as string | undefined, isAvailable: false };
+  const state: ExtensionState = { iarSessionId: undefined, pendingActionId: undefined, isAvailable: false, unavailableNotified: false };
   pi.registerEntryRenderer('iar-bridge', renderBridgeEntry);
   pi.on('session_start', async (_event, context) => initializeSession(client, state, context));
-  pi.on('session_shutdown', async () => { state.iarSessionId = undefined; state.pendingActionId = undefined; state.isAvailable = false; });
+  pi.on('session_shutdown', async () => { state.iarSessionId = undefined; state.pendingActionId = undefined; state.isAvailable = false; state.unavailableNotified = false; });
   pi.on('input', async (event, context) => handleInput(pi, client, state, unavailableAction, event, context));
   registerConfirmationCommand(pi, client, state, true);
   registerConfirmationCommand(pi, client, state, false);
@@ -76,7 +76,7 @@ async function initializeSession(client: IarBridgeClientLike, state: ExtensionSt
     state.iarSessionId = undefined;
     state.pendingActionId = undefined;
     state.isAvailable = false;
-    notifyUnavailable(context);
+    notifyUnavailable(context, state);
   }
 }
 
@@ -84,13 +84,13 @@ async function initializeSession(client: IarBridgeClientLike, state: ExtensionSt
 async function handleInput(pi: PiExtensionAPI, client: IarBridgeClientLike, state: ExtensionState, unavailableAction: 'handled' | 'continue', event: unknown, context: PiExtensionContext): Promise<PiInputResult> {
   const input = readInputEvent(event);
   if (input.source === 'extension') return { action: 'continue' };
-  if (!state.isAvailable || state.iarSessionId === undefined) return unavailableResult(unavailableAction, context);
+  if (!state.isAvailable || state.iarSessionId === undefined) return unavailableResult(unavailableAction, context, state);
   try {
     const response = await client.input(state.iarSessionId, input.text);
     return presentResponse(pi, state, response, context);
   } catch {
     state.isAvailable = false;
-    if (unavailableAction === 'handled') { notifyUnavailable(context); return { action: 'handled' }; }
+    if (unavailableAction === 'handled') { notifyUnavailable(context, state); return { action: 'handled' }; }
     return { action: 'continue' };
   }
 }
@@ -111,7 +111,7 @@ async function confirmPending(pi: PiExtensionAPI, client: IarBridgeClientLike, s
   } catch (error) {
     state.isAvailable = false;
     if (error instanceof BridgeClientError && error.code === 'bridge_rejected') context.ui.notify('IAR 拒绝了当前确认请求。', 'warning');
-    else notifyUnavailable(context);
+    else notifyUnavailable(context, state);
   }
 }
 
@@ -163,13 +163,17 @@ function wrapDisplayText(value: string, width: number): string[] {
 }
 
 /** 桥接不可用时按配置返回安全处置。 */
-function unavailableResult(action: 'handled' | 'continue', context: PiExtensionContext): PiInputResult {
-  if (action === 'handled') { notifyUnavailable(context); return { action: 'handled' }; }
+function unavailableResult(action: 'handled' | 'continue', context: PiExtensionContext, state: ExtensionState): PiInputResult {
+  if (action === 'handled') { notifyUnavailable(context, state); return { action: 'handled' }; }
   return { action: 'continue' };
 }
 
-/** 统一展示固定桥接故障消息。 */
-function notifyUnavailable(context: PiExtensionContext): void { context.ui.notify('IAR 桥接不可用，当前输入已安全阻断。', 'error'); }
+/** 统一展示固定桥接故障消息；每个 Pi 会话只告知一次，避免重复打断输入。 */
+function notifyUnavailable(context: PiExtensionContext, state: ExtensionState): void {
+  if (state.unavailableNotified) return;
+  state.unavailableNotified = true;
+  context.ui.notify('IAR 桥接不可用，当前输入已安全阻断。', 'error');
+}
 
 /** 读取并限制 input 事件的公开字段。 */
 function readInputEvent(value: unknown): PiInputEvent {
@@ -180,7 +184,7 @@ function readInputEvent(value: unknown): PiInputEvent {
   return { text, source };
 }
 
-/** 扩展会话状态只保存映射和当前待确认 actionId。 */
-type ExtensionState = { iarSessionId: string | undefined; pendingActionId: string | undefined; isAvailable: boolean };
+/** 扩展会话状态只保存映射、当前待确认 actionId 和故障告知标记。 */
+type ExtensionState = { iarSessionId: string | undefined; pendingActionId: string | undefined; isAvailable: boolean; unavailableNotified: boolean };
 
 const MAX_DISPLAY_CHARS = 4096;

@@ -15,7 +15,8 @@
     "verify:packages": "node scripts/verify-package-distribution.mjs",
     "test": "npm run build && node scripts/run-tests.mjs",
     "demo:fake-plugin": "npm run build && node scripts/run-fake-plugin-demo.mjs",
-    "demo:sandbox": "npm run build && node scripts/run-agent-sandbox.mjs"
+    "demo:sandbox": "npm run build && node scripts/run-agent-sandbox.mjs",
+    "demo:pi-host": "npm run build && node scripts/run-pi-host-demo.mjs"
   },
   "engines": {
     "node": ">=24"
