@@ -150,7 +150,18 @@
   });
   es.onerror = () => { $('connBadge').textContent = '断开'; $('connBadge').className = 'badge off'; };
   es.addEventListener('route', (e) => { pendingRoute = JSON.parse(e.data); });
-  es.addEventListener('entry', (e) => { renderEntry(JSON.parse(e.data)); });
+  es.addEventListener('entry', (e) => {
+    let entry;
+    try {
+      entry = JSON.parse(e.data);
+    } catch {
+      // 解析失败的事件不影响后续 SSE 事件。
+      return;
+    }
+    // 仅渲染 IAR 桥接事件，避免把其他扩展事件误当成 IAR 结果。
+    if (!entry || entry.customType !== 'iar-bridge' || !entry.data || typeof entry.data !== 'object') return;
+    renderEntry(entry);
+  });
   es.addEventListener('notify', (e) => { const n = JSON.parse(e.data); toast(n.message, n.type); });
   es.addEventListener('piDelta', (e) => {
     const el = ensureStreaming();
