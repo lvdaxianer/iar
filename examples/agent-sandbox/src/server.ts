@@ -24,6 +24,8 @@ import { loadSandboxPersistenceProvider } from './persistence-provider.js';
 export type SandboxServerOptions = {
   /** 大脑模式：brain 真实 LLM，scripted 离线假大脑。 */
   mode: SandboxMode;
+  /** Agent 创建时配置的总体提示词，作用于回复模型和 Pi Agent。 */
+  systemPrompt?: string;
   /** 监听端口，缺省取 IAR_SANDBOX_PORT 或 8787。 */
   port?: number;
   /** 独立会话与请求的资源上限。 */
@@ -104,9 +106,9 @@ async function createSandboxStartupResources(options: SandboxServerOptions): Pro
   try {
     if (options.persistenceProvider) await persistenceProvider?.open(undefined);
     const persistenceProviderOpened = persistenceProvider !== undefined;
-    const piAgentFactory = options.piAgentFactory ?? ((sessionId: string) => createPiAgentDelegate({ mode: options.mode, sessionId }));
-    const session = new IarSandboxSession({ mode: options.mode, sessionId: 'legacy', piAgent: piAgentFactory('legacy'), ...(snapshotStore ? { snapshotStore } : {}), ...(persistenceProvider ? { persistenceProvider, persistenceProviderOpened: true } : {}) });
-    return { session, manager: new SandboxSessionManager(options.mode, session, options.sessionLimits, snapshotStore, persistenceProvider, persistenceProviderOpened, piAgentFactory), ...(snapshotStore ? { snapshotStore } : {}), ...(persistenceProvider ? { persistenceProvider, persistenceProviderOpened: true } : {}) };
+    const piAgentFactory = options.piAgentFactory ?? ((sessionId: string, systemPrompt?: string) => createPiAgentDelegate({ mode: options.mode, sessionId, ...(systemPrompt === undefined ? {} : { systemPrompt }) }));
+    const session = new IarSandboxSession({ mode: options.mode, sessionId: 'legacy', ...(options.systemPrompt === undefined ? {} : { systemPrompt: options.systemPrompt }), piAgent: piAgentFactory('legacy', options.systemPrompt), ...(snapshotStore ? { snapshotStore } : {}), ...(persistenceProvider ? { persistenceProvider, persistenceProviderOpened: true } : {}) });
+    return { session, manager: new SandboxSessionManager(options.mode, session, options.sessionLimits, snapshotStore, persistenceProvider, persistenceProviderOpened, piAgentFactory, options.systemPrompt), ...(snapshotStore ? { snapshotStore } : {}), ...(persistenceProvider ? { persistenceProvider, persistenceProviderOpened: true } : {}) };
   } catch (error) {
     try { await persistenceProvider?.close(); } catch { /* 保留原始启动故障。 */ }
     throw error;

@@ -61,6 +61,7 @@ export class IarSandboxSession extends SandboxSessionCore {
     const session = this;
     return new SandboxSessionReplies({
       get mode() { return session.mode; },
+      ...(session.configuration.systemPrompt === undefined ? {} : { get agentPrompt() { return session.configuration.systemPrompt; } }),
       get brainProvider() { return session.brainProvider; },
       get registry() { return session.registry; },
       get gateway() { return session.gateway; },
@@ -346,5 +347,4 @@ export class IarSandboxSession extends SandboxSessionCore {
     await this.drainWorkflowEvents();
     return finishConfirmedAction({ replies: this.replies, projector: this.projector, recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), turnCount: this.turnCount }, action, executed.value);
   }
-
 }

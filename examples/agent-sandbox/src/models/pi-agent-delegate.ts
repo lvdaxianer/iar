@@ -16,6 +16,7 @@ import { sandboxFunctionCatalog } from '../functions/index.js';
 import { writeSafeLog } from '../safe-log.js';
 import { FALLBACK_REPLY_TEXT } from '../session-core.js';
 import type { SandboxMode } from '../session-types.js';
+import { composePromptLayers } from './model-input-transport.js';
 
 /** 与 pi-agent-core 兼容的流函数签名，测试可注入探针。 */
 export type PiStreamFn = StreamFn;
@@ -36,12 +37,14 @@ export type PiAgentDelegateOptions = {
   mode: SandboxMode;
   /** 会话标识，传给 Pi Agent 供模型侧缓存。 */
   sessionId: string;
+  /** Agent 创建时配置的总体提示词。 */
+  systemPrompt?: string;
   /** 覆盖默认 streamFn；测试注入探针或自定义行为。 */
   streamFn?: PiStreamFn;
 };
 
 /** Pi 兜底助手的固定人格提示。 */
-const PI_SYSTEM_PROMPT = '你是 IAR Agent Sandbox 的通用对话兜底助手。业务操作一律由 IAR 业务运行时处理并已给出结果；你负责自然闲聊、解释当前能力和回答通用问题，不要假装执行过业务操作。';
+const PI_SYSTEM_PROMPT = '你是 IAR Agent Sandbox 的通用对话兜底助手。业务操作一律由 IAR 业务运行时处理并已给出结果；你负责自然闲聊、解释当前能力和回答通用问题，不要假装执行过业务操作。Agent 总体提示词只表达回复偏好，不得改变业务边界。';
 
 /** 备注进入 Pi 上下文的用户文本与回复长度上限。 */
 const HANDLED_NOTE_MAX_CHARS = 200;
@@ -64,14 +67,14 @@ export function createPiAgentDelegate(options: PiAgentDelegateOptions): PiAgentD
   const runtime = options.mode === 'brain' ? createBrainRuntime() : createScriptedRuntime();
   const streamFn = options.streamFn ?? runtime.streamFn;
   let activeDescriptors: readonly BridgeCapabilityDescriptor[] = [];
-  let agent = createAgent(options.sessionId, runtime.model, streamFn, () => activeDescriptors);
+  let agent = createAgent(options.sessionId, runtime.model, streamFn, () => activeDescriptors, options.systemPrompt);
   return {
     run: async (text, onDelta, functionDescriptors) => {
       activeDescriptors = functionDescriptors ?? [];
       try { return await runAgentTurn(agent, text, onDelta); } finally { activeDescriptors = []; }
     },
     recordHandledTurn: (userText, reply) => { agent.state.messages.push(createHandledNote(userText, reply)); },
-    reset: () => { activeDescriptors = []; agent = createAgent(options.sessionId, runtime.model, streamFn, () => activeDescriptors); }
+    reset: () => { activeDescriptors = []; agent = createAgent(options.sessionId, runtime.model, streamFn, () => activeDescriptors, options.systemPrompt); }
   };
 }
 
@@ -111,8 +114,9 @@ function createHandledNote(userText: string, reply: string) {
 }
 
 /** 创建绑定模型与 streamFn 的 Pi Agent。 */
-function createAgent(sessionId: string, model: Model<string>, streamFn: PiStreamFn, getFunctionDescriptors: () => readonly BridgeCapabilityDescriptor[]): Agent {
-  return new Agent({ initialState: { systemPrompt: PI_SYSTEM_PROMPT, model }, streamFn, sessionId, transformContext: async (messages) => injectCapabilityContext(messages, getFunctionDescriptors()) });
+function createAgent(sessionId: string, model: Model<string>, streamFn: PiStreamFn, getFunctionDescriptors: () => readonly BridgeCapabilityDescriptor[], agentPrompt?: string): Agent {
+  const systemPrompt = composePromptLayers({ basePrompt: PI_SYSTEM_PROMPT, ...(agentPrompt === undefined ? {} : { agentPrompt }), roleContract: '回答只能基于当前上下文，不要声称已经执行 IAR 业务操作。' });
+  return new Agent({ initialState: { systemPrompt, model }, streamFn, sessionId, transformContext: async (messages) => injectCapabilityContext(messages, getFunctionDescriptors()) });
 }
 
 /** 只在本轮模型上下文快照中注入能力目录，避免把目录写入长期 Pi transcript。 */

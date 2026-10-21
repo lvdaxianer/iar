@@ -11,7 +11,7 @@ import {
   type DecisionRequest,
   type ModelProvider
 } from '@iar/runtime';
-import { buildFallbackUserPrompt, buildResponseUserPrompt, buildSemanticUserPrompt } from '../../../examples/agent-sandbox/src/models/model-input-transport.js';
+import { buildFallbackUserPrompt, buildResponseStreamSystemPrompt, buildResponseSystemPrompt, buildResponseUserPrompt, buildSemanticUserPrompt } from '../../../examples/agent-sandbox/src/models/model-input-transport.js';
 import { ResponseGeneratorAdapter } from '@iar/runtime';
 import { PluginHost } from '@iar/plugins';
 import type { ActionType } from '@iar/contracts';
@@ -140,6 +140,18 @@ test('共享语义系统提示词不内置业务功能目录，描述由调用�
   });
   assert.match(prompt, /candidate-opaque/);
   assert.match(prompt, /动态能力描述/);
+});
+
+test('Response Generator 按固定顺序接收 Agent 与 Plugin 提示词，并允许 Markdown', () => {
+  const prompt = buildResponseSystemPrompt({ agentPrompt: '所有回复先给结论', supplementaryPrompt: '自我介绍要按能力分类' });
+  const agentIndex = prompt.indexOf('所有回复先给结论');
+  const pluginIndex = prompt.indexOf('自我介绍要按能力分类');
+  assert.ok(agentIndex >= 0);
+  assert.ok(pluginIndex > agentIndex);
+  assert.match(prompt, /iar\.response\/v1/);
+  assert.match(prompt, /Markdown/);
+  assert.match(buildResponseStreamSystemPrompt({ agentPrompt: '所有回复先给结论' }), /Markdown/);
+  assert.match(prompt, /不能选择或执行 Function/);
 });
 
 test('semantic prompt routes identity questions to enabled self-introduction', () => {

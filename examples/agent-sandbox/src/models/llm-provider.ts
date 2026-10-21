@@ -25,7 +25,7 @@ import {
 import { callModel } from './model-transport.js';
 import { runWithModelLogContext } from '../safe-log.js';
 import { callModelStream } from './model-stream-transport.js';
-import { SEMANTIC_SYSTEM_PROMPT, COMPACT_SYSTEM_PROMPT, RESPONSE_SYSTEM_PROMPT, RESPONSE_STREAM_SYSTEM_PROMPT,
+import { SEMANTIC_SYSTEM_PROMPT, COMPACT_SYSTEM_PROMPT, buildResponseStreamSystemPrompt, buildResponseSystemPrompt,
   buildCompactionUserPrompt, buildResponseUserPrompt, buildSemanticUserPrompt, readString } from './model-input-transport.js';
 
 /** brain provider 的可注入配置。 */
@@ -130,7 +130,8 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
    */
   protected buildStreamPrompt(request: ModelProviderRequest): { system: string; user: string } {
     if (request.profile.role === 'response.generate') {
-      return { system: RESPONSE_STREAM_SYSTEM_PROMPT, user: buildResponseUserPrompt(asRecord(request.input)) };
+      const input = asRecord(request.input);
+      return { system: buildResponseStreamSystemPrompt(input), user: buildResponseUserPrompt(input) };
     }
     return this.buildPrompt(request);
   }
@@ -151,7 +152,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     if (request.profile.role === 'context.compact') {
       return { system: COMPACT_SYSTEM_PROMPT, user: buildCompactionUserPrompt(input) };
     }
-    return { system: RESPONSE_SYSTEM_PROMPT, user: buildResponseUserPrompt(input) };
+    return { system: buildResponseSystemPrompt(input), user: buildResponseUserPrompt(input) };
   }
 
   /**

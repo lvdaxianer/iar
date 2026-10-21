@@ -69,6 +69,7 @@ type SandboxSessionOptions = {
   recentMessageLimit?: number;
   piAgent?: PiAgentDelegate;
   disabledPluginIds?: readonly string[];
+  systemPrompt?: string;
   selfIntroduction?: SelfIntroductionOptions;
 };
 

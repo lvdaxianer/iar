@@ -34,6 +34,8 @@ export type PiHostSessionOptions = {
   sessionId: string;
   /** Pi Agent 大脑模式：scripted 离线模板，brain 真实模型。 */
   mode: SandboxMode;
+  /** Agent 创建时配置的总体提示词。 */
+  systemPrompt?: string;
   /** 覆盖 bridge client（测试注入假桥）。 */
   client?: IarBridgeClientLike;
   /** bridge 地址；缺省取 IAR_PI_BRIDGE_URL 或本地 8787。 */
@@ -73,7 +75,7 @@ export class PiHostSession {
 
   public constructor(private readonly options: PiHostSessionOptions) {
     this.events = options.events ?? {};
-    this.delegate = options.piAgent ?? createPiAgentDelegate({ mode: options.mode, sessionId: options.sessionId });
+    this.delegate = options.piAgent ?? createPiAgentDelegate({ mode: options.mode, sessionId: options.sessionId, ...(options.systemPrompt === undefined ? {} : { systemPrompt: options.systemPrompt }) });
     const baseClient = options.client ?? new IarBridgeClient({ baseUrl: options.bridgeUrl ?? process.env.IAR_PI_BRIDGE_URL ?? 'http://127.0.0.1:8787' });
     const client = observeClient(baseClient, {
       input: (response) => { this.passThroughDescriptors = response.disposition === 'pass_through' ? response.capabilityContext?.functionDescriptors ?? [] : []; this.publishRoute(response); this.events.onConfirm?.(response.pending ?? null); },

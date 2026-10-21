@@ -20,7 +20,7 @@
 
 ## 2. Response Model 与 Pi Agent 汇总链路
 
-- [ ] 2.1 将 Agent 总体提示词贯通沙箱会话到 `response.generate`，修改普通和流式 Response Prompt，允许 Markdown 出现在 `iar.response/v1.text`，并确保 self-introduction 的 `mode=model` 走 Response Model；测试捕获模型输入，验证能力清单、`extraPrompt`、总体提示词均到达模型，且 `direct/none` 不调用模型。
+- [x] 2.1 将 Agent 总体提示词贯通沙箱会话到 `response.generate`，修改普通和流式 Response Prompt，允许 Markdown 出现在 `iar.response/v1.text`，并确保 self-introduction 的 `mode=model` 走 Response Model；测试捕获模型输入，验证能力清单、`extraPrompt`、总体提示词均到达模型，且 `direct/none` 不调用模型。
 
   - 任务边界：负责 `session-replies.ts`、`model-input-transport.ts`、`llm-provider.ts` 及相关模型调用测试。
   - 允许文件：`examples/agent-sandbox/src/session-replies.ts`、`examples/agent-sandbox/src/models/model-input-transport.ts`、`examples/agent-sandbox/src/models/llm-provider.ts`、相关测试。
@@ -28,7 +28,7 @@
   - 依赖：1.1、1.2。
   - focused verification：self-introduction integration test、function response contract tests、stream/non-stream response tests。
 
-- [ ] 2.2 将同一 Agent 总体提示词传入 Pi Agent 固定系统提示词，保持 Pi 的业务边界和能力目录上下文；测试验证 pass-through 使用总体提示词，handled 的 self-introduction 不调用 Pi，运行 Pi delegate 与 bridge integration tests。
+- [x] 2.2 将同一 Agent 总体提示词传入 Pi Agent 固定系统提示词，保持 Pi 的业务边界和能力目录上下文；测试验证 pass-through 使用总体提示词，handled 的 self-introduction 不调用 Pi，运行 Pi delegate 与 bridge integration tests。
 
   - 任务边界：负责 Pi delegate options、Agent 构造和会话装配。
   - 允许文件：`examples/agent-sandbox/src/models/pi-agent-delegate.ts`、`examples/agent-sandbox/src/session-core.ts`、`examples/agent-sandbox/src/session-dependencies.ts`、相关测试。
