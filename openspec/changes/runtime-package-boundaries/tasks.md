@@ -63,15 +63,15 @@
 
 ## 5. Migrate the unified application entry
 
-- [ ] 5.1 Move the implementation in `packages/agent/src/index.ts` into the
+- [x] 5.1 Move the implementation in `packages/agent/src/index.ts` into the
   runtime bootstrap module, export `createIarAgent` as a documented deprecated
   alias of `createIarRuntime` for the migration window, and verify both entry
   names return the same atomic initialization behavior.
-- [ ] 5.2 Update all active imports in `examples/**`, `tests/**`, `scripts/**`,
+- [x] 5.2 Update all active imports in `examples/**`, `tests/**`, `scripts/**`,
   `README.md`, `docs/unified-entry.md`, and current architecture docs from
   `@iar/agent` to `@iar/runtime`; verify `rg` finds no active source consumer of
   `@iar/agent` outside migration history.
-- [ ] 5.3 Remove `packages/agent/package.json` and its build reference after
+- [x] 5.3 Remove `packages/agent/package.json` and its build reference after
   consumer migration, add the breaking import migration note to the runtime
   documentation, and verify package discovery reports no `@iar/agent` publish
   artifact.
