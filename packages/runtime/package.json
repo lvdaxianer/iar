@@ -11,6 +11,9 @@
   },
   "types": "./dist/index.d.ts",
   "files": ["dist"],
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@iar/contracts": "0.1.0",
     "@iar/plugins": "0.1.0",
