@@ -90,7 +90,7 @@ The system SHALL persist accepted messages and structured context through the co
 
 ### Requirement: Model calls receive structured conversational context
 
-The system SHALL include the current routing scope, relevant verified facts, pending clarification, bounded recent messages and current user message in applicable semantic extraction, decision, fallback and response-generation model calls. Recent messages SHALL be labeled as untrusted data, SHALL be bounded by count and size, and SHALL NOT grant authority. When the selected Function is self-introduction, response generation SHALL additionally receive the Plugin-produced bounded capability inventory and Agent-level supplementary prompt; compaction SHALL continue to exclude raw message history.
+The system SHALL include current routing scope, verified facts, pending clarification, bounded recent messages and the current user message in applicable model calls. Recent messages SHALL be labeled untrusted, bounded by count and size, and non-authoritative. Self-introduction responses SHALL also receive the bounded capability inventory and Agent supplementary prompt; compaction SHALL exclude raw message history.
 
 #### Scenario: A later question is processed
 
