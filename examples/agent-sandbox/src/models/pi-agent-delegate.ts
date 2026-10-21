@@ -7,6 +7,8 @@
  */
 import { Agent, type StreamFn } from '@earendil-works/pi-agent-core';
 import { createModels, type AssistantMessage, type AssistantMessageEventStream, type Model } from '@earendil-works/pi-ai';
+import { createProvider } from '@earendil-works/pi-ai/models';
+import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import { moonshotaiCnProvider } from '@earendil-works/pi-ai/providers/moonshotai-cn';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream';
 import { sandboxFunctionCatalog } from '../functions/index.js';
@@ -106,16 +108,50 @@ function createScriptedRuntime(): { model: Model<string>; streamFn: PiStreamFn }
   return { model: createScriptedModel(), streamFn: scriptedPiStreamFn };
 }
 
-/** brain 模式运行时：注册 moonshot provider 并解析目录内模型。 */
+/** brain 模式运行时：优先复用宿主网关（IAR_LLM_BASE_URL，OpenAI 兼容），否则回退 moonshotai-cn 目录。 */
 function createBrainRuntime(): { model: Model<string>; streamFn: PiStreamFn } {
+  const requested = process.env.IAR_PI_MODEL_ID ?? process.env.IAR_LLM_MODEL_ID;
+  const gatewayBaseUrl = readNonEmpty(process.env.IAR_PI_BASE_URL) ?? readNonEmpty(process.env.IAR_LLM_BASE_URL);
+  if (gatewayBaseUrl !== undefined) return createGatewayRuntime(gatewayBaseUrl, requested);
+  return createMoonshotRuntime(requested);
+}
+
+/** moonshot 目录运行时：MOONSHOT_API_KEY 缺省时复用 IAR_LLM_API_KEY。 */
+function createMoonshotRuntime(requested: string | undefined): { model: Model<string>; streamFn: PiStreamFn } {
   if (!process.env.MOONSHOT_API_KEY && process.env.IAR_LLM_API_KEY) process.env.MOONSHOT_API_KEY = process.env.IAR_LLM_API_KEY;
   const models = createModels();
   models.setProvider(moonshotaiCnProvider());
-  const requested = process.env.IAR_PI_MODEL_ID ?? process.env.IAR_LLM_MODEL_ID;
   const model = (requested === undefined ? undefined : models.getModel('moonshotai-cn', requested)) ?? models.getModel('moonshotai-cn', 'kimi-k2.6');
   if (!model) throw new Error('moonshotai-cn 目录缺少 kimi-k2.6，无法创建 Pi 兜底 Agent。');
   if (requested !== undefined && model.id !== requested) writeSafeLog({ level: 'warn', event: 'sandbox.pi_agent', outcome: 'model_fallback' });
   return { model: model as Model<string>, streamFn: models.streamSimple.bind(models) };
+}
+
+/** 自定义网关运行时：模型标识由宿主配置决定，网关对可用模型有最终决定权。 */
+function createGatewayRuntime(baseUrl: string, requested: string | undefined): { model: Model<string>; streamFn: PiStreamFn } {
+  const modelId = requested ?? 'kimi-k2.6';
+  const apiKey = readNonEmpty(process.env.IAR_PI_API_KEY) ?? readNonEmpty(process.env.IAR_LLM_API_KEY) ?? readNonEmpty(process.env.IAR_MODEL_API_KEY);
+  if (apiKey === undefined) throw new Error('已配置 IAR_LLM_BASE_URL 但缺少 API Key，无法创建 Pi 兜底 Agent。');
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
+  const provider = createProvider({
+    id: 'iar-gateway',
+    name: 'IAR Gateway',
+    baseUrl: normalizedBaseUrl,
+    auth: { apiKey: { name: 'IAR Gateway API key', resolve: async ({ signal }) => { signal.throwIfAborted(); return { auth: { apiKey }, source: 'IAR_LLM_API_KEY' }; } } },
+    models: [{ id: modelId, name: modelId, api: 'openai-completions', provider: 'iar-gateway', baseUrl: normalizedBaseUrl, reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 128_000, maxTokens: 8192 }],
+    api: openAICompletionsApi()
+  });
+  const models = createModels();
+  models.setProvider(provider);
+  const model = models.getModel('iar-gateway', modelId);
+  if (!model) throw new Error('iar-gateway 目录缺少模型 ' + modelId + '，无法创建 Pi 兜底 Agent。');
+  return { model: model as Model<string>, streamFn: models.streamSimple.bind(models) };
+}
+
+/** 读取非空且非占位符的环境变量。 */
+function readNonEmpty(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed && trimmed !== 'CHANGE_ME' ? trimmed : undefined;
 }
 
 /** scripted 模式的本地模型占位，真实推理发生在 scripted streamFn。 */

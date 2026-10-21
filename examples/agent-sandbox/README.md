@@ -64,9 +64,11 @@ IAR_SANDBOX_PORT=8788 npm run demo:sandbox
 | `IAR_INTENT_MODEL_API_KEY` | Intent Model 独立 API Key | 无，缺失时 fail-closed |
 | `IAR_INTENT_MODEL_ID` | Intent Model 名称 | profile `modelId` |
 | `IAR_SANDBOX_DECISION_BACKEND` | 决策 backend：`jev` 或 `intent-model`；不设置时 JEV 优先 | JEV 优先 |
-| `IAR_PI_MODEL_ID` | Pi 兜底 Agent 的模型标识（moonshotai-cn 目录内）；缺省依次尝试 `IAR_LLM_MODEL_ID`、`kimi-k2.6` | `kimi-k2.6` |
+| `IAR_PI_MODEL_ID` | Pi 兜底 Agent 的模型标识；配置了网关时原样传给网关（网关决定可用性），否则在 moonshotai-cn 目录内解析，缺省依次尝试 `IAR_LLM_MODEL_ID`、`kimi-k2.6` | `kimi-k2.6` |
+| `IAR_PI_BASE_URL` | Pi 兜底 Agent 的自定义 OpenAI 兼容网关地址；缺省复用 `IAR_LLM_BASE_URL`，两者都未配置时走 moonshotai-cn 官方端点 | 无 |
+| `IAR_PI_API_KEY` | 自定义网关的 API Key；缺省依次复用 `IAR_LLM_API_KEY`、`IAR_MODEL_API_KEY` | 无 |
 | `IAR_PI_TIMEOUT_MS` | Pi 兜底单轮调用的超时毫秒数，超时中止并回退 IAR 兜底 | `120000` |
-| `MOONSHOT_API_KEY` | Pi 兜底 Agent 的 API Key；未设置时自动复用 `IAR_LLM_API_KEY` | 无 |
+| `MOONSHOT_API_KEY` | moonshotai-cn 官方端点的 API Key；未设置时自动复用 `IAR_LLM_API_KEY` | 无 |
 | `IAR_SANDBOX_PORT` | 服务端口 | `8787` |
 | `IAR_PERSISTENCE_PROVIDER` | 会话 Provider 标识；默认内置 `sqlite` | `sqlite` |
 | `IAR_PERSISTENCE_MODULE` | 外部 Provider 的动态模块入口 | 无（内置 Provider 不需要） |
