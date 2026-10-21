@@ -107,6 +107,42 @@ test('IAR bridge client rejects malformed responses and normalizes timeout failu
   await assert.rejects(() => timedOut.input('iar-1', '普通问题'), (error: unknown) => error instanceof BridgeClientError && error.code === 'bridge_timeout' && error.retryable);
 });
 
+test('IAR bridge client preserves stable server error codes', async () => {
+  const client = new IarBridgeClient({
+    baseUrl: 'http://iar.test',
+    fetch: async () => Response.json({ version: PI_BRIDGE_VERSION, code: 'session_busy', message: 'IAR 会话繁忙。', retryable: true }, { status: 503 })
+  });
+  await assert.rejects(() => client.input('iar-1', '普通问题'), (error: unknown) => error instanceof BridgeClientError && error.code === 'session_busy' && error.retryable);
+});
+
+test('Pi extension reports response model failures without poisoning the bridge session', async () => {
+  const handlers = new Map<string, (event: unknown, context: PiExtensionContext) => Promise<unknown> | unknown>();
+  const notifications: string[] = [];
+  let calls = 0;
+  const client = {
+    openSession: async () => ({ version: PI_BRIDGE_VERSION, piSessionId: 'pi-1', iarSessionId: 'iar-1', resumed: false }),
+    input: async () => {
+      calls += 1;
+      if (calls === 1) throw new BridgeClientError('response_model_failed', 'Response Model 处理失败。', true);
+      return { version: PI_BRIDGE_VERSION, iarSessionId: 'iar-1', disposition: 'handled' as const, reply: '第二次请求成功' };
+    },
+    confirm: async () => { throw new Error('unreachable'); },
+    state: async () => ({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-1' })
+  };
+  const pi: PiExtensionAPI = {
+    on: (event, handler) => { handlers.set(event, handler); },
+    registerCommand: () => {},
+    appendEntry: () => {},
+    registerEntryRenderer: () => {}
+  };
+  await createIarExtension({ client })(pi);
+  const context = { sessionManager: { getSessionId: () => 'pi-1' }, ui: { notify: (message: string) => notifications.push(message) } };
+  await handlers.get('session_start')?.({}, context);
+  assert.deepEqual(await handlers.get('input')?.({ text: '第一次请求', source: 'interactive' }, context), { action: 'handled' });
+  assert.deepEqual(await handlers.get('input')?.({ text: '第二次请求', source: 'interactive' }, context), { action: 'handled' });
+  assert.deepEqual(notifications, ['Response Model 处理失败，本轮未完成，未执行任何动作。']);
+});
+
 test('Pi extension continues pass-through and handles IAR results', async () => {
   const handlers = new Map<string, (event: unknown, context: PiExtensionContext) => Promise<unknown> | unknown>();
   const commands = new Map<string, { handler: (args: string, context: PiExtensionContext) => Promise<void> }>();

@@ -5,7 +5,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-20
  */
-import { BridgeClientError, IarBridgeClient, type IarBridgeClientLike, type BridgeLogger } from './client.js';
+import { BridgeClientError, IarBridgeClient, type BridgeClientErrorCode, type IarBridgeClientLike, type BridgeLogger } from './client.js';
 import { isBridgeReplySource, type BridgeInputResponse, type BridgeReplySource } from './protocol.js';
 
 /** Pi 输入事件的最小结构。 */
@@ -72,11 +72,11 @@ async function initializeSession(client: IarBridgeClientLike, state: ExtensionSt
     state.iarSessionId = opened.iarSessionId;
     state.pendingActionId = (await client.state(opened.iarSessionId)).pending?.actionId;
     state.isAvailable = true;
-  } catch {
+  } catch (error) {
     state.iarSessionId = undefined;
     state.pendingActionId = undefined;
     state.isAvailable = false;
-    notifyUnavailable(context, state);
+    notifyFailure(context, state, error);
   }
 }
 
@@ -88,9 +88,9 @@ async function handleInput(pi: PiExtensionAPI, client: IarBridgeClientLike, stat
   try {
     const response = await client.input(state.iarSessionId, input.text);
     return presentResponse(pi, state, response, context);
-  } catch {
-    state.isAvailable = false;
-    if (unavailableAction === 'handled') { notifyUnavailable(context, state); return { action: 'handled' }; }
+  } catch (error) {
+    if (isFatalBridgeFailure(error)) state.isAvailable = false;
+    if (unavailableAction === 'handled') { notifyFailure(context, state, error); return { action: 'handled' }; }
     return { action: 'continue' };
   }
 }
@@ -109,9 +109,8 @@ async function confirmPending(pi: PiExtensionAPI, client: IarBridgeClientLike, s
     state.pendingActionId = response.pending?.actionId;
     presentMessage(pi, context, response.reply, response.reasonCode ?? (accepted ? 'confirmed' : 'cancelled'), response.replySource);
   } catch (error) {
-    state.isAvailable = false;
-    if (error instanceof BridgeClientError && error.code === 'bridge_rejected') context.ui.notify('IAR 拒绝了当前确认请求。', 'warning');
-    else notifyUnavailable(context, state);
+    if (isFatalBridgeFailure(error)) state.isAvailable = false;
+    notifyFailure(context, state, error, 'warning');
   }
 }
 
@@ -174,6 +173,32 @@ function notifyUnavailable(context: PiExtensionContext, state: ExtensionState): 
   if (state.unavailableNotified) return;
   state.unavailableNotified = true;
   context.ui.notify('IAR 桥接不可用，当前输入已安全阻断。', 'error');
+}
+
+/** 按稳定错误码返回固定安全提示，不把上游异常正文交给用户。 */
+function notifyFailure(context: PiExtensionContext, state: ExtensionState, error: unknown, type: 'warning' | 'error' = 'error'): void {
+  if (error instanceof BridgeClientError && error.code === 'bridge_unavailable') { notifyUnavailable(context, state); return; }
+  context.ui.notify(failureMessage(error), type);
+}
+
+/** 只有会话/桥接自身失效才阻断后续输入，单次模型或业务拒绝允许继续使用当前会话。 */
+function isFatalBridgeFailure(error: unknown): boolean {
+  if (!(error instanceof BridgeClientError)) return true;
+  return error.code === 'bridge_unavailable' || error.code === 'bridge_timeout' || error.code === 'bridge_internal_error' || error.code === 'invalid_bridge_response' || error.code === 'session_unavailable';
+}
+
+/** 错误码到 UI 安全文案的固定映射。 */
+function failureMessage(error: unknown): string {
+  const code: BridgeClientErrorCode = error instanceof BridgeClientError ? error.code : 'bridge_unavailable';
+  if (code === 'bridge_timeout') return 'IAR 桥接请求超时，本轮输入未完成。';
+  if (code === 'bridge_rejected') return 'IAR 桥接拒绝了当前输入，未执行任何动作。';
+  if (code === 'bridge_internal_error') return 'IAR 服务处理失败，本轮输入未完成。';
+  if (code === 'invalid_bridge_response') return 'IAR 桥接响应无效，本轮输入未完成。';
+  if (code === 'session_unavailable') return 'IAR 会话已失效，请重新建立会话。';
+  if (code === 'session_busy') return 'IAR 当前会话正忙，请稍后重试。';
+  if (code === 'session_limit') return 'IAR 会话操作次数已达上限，请重新建立会话。';
+  if (code === 'response_model_failed') return 'Response Model 处理失败，本轮未完成，未执行任何动作。';
+  return 'IAR 桥接不可用，当前输入已安全阻断。';
 }
 
 /** 读取并限制 input 事件的公开字段。 */

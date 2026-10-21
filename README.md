@@ -123,7 +123,7 @@ Function 和 Plugin 决策都经过 `ModelGateway` 与 `UnifiedDecisionAdapter`�
 }
 ```
 
-- 同一决策阶段同时配置两个 backend 时固定选择 JEV；没有 JEV primary 时才选择 Intent Model。
+- `semantic.extract` 始终使用 Intent Model；`function.select`/`plugin.select` 在 JEV 三项连接变量完整时使用 JEV，否则直接使用 Intent Model。
 - Intent Model 使用固定 Prompt `iar.intent-decision-prompt/v1`，要求只返回 JSON、原样保留有序 `candidateIds`，不得新增候选、授予能力、授权动作或执行插件。
 - 低分或歧义结果仍是 `needs_clarification`，不会自动切换成另一条可执行选择。
 - backend 只提供候选选择建议；Function-first、Plugin ownership、租户/用户/环境授权、Manifest capability 和最终 Policy/Confirmation 复核仍由 Runtime 完成。
@@ -147,7 +147,7 @@ Function 和 Plugin 决策都经过 `ModelGateway` 与 `UnifiedDecisionAdapter`�
 
 普通交互模型默认使用 `IAR_LLM_BASE_URL`、`IAR_LLM_API_KEY`、`IAR_LLM_MODEL_ID`；Intent Model 默认使用独立的 `IAR_INTENT_MODEL_ENDPOINT`、`IAR_INTENT_MODEL_API_KEY`、`IAR_INTENT_MODEL_ID`。profile 映射中的非空变量值优先于 provider 默认值；模型名最终回退到 profile 的 `modelId`，endpoint/API key 缺失时 fail-closed。变量实际值不会进入 profile、审计或错误消息。
 
-agent-sandbox 默认同时加载 JEV 和 Intent Model，并固定 JEV 优先。设置 `IAR_SANDBOX_DECISION_BACKEND=intent-model` 可运行 Intent-only 路径；两条路径都通过同一个 `iar.decision/v1` 返回契约。
+agent-sandbox 根据 JEV 三项连接变量自动选择决策 backend：完整时使用 JEV，任一缺失时只使用 Intent Model；设置 `IAR_SANDBOX_DECISION_BACKEND=intent-model` 或 `jev` 可显式选择。两条路径都通过同一个 `iar.decision/v1` 返回契约，语义抽取则固定使用 Intent Model。
 
 ### 沙箱会话
 

@@ -5,5 +5,5 @@
  * @date 2026-10-20
  */
 export * from './protocol.js';
-export { IarBridgeClient, BridgeClientError, type IarBridgeClientLike, type IarBridgeClientOptions, type BridgeFetch, type BridgeLogger } from './client.js';
+export { IarBridgeClient, BridgeClientError, type BridgeClientErrorCode, type IarBridgeClientLike, type IarBridgeClientOptions, type BridgeFetch, type BridgeLogger } from './client.js';
 export { createIarExtension, type IarExtensionOptions, type PiExtensionAPI, type PiEntryComponent, type PiEntryRenderer, type PiInputEvent, type PiExtensionContext, type PiInputResult } from './extension.js';

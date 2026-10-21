@@ -19,6 +19,21 @@ export type BridgeLogger = { debug?: (message: string, fields?: Record<string, s
 /** IAR Bridge client 配置。 */
 export type IarBridgeClientOptions = { baseUrl: string; fetch?: BridgeFetch; timeoutMs?: number; logger?: BridgeLogger };
 
+/** Bridge client 对宿主公开的稳定失败分类。 */
+export type BridgeClientErrorCode =
+  | 'invalid_bridge_url'
+  | 'invalid_bridge_json'
+  | 'invalid_bridge_timeout'
+  | 'invalid_bridge_response'
+  | 'bridge_unavailable'
+  | 'bridge_timeout'
+  | 'bridge_rejected'
+  | 'bridge_internal_error'
+  | 'session_unavailable'
+  | 'session_busy'
+  | 'session_limit'
+  | 'response_model_failed';
+
 /** 扩展使用的 client 最小行为接口。 */
 export type IarBridgeClientLike = Pick<IarBridgeClient, 'openSession' | 'input' | 'confirm' | 'state'>;
 
@@ -32,7 +47,7 @@ export class BridgeClientError extends Error {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-20
    */
-  public constructor(public readonly code: string, message: string, public readonly retryable: boolean) {
+  public constructor(public readonly code: BridgeClientErrorCode, message: string, public readonly retryable: boolean) {
     super(message);
     this.name = 'BridgeClientError';
   }
@@ -128,7 +143,7 @@ export class IarBridgeClient {
       const response = await this.fetchImpl(`${this.baseUrl}${options.path}`, requestInit(options.method, options.body, this.timeoutMs));
       const durationMs = Date.now() - startedAt;
       this.logger?.debug?.('IAR bridge response', { method: options.method, status: response.status, durationMs });
-      if (!response.ok) throw httpError(response.status);
+      if (!response.ok) throw await httpError(response.status, response);
       const payload = await readJson(response);
       return options.validate(payload);
     } catch (error) {
@@ -150,8 +165,47 @@ async function readJson(response: Response): Promise<unknown> {
 }
 
 /** HTTP 状态到稳定错误的映射。 */
-function httpError(status: number): BridgeClientError {
-  return new BridgeClientError(status >= 500 || status === 429 ? 'bridge_unavailable' : 'bridge_rejected', 'IAR 桥接请求未被接受。', status >= 500 || status === 429);
+async function httpError(status: number, response: Response): Promise<BridgeClientError> {
+  const payload = await readErrorPayload(response);
+  const code = mapServerErrorCode(payload?.code, status);
+  const retryable = typeof payload?.retryable === 'boolean' ? payload.retryable : status >= 500 || status === 429;
+  return new BridgeClientError(code, errorMessage(code), retryable);
+}
+
+/** 读取错误响应中的稳定字段；正文损坏时回退到 HTTP 状态分类。 */
+async function readErrorPayload(response: Response): Promise<{ code?: string; retryable?: boolean } | undefined> {
+  try {
+    const value = await response.json() as unknown;
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+    const record = value as Record<string, unknown>;
+    return { ...(typeof record.code === 'string' ? { code: record.code } : {}), ...(typeof record.retryable === 'boolean' ? { retryable: record.retryable } : {}) };
+  } catch {
+    return undefined;
+  }
+}
+
+/** 将 Bridge 服务端错误码投影为 Pi 宿主可消费的有限分类。 */
+function mapServerErrorCode(value: string | undefined, status: number): BridgeClientErrorCode {
+  if (value === 'session_not_found' || value === 'invalid_session_id') return 'session_unavailable';
+  if (value === 'session_busy') return 'session_busy';
+  if (value === 'session_limit') return 'session_limit';
+  if (value === 'bridge_internal_error') return 'bridge_internal_error';
+  if (value?.startsWith('model.') || value === 'response_model_failed') return 'response_model_failed';
+  if (status >= 500 || status === 429) return 'bridge_unavailable';
+  return 'bridge_rejected';
+}
+
+/** 只返回固定安全文案，避免把服务端异常正文传播给 Pi。 */
+function errorMessage(code: BridgeClientErrorCode): string {
+  if (code === 'bridge_unavailable') return 'IAR 桥接不可用。';
+  if (code === 'bridge_timeout') return 'IAR 桥接请求超时。';
+  if (code === 'bridge_rejected') return 'IAR 桥接请求被拒绝。';
+  if (code === 'bridge_internal_error') return 'IAR 服务处理失败。';
+  if (code === 'session_unavailable') return 'IAR 会话不可用。';
+  if (code === 'session_busy') return 'IAR 会话繁忙。';
+  if (code === 'session_limit') return 'IAR 会话操作次数已达上限。';
+  if (code === 'response_model_failed') return 'Response Model 处理失败。';
+  return 'IAR 桥接响应无效。';
 }
 
 /** 把未知异常收敛为不泄露原文的 Client 错误。 */
