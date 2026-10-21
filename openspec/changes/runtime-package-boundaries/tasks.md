@@ -31,16 +31,16 @@
 
 ## 3. Consolidate decision and rule implementation
 
-- [ ] 3.1 Move `packages/decision/src/*` into
+- [x] 3.1 Move `packages/decision/src/*` into
   `packages/runtime/src/intent/decision/` and
   `packages/rule-engine/src/*` into `packages/runtime/src/intent/rules/`;
   preserve exported types and decision result shapes; verify routing and model
   provider tests pass through `@iar/runtime` imports.
-- [ ] 3.2 Replace all `@iar/decision` and `@iar/rule-engine` manifest,
+- [x] 3.2 Replace all `@iar/decision` and `@iar/rule-engine` manifest,
   project-reference, source, test, example, and documentation consumers with
   the runtime public entry or runtime-internal relative imports; remove the two
   old package manifests only after `npm run lint` and `npm run build` pass.
-- [ ] 3.3 Update the current routing contract tests so bounded candidates,
+- [x] 3.3 Update the current routing contract tests so bounded candidates,
   fail-closed validation, and model-provider configuration are exercised after
   consolidation; verify the focused routing suite and `npm test` pass.
 
