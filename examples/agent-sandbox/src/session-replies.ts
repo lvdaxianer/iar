@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type BehaviorContext, type FunctionResponse, type JsonValue, type PendingInput, type VerifiedFactRecord } from '@iar/contracts';
 import { ResponseGeneratorAdapter, type ClarificationMetadata, type ModelGateway, type ModelProfileRegistry } from '@iar/runtime';
 import type { SessionMessage } from '@iar/storage';
-import type { PluginDescriptor } from '@iar/plugins';
+import { SELF_INTRODUCTION_FUNCTION_ID, type PluginDescriptor } from '@iar/plugins';
 import { OpenAICompatibleModelProvider, type BrainModelProvider } from './models/llm-provider.js';
 import type { ScriptedModelProvider } from './models/scripted-provider.js';
 import { SandboxSessionCompaction, type CompactionContext } from './session-compaction.js';
@@ -25,6 +25,8 @@ type ActionReplyContext = ReplyContext & { action: ActionDefinition; actionResul
 /** 回复及压缩只访问宿主状态，重置后所有访问器指向当前会话。 */
 export type SessionRepliesContext = CompactionContext & {
   mode: SandboxMode;
+  /** Agent 创建时保存的总体提示词，仅进入回复模型和 Pi Agent。 */
+  agentPrompt?: string;
   brainProvider: BrainModelProvider | ScriptedModelProvider;
   registry: ModelProfileRegistry;
   gateway: ModelGateway;
@@ -87,6 +89,7 @@ export class SandboxSessionReplies {
           recentMessages,
           availableFunctions: functionDescriptors,
           functionDescriptors,
+          ...(this.context.agentPrompt === undefined ? {} : { agentPrompt: this.context.agentPrompt }),
           reasonCode,
           ...(resolvedReferences === undefined ? {} : { resolvedReferences }),
           ...(referenceCandidates === undefined ? {} : { referenceCandidates })
@@ -136,7 +139,7 @@ export class SandboxSessionReplies {
       behaviorContext,
       recentMessages,
       availableFunctions: functionDescriptors,
-      functionDescriptors,
+      functionDescriptors, ...(this.context.agentPrompt === undefined ? {} : { agentPrompt: this.context.agentPrompt }),
       reasonCode,
       ...(resolvedReferences === undefined ? {} : { resolvedReferences }),
       ...(referenceCandidates === undefined ? {} : { referenceCandidates })
@@ -256,7 +259,20 @@ export class SandboxSessionReplies {
   /** 构造只包含已校验 Function 输出的数据上下文。 */
   private actionReplyModelInput(context: ActionReplyContext): JsonValue {
     const { userText, behaviorContext, recentMessages, functionDescriptors, action, actionResult } = context;
-    return { userMessage: userText, functionId: action.functionId, pluginId: action.pluginId, actionStatus: actionResult.status, actionOutput: actionResult.output ?? null, functionResponse: actionResult.response ?? DEFAULT_FUNCTION_RESPONSE, behaviorContext, recentMessages, functionDescriptors };
+    const supplementaryPrompt = action.functionId === SELF_INTRODUCTION_FUNCTION_ID ? readSupplementaryPrompt(actionResult.output) : undefined;
+    return {
+      userMessage: userText,
+      functionId: action.functionId,
+      pluginId: action.pluginId,
+      actionStatus: actionResult.status,
+      actionOutput: actionResult.output ?? null,
+      functionResponse: actionResult.response ?? DEFAULT_FUNCTION_RESPONSE,
+      behaviorContext,
+      recentMessages,
+      functionDescriptors,
+      ...(this.context.agentPrompt === undefined ? {} : { agentPrompt: this.context.agentPrompt }),
+      ...(supplementaryPrompt === undefined ? {} : { supplementaryPrompt })
+    };
   }
 
 
@@ -315,4 +331,11 @@ function currentFactRecords(context: BehaviorContext): Array<NonNullable<Behavio
   const focus = history.focusRecordId ? history.records.find((record) => record.recordId === history.focusRecordId) : undefined;
   const latest = history.records.at(-1);
   return focus ? [focus] : latest ? [latest] : [];
+}
+
+/** 只提取 Function 输出中约定的附加提示词，不把整个输出提升为系统指令。 */
+function readSupplementaryPrompt(output: JsonValue | undefined): string | undefined {
+  if (typeof output !== 'object' || output === null || Array.isArray(output)) return undefined;
+  const prompt = output.extraPrompt;
+  return typeof prompt === 'string' && prompt.length > 0 ? prompt : undefined;
 }

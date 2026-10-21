@@ -181,6 +181,13 @@ test('Pi 委托将能力目录序列化到模型输入上下文', async () => {
   assert.doesNotMatch(JSON.stringify(nextContext.messages ?? []), /当前可用能力|function\.visible/u);
 });
 
+test('Pi Agent 使用 Agent 创建时配置的总体提示词', async () => {
+  const seen: unknown[][] = [];
+  const delegate = createPiAgentDelegate({ mode: 'scripted', sessionId: 'pi-agent-prompt', systemPrompt: '所有回复使用 Markdown', streamFn: contextProbe('探针回复', seen) });
+  await delegate.run('你好', () => undefined);
+  assert.match(JSON.stringify(seen[0]?.[1] ?? {}), /<agent_prompt>[\s\S]*所有回复使用 Markdown[\s\S]*<\/agent_prompt>/u);
+});
+
 test('自我介绍意图由内置 Plugin 执行，不再交给 Pi 循环', async () => {
   const delegate = createPiAgentDelegate({ mode: 'scripted', sessionId: 'pi-demo-1' });
   const session = new IarSandboxSession({ mode: 'scripted', piAgent: delegate });

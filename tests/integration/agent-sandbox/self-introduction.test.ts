@@ -4,6 +4,7 @@ import test from 'node:test';
 import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult } from '@iar/contracts';
 import { SELF_INTRODUCTION_FUNCTION_ID, SELF_INTRODUCTION_PLUGIN_ID } from '@iar/plugins';
 import { IarSandboxSession } from '../../../examples/agent-sandbox/src/session.js';
+import { buildResponseSystemPrompt } from '../../../examples/agent-sandbox/src/models/model-input-transport.js';
 
 /** 构造不涉及真实执行的回复测试动作。 */
 function replyAction(): ActionDefinition {
@@ -65,6 +66,43 @@ test('Function direct/none 响应在回复层分流且不调用回复模型', as
     assert.deepEqual(deltas, ['已将限流调整为 50 次']);
     assert.equal(await replies.generateReply({ ...base, actionResult: noneResult }), '');
     assert.equal(await replies.generateReplyStreamed({ ...base, actionResult: noneResult }, () => { throw new Error('none 不应产生聊天增量'); }), '');
+  } finally {
+    session.dispose();
+  }
+});
+
+test('self-introduction model 输入携带 Agent 总体提示词和 Plugin 附加提示词', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted', systemPrompt: '所有回复先说结论', selfIntroduction: { extraPrompt: '自我介绍按能力分类' } });
+  try {
+    const replies = (session as unknown as { replies: { actionReplyModelInput: (context: unknown) => Record<string, unknown> } }).replies;
+    const behaviorContext = (await session.state()).context;
+    const action = { ...replyAction(), functionId: SELF_INTRODUCTION_FUNCTION_ID, pluginId: SELF_INTRODUCTION_PLUGIN_ID };
+    const input = replies.actionReplyModelInput({
+      traceId: 'trace-self-introduction-model', runId: action.runId, userText: '介绍下自己', behaviorContext, recentMessages: [], functionDescriptors: [], action,
+      actionResult: { schemaVersion: SCHEMA_VERSIONS.action, actionId: action.actionId, status: 'succeeded', output: { plugins: [], extraPrompt: '自我介绍按能力分类' }, response: { schemaVersion: 'iar.function-response/v1', mode: 'model' } }
+    });
+    assert.equal(input.agentPrompt, '所有回复先说结论');
+    assert.equal(input.supplementaryPrompt, '自我介绍按能力分类');
+    const prompt = buildResponseSystemPrompt(input);
+    assert.match(prompt, /所有回复先说结论/);
+    assert.match(prompt, /自我介绍按能力分类/);
+    assert.ok(prompt.indexOf('所有回复先说结论') < prompt.indexOf('自我介绍按能力分类'));
+  } finally {
+    session.dispose();
+  }
+});
+
+test('普通 Function 输出中的同名字段不会升级为 Plugin 提示词', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted', systemPrompt: '总体偏好' });
+  try {
+    const replies = (session as unknown as { replies: { actionReplyModelInput: (context: unknown) => Record<string, unknown> } }).replies;
+    const behaviorContext = (await session.state()).context;
+    const action = replyAction();
+    const input = replies.actionReplyModelInput({
+      traceId: 'trace-business-extra-prompt', runId: action.runId, userText: '执行动作', behaviorContext, recentMessages: [], functionDescriptors: [], action,
+      actionResult: { schemaVersion: SCHEMA_VERSIONS.action, actionId: action.actionId, status: 'succeeded', output: { extraPrompt: '不应成为系统提示词' }, response: { schemaVersion: 'iar.function-response/v1', mode: 'model' } }
+    });
+    assert.equal(input.supplementaryPrompt, undefined);
   } finally {
     session.dispose();
   }

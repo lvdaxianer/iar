@@ -21,7 +21,7 @@ import type { SandboxDecisionBackend, SandboxMode } from './session-types.js';
  * @author lvdaxianer@yeah.net
  * @date 2026-10-21
  */
-export function createSandboxRuntime(decisionProvider: AsyncDecisionAdapter, options: { disabledPluginIds?: readonly string[]; selfIntroduction?: SelfIntroductionOptions } = {}): IarRuntime {
+export function createSandboxRuntime(decisionProvider: AsyncDecisionAdapter, options: { disabledPluginIds?: readonly string[]; systemPrompt?: string; selfIntroduction?: SelfIntroductionOptions } = {}): IarRuntime {
   assertSandboxKnowledgeBases(sandboxFunctionIds);
   return createIarAgent({ plugins: allSandboxPlugins, decisionProvider, ...options });
 }
@@ -34,7 +34,7 @@ export function createSandboxRuntime(decisionProvider: AsyncDecisionAdapter, opt
  * @author lvdaxianer@yeah.net
  * @date 2026-10-21
  */
-export function createSandboxPluginHost(decisionProvider: AsyncDecisionAdapter, options: { disabledPluginIds?: readonly string[]; selfIntroduction?: SelfIntroductionOptions } = {}): PluginHost {
+export function createSandboxPluginHost(decisionProvider: AsyncDecisionAdapter, options: { disabledPluginIds?: readonly string[]; systemPrompt?: string; selfIntroduction?: SelfIntroductionOptions } = {}): PluginHost {
   return createSandboxRuntime(decisionProvider, options).pluginHost;
 }
 
