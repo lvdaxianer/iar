@@ -91,6 +91,19 @@ for (const publicEntry of ['@iar/plugin', '@iar/runtime']) {
   assert.ok(manifests.some(({ manifest }) => manifest.name === publicEntry), `${publicEntry} must have a publishable package manifest`);
 }
 
+const manifestByName = new Map(manifests.map(({ manifest }) => [manifest.name, manifest]));
+const runtimeDependencies = Object.keys(manifestByName.get('@iar/runtime')?.dependencies ?? {});
+assert.ok(runtimeDependencies.every((name) => !name.startsWith('@iar/adapters-')), '@iar/runtime must not depend on host adapters');
+assert.ok(!runtimeDependencies.includes('@iar/pi-bridge'), '@iar/runtime must not depend on Pi');
+assert.equal(manifestByName.get('@iar/pi-bridge')?.dependencies, undefined, '@iar/pi-bridge must remain a standalone host adapter');
+assert.equal(manifestByName.get('@iar/adapters-postgres')?.dependencies?.['@iar/storage'], '0.1.0', 'PostgreSQL must depend on storage');
+assert.equal(manifestByName.get('@iar/adapters-temporal')?.dependencies?.['@iar/runtime'], '0.1.0', 'Temporal must depend on runtime execution contracts');
+assert.ok(!manifestByName.has('@iar/agent'), '@iar/agent must not remain a publishable package');
+assert.ok(!manifestByName.has('@iar/decision'), '@iar/decision must not remain a publishable package');
+assert.ok(!manifestByName.has('@iar/rule-engine'), '@iar/rule-engine must not remain a publishable package');
+assert.ok(!manifestByName.has('@iar/workflow'), '@iar/workflow must not remain a publishable package');
+assert.ok(!manifestByName.has('@iar/observability'), '@iar/observability must not remain a publishable package');
+
 const representative = manifests.find(({ manifest }) => manifest.name === '@iar/contracts');
 assert.ok(representative, 'representative package @iar/contracts must exist');
 const consumerDirectory = mkdtempSync(join(tmpdir(), 'iar-package-consumer-'));
