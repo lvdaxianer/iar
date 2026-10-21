@@ -5,14 +5,24 @@
  * @date 2026-10-17
  */
 import assert from 'node:assert/strict';
-import { createIarAgent } from '@iar/agent';
+import { createIarAgent } from '@iar/runtime';
 import { replayEvents } from '@iar/runtime';
 import { fakeStopPlugin } from '../dist/examples/plugins/fake-plugin/src/index.js';
 
 // 演示入口只使用构建产物，避免文档示例依赖不存在的源码 .js 文件。
 // npm run demo:fake-plugin 会先生成 dist，再执行本文件。
 // 统一入口负责校验、安装、启用，并从 Plugin 包派生 Function 索引。
-const host = createIarAgent({ plugins: [fakeStopPlugin] }).pluginHost;
+const host = createIarAgent({
+  plugins: [fakeStopPlugin],
+  decisionProvider: {
+    decide: async () => ({
+      ok: false,
+      error: { code: 'model.no_profile', message: '决策模型 backend 未配置', retryable: false, details: {} },
+      audit: [],
+      events: [],
+    }),
+  },
+}).pluginHost;
 const candidate = host.resolveCandidate('dip.service.stop', fakeStopPlugin.manifest.pluginId);
 // resolveCandidate 同时检查 Function 归属和 enabled 状态。
 assert.equal(candidate.ok, true);

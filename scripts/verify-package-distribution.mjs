@@ -29,7 +29,7 @@ const manifests = packageDirectories
   .filter(existsSync)
   .map((file) => ({ file, directory: join(file, '..'), manifest: JSON.parse(readFileSync(file, 'utf8')) }));
 
-assert.equal(manifests.length, 16, 'expected 9 core and 7 adapter packages to have manifests');
+assert.equal(manifests.length, 15, 'expected 8 core and 7 adapter packages to have manifests');
 
 function assertTarget(packageDirectory, packageName, field, target) {
   assert.equal(typeof target, 'string', `${packageName} ${field} must be a string`);

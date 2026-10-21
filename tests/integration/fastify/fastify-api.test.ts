@@ -38,7 +38,7 @@ function manifest(): ReturnType<typeof pluginPackage> {
 
 /**
  * HTTP 生命周期接口只接收可序列化的系统 Plugin Manifest；业务 Plugin 的 Handler
- * 属于本地包运行时，必须通过 @iar/plugin 和 @iar/agent 注册，不能从 JSON 传输。
+ * 属于本地包运行时，必须通过 @iar/plugin 和 @iar/runtime 注册，不能从 JSON 传输。
  *
  * @returns 合法系统 Plugin Manifest
  * @author lvdaxianer@yeah.net

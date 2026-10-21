@@ -4,7 +4,6 @@
     { "path": "./packages/contracts/tsconfig.build.json" },
     { "path": "./packages/plugins/tsconfig.build.json" },
     { "path": "./packages/plugin/tsconfig.build.json" },
-    { "path": "./packages/agent/tsconfig.build.json" },
     { "path": "./packages/subscriptions/tsconfig.build.json" },
     { "path": "./packages/storage/tsconfig.build.json" },
     { "path": "./packages/runtime/tsconfig.build.json" },

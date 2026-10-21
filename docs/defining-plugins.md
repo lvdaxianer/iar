@@ -93,10 +93,10 @@ export const ticketPlugin = definePlugin({
 
 ## 4. 统一入口注册
 
-应用只需要把 Plugin 包传给 `@iar/agent`：
+应用只需要把 Plugin 包传给 `@iar/runtime`：
 
 ```ts
-import { createIarAgent } from '@iar/agent';
+import { createIarAgent } from '@iar/runtime';
 import { ticketPlugin } from './ticket-plugin.js';
 
 export const iar = createIarAgent({ plugins: [ticketPlugin] });
@@ -126,7 +126,7 @@ Pi 只通过 `@iar/pi-bridge` 调用 IAR 会话服务。Pi 不需要知道 Plugi
 
 ## 6. HTTP/Service 边界的限制
 
-本地业务 Plugin 的 Handler 是不可 JSON 序列化的函数，因此业务包必须通过模块导入和 `@iar/agent` 注册。Fastify/Service API 可以接收可序列化的系统 Plugin Manifest 做生命周期管理；将业务 Manifest 当作远程可执行包提交会被拒绝，这是 fail-closed 行为。
+本地业务 Plugin 的 Handler 是不可 JSON 序列化的函数，因此业务包必须通过模块导入和 `@iar/runtime` 注册。Fastify/Service API 可以接收可序列化的系统 Plugin Manifest 做生命周期管理；将业务 Manifest 当作远程可执行包提交会被拒绝，这是 fail-closed 行为。
 
 ## 7. 红线
 

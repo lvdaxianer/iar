@@ -149,8 +149,8 @@ export class SandboxSessionCore {
       this.recentMessageLimit = normalizeRecentMessageLimit(options.recentMessageLimit);
       this.snapshotStore = options.snapshotStore; this.persistenceProvider = options.persistenceProvider;
       this.persistenceDispatcher = this.createPersistenceDispatcher(options.persistenceProvider);
-      this.pluginHost = createSandboxPluginHost();
       const models = createSandboxModels(options);
+      this.pluginHost = createSandboxPluginHost(models.functionAdapter);
       this.brainProvider = models.brain; this.registry = models.registry; this.gateway = models.gateway;
       this.functionDecisionAdapter = models.functionAdapter; this.pluginDecisionAdapter = models.pluginAdapter;
       this.workflow = this.createWorkflow();

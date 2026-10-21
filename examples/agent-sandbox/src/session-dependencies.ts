@@ -2,8 +2,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SCHEMA_VERSIONS } from '@iar/contracts';
-import { DecisionBackendResolver, IntentModelDecisionAdapter, JevDecisionAdapter, ModelGateway, ModelProfileRegistry, UnifiedDecisionAdapter, loadModelProfiles, type DecisionRequest, type ModelProvider } from '@iar/runtime';
-import { createIarAgent } from '@iar/agent';
+import { DecisionBackendResolver, IntentModelDecisionAdapter, JevDecisionAdapter, ModelGateway, ModelProfileRegistry, UnifiedDecisionAdapter, loadModelProfiles, type AsyncDecisionAdapter, type DecisionRequest, type ModelProvider } from '@iar/runtime';
+import { createIarAgent } from '@iar/runtime';
 import { PluginHost } from '@iar/plugins';
 import { allSandboxPlugins, sandboxFunctionIds } from './functions/index.js';
 import { assertSandboxKnowledgeBases } from './knowledge/retrieval.js';
@@ -18,9 +18,9 @@ import type { SandboxDecisionBackend, SandboxMode } from './session-types.js';
  * @throws Error 安装、启用或知识库校验失败
  * @author lvdaxianer@yeah.net @date 2026-10-18
  */
-export function createSandboxPluginHost(): PluginHost {
+export function createSandboxPluginHost(decisionProvider: AsyncDecisionAdapter): PluginHost {
   assertSandboxKnowledgeBases(sandboxFunctionIds);
-  return createIarAgent({ plugins: allSandboxPlugins }).pluginHost;
+  return createIarAgent({ plugins: allSandboxPlugins, decisionProvider }).pluginHost;
 }
 
 /** 从受控配置构建模型网关和两个决策适配器。

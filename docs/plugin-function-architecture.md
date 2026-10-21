@@ -25,7 +25,7 @@ Plugin Manifest 只声明包级信息。业务 Function 必须嵌套在 `PluginP
 @iar/plugin     插件作者入口：definePlugin / defineFunction
 @iar/plugins    PluginHost、生命周期和 Function provider 索引
 @iar/runtime    意图决策、有限候选和动态路由
-@iar/agent      应用统一入口：安装、启用和运行时装配
+@iar/runtime      应用统一入口：安装、启用和运行时装配
 @iar/pi-bridge  Pi 与 IAR 会话服务之间的适配边界
 ```
 

@@ -18,10 +18,10 @@ import { defineFunction, definePlugin } from '@iar/plugin';
 
 ## 应用统一入口
 
-应用从 `@iar/agent` 导入 `createIarAgent`：
+应用从 `@iar/runtime` 导入 `createIarAgent`：
 
 ```ts
-import { createIarAgent } from '@iar/agent';
+import { createIarAgent } from '@iar/runtime';
 import { ticketPlugin } from './ticket-plugin.js';
 
 const iar = createIarAgent({
@@ -58,7 +58,7 @@ type IarAgent = {
 
 ```text
 插件项目  → @iar/plugin → 导出 PluginPackage
-应用项目  → @iar/agent  → createIarAgent({ plugins })
+应用项目  → @iar/runtime  → createIarAgent({ plugins })
 运行时    → @iar/plugins → PluginHost / FunctionRegistry
 ```
 
@@ -66,7 +66,7 @@ type IarAgent = {
 
 ```ts
 import { definePlugin } from '@iar/plugin';
-import { createIarAgent } from '@iar/agent';
+import { createIarAgent } from '@iar/runtime';
 ```
 
 两个包都发布自身 `dist/index.js` 和 `dist/index.d.ts`，不依赖仓库根目录、其他包的 `src` 或未声明内部路径。

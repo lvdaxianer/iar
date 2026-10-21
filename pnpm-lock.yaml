@@ -93,15 +93,6 @@ importers:
         specifier: 0.1.0
         version: link:../../runtime
 
-  packages/agent:
-    dependencies:
-      '@iar/contracts':
-        specifier: 0.1.0
-        version: link:../contracts
-      '@iar/plugins':
-        specifier: 0.1.0
-        version: link:../plugins
-
   packages/cli:
     dependencies:
       '@iar/adapters-service':

@@ -19,3 +19,9 @@ export type IarRuntime = {
   /** 调用方注入的意图决策适配器。 */
   decisionProvider: AsyncDecisionAdapter;
 };
+
+/** @deprecated 请使用 IarRuntimeOptions。 */
+export type IarAgentOptions = IarRuntimeOptions;
+
+/** @deprecated 请使用 IarRuntime。 */
+export type IarAgent = IarRuntime;
