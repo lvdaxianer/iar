@@ -1,14 +1,13 @@
 /** Pi 宿主演示服务：静态页面 + SSE 事件 + chat/confirm 路由。
- * 页面复刻 “Pi 宿主 + IAR 前置意图路由层” 的终端形态，
+ * 页面与 IAR Agent Sandbox 共用样式与安全 Markdown 片段，仅协议适配不同，
  * 真实拦截由 @iar/pi-bridge 扩展和 bridge HTTP API 完成，本文件只做协议和边界。
  * @author lvdaxianer@yeah.net
  * @date 2026-10-21
  */
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import type { IarBridgeClientLike } from '@iar/pi-bridge';
 import type { SandboxMode } from '../session-types.js';
+import { loadPiHostPage } from '../page-template.js';
 import { PiHostSession, type PiHostSessionEvents } from './pi-host-session.js';
 
 const DEFAULT_PI_HOST_PORT = 8788;
@@ -131,13 +130,6 @@ export async function startPiHostServer(options: PiHostServerOptions): Promise<P
   const { app, closeClients } = buildPiHostApp(options);
   await app.listen({ port, host: HOST });
   return { host: HOST, port, mode: options.mode, close: async () => { closeClients(); await app.close(); } };
-}
-
-/** 读取页面文件；缺文件或占位符无效时快速失败，避免半可用演示。 */
-function loadPiHostPage(): string {
-  const html = readFileSync(join(process.cwd(), 'examples', 'agent-sandbox', 'src', 'pi-host', 'web', 'index.html'), 'utf8');
-  if (!html.includes('id="transcript"')) throw new Error('Pi 宿主演示页面模板无效。');
-  return html;
 }
 
 /** 读取可配置端口；非法值不可静默回退。 */

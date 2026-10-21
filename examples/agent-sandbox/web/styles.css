@@ -214,6 +214,9 @@
   }
   .events li:hover { border-color: #c9d2e8; }
   .events li .t { color: var(--muted); flex-shrink: 0; font-size: 11px; }
+  /* 调用链激活节点：Pi host 演示页按轮次高亮，描边与文字颜色辅助但节点名始终可读。 */
+  .events li.active { border-color: #c7cdf5; background: var(--accent-soft); }
+  .events li.active span:first-child { color: var(--accent); font-weight: 600; }
 
   details { border: 1px solid var(--border); border-radius: 10px; background: #fff; overflow: hidden; }
   details summary {

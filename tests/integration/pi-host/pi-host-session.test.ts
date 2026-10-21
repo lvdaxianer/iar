@@ -137,3 +137,14 @@ test('Pi host app serves the page and processes chat over HTTP', async t => {
   const badSession = await app.inject({ method: 'POST', url: '/api/pi-host/confirm', payload: { session: '非法 id!', accepted: true } });
   assert.equal(badSession.statusCode, 400);
 });
+
+test('Pi host app serves assembled shared page by default', async t => {
+  const { app, closeClients } = buildPiHostApp({ mode: 'scripted', client: makeFakeBridge() });
+  t.after(async () => { closeClients(); await app.close(); });
+  const page = await app.inject({ method: 'GET', url: '/' });
+  assert.equal(page.statusCode, 200);
+  assert.match(page.body, /id="messages"/);
+  assert.match(page.body, /function renderMarkdown\(src\)/);
+  assert.match(page.body, /function renderPiHostEntry\(entry\)/);
+  assert.doesNotMatch(page.body, /IAR_PI_HOST_(?:STYLES|SCRIPT)/);
+});

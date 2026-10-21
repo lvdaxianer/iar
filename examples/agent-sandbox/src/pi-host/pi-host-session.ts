@@ -1,6 +1,6 @@
 /** 进程内 Pi 宿主会话：按真实集成链路把每轮输入先交给 @iar/pi-bridge 扩展，
  * IAR 未命中（continue）时才交给进程内 Pi Agent 回答。
- * 网页端借此复刻 “Pi 宿主 + IAR 前置意图路由层” 的终端形态，
+ * 网页端与 IAR Agent Sandbox 共用同一套界面资源复刻 “Pi 宿主 + IAR 前置意图路由层”，
  * 扩展、bridge client 与 Pi 委托均复用正式集成代码。
  * @author lvdaxianer@yeah.net
  * @date 2026-10-21

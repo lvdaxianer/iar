@@ -1,0 +1,374 @@
+
+  // Pi 宿主演示页协议适配：与 8787 沙箱页共用样式与安全 Markdown 渲染，仅事件协议不同。
+  // 每轮输入先经 IAR 前置路由（entry/route/confirm 事件），未命中由 Pi Agent 流式回答（piDelta/piDone）。
+  // 会话标识仅保存在本标签页存储；历史回放与沙箱页一样使用本地存储，服务端不保存聊天正文。
+  const PI_HOST_SESSION_KEY = 'iar.piHostSession';
+  const PI_HOST_HISTORY_PREFIX = 'iar-pi-host-history-v1:';
+  const PI_HOST_HISTORY_LIMIT = 100;
+  const PI_HOST_EVENT_LIMIT = 8;
+  const PI_HOST_SESSION_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+  const PI_HOST_DISPOSITION_META = { handled: '已执行', awaiting_confirmation: '等待确认', clarification: '需要澄清', cancelled: '已取消', pass_through: '已通过' };
+  let piHostMessagesEl = document.getElementById('messages');
+  let piHostInputEl = document.getElementById('messageInput');
+  let piHostSendBtn = document.getElementById('sendBtn');
+  let piHostSessionId = readPiHostSessionId();
+  let piHostBusy = false;
+  let piHostBubble = null;
+  let piHostPendingRoute = null;
+  let piHostEvents = [];
+
+  /** 读取本标签页的 Pi 会话标识；缺失、损坏或不合法时创建新标识。
+   * 标识只进入请求参数与会话面板，不写入前端日志。
+   * @returns 校验通过的会话标识
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  function readPiHostSessionId() {
+    try {
+      var stored = sessionStorage.getItem(PI_HOST_SESSION_KEY);
+      if (PI_HOST_SESSION_PATTERN.test(stored || '')) return stored;
+    } catch (err) { /* 存储不可用时按新会话处理。 */ }
+    var created = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'pi-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+    try { sessionStorage.setItem(PI_HOST_SESSION_KEY, created); } catch (err) { /* 失败时仅影响刷新恢复。 */ }
+    return created;
+  }
+
+  /** 追加一条聊天消息，用户输入始终作为纯文本呈现。
+   * 助手内容通过共用的受限 Markdown 渲染器转义，与沙箱页同一安全出口。
+   * @param role - 用户或助手角色
+   * @param text - 消息正文
+   * @param meta - 可选状态文字
+   * @returns 新建的消息容器
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  function appendMsg(role, text, meta) {
+    var div = document.createElement('div');
+    div.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
+    if (role === 'user') {
+      div.textContent = text;
+    } else {
+      var body = document.createElement('div');
+      body.className = 'md-body';
+      body.innerHTML = renderMarkdown(text);
+      div.appendChild(body);
+    }
+    if (meta) appendMessageMeta(div, meta);
+    piHostMessagesEl.appendChild(div);
+    piHostMessagesEl.scrollTop = piHostMessagesEl.scrollHeight;
+    return div;
+  }
+
+  /** 在消息尾部显示动作或回复状态。 */
+  function appendMessageMeta(div, text) {
+    var span = document.createElement('span');
+    span.className = 'meta';
+    span.textContent = text;
+    div.appendChild(span);
+  }
+
+  /** 读取本地历史；损坏记录按空处理，脏数据不进入渲染路径。
+   * @returns 消息数组
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  function readPiHostHistory() {
+    try {
+      var record = JSON.parse(localStorage.getItem(PI_HOST_HISTORY_PREFIX + piHostSessionId) || '[]');
+      return Array.isArray(record) ? record.filter(function (m) { return m && (m.role === 'user' || m.role === 'bot') && typeof m.text === 'string'; }) : [];
+    } catch (err) { return []; }
+  }
+
+  /** 写入本地历史，超长丢弃最旧消息；存储不可用时降级为仅当前页面可见。 */
+  function recordPiHostConversation(role, text, meta) {
+    if (typeof text !== 'string') return;
+    var messages = readPiHostHistory();
+    messages.push({ role: role, text: text, at: Date.now(), ...(meta === undefined ? {} : { meta: meta }) });
+    if (messages.length > PI_HOST_HISTORY_LIMIT) messages.splice(0, messages.length - PI_HOST_HISTORY_LIMIT);
+    try { localStorage.setItem(PI_HOST_HISTORY_PREFIX + piHostSessionId, JSON.stringify(messages)); } catch (err) { /* 降级为内存展示。 */ }
+  }
+
+  /** 初始化时回放本地历史，重放与实时消息共用同一安全渲染出口。 */
+  function renderPiHostHistory() {
+    readPiHostHistory().forEach(function (message) { appendMsg(message.role, message.text, message.meta); });
+  }
+
+  /** 同步输入与发送按钮的忙碌状态；确认按钮各自检查 busy。
+   * @param value - 当前是否有操作未结束
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  function setPiHostBusy(value) {
+    piHostBusy = value;
+    piHostSendBtn.disabled = value;
+    piHostInputEl.disabled = value;
+    document.querySelectorAll('.confirm-box button').forEach(function (button) { button.disabled = value; });
+  }
+
+  /** 记录并展示最近事件，事件名与详情都以纯文本呈现。
+   * @param name - 事件名
+   * @param detail - 事件详情
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  function recordPiHostEvent(name, detail) {
+    piHostEvents.push({ name: name, detail: detail });
+    if (piHostEvents.length > PI_HOST_EVENT_LIMIT) piHostEvents.shift();
+    var list = document.getElementById('eventList');
+    list.innerHTML = '';
+    piHostEvents.forEach(function (event) {
+      var li = document.createElement('li');
+      var nameEl = document.createElement('span');
+      nameEl.textContent = event.name;
+      var detailEl = document.createElement('span');
+      detailEl.className = 't';
+      detailEl.textContent = event.detail;
+      li.appendChild(nameEl);
+      li.appendChild(detailEl);
+      list.appendChild(li);
+    });
+  }
+
+  /** 高亮调用链节点，其余节点恢复默认；空数组清除全部高亮。
+   * @param nodes - 要激活的节点名列表
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  function highlightPiHostFlow(nodes) {
+    document.querySelectorAll('#flowList li').forEach(function (li) {
+      li.className = nodes.indexOf(li.getAttribute('data-node')) >= 0 ? 'active' : '';
+    });
+  }
+
+  /** 用路由证据更新右侧调试面板，缺失字段使用占位符。
+   * @param route - 本轮 bridge 路由摘要
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  function updatePiHostRoutePanel(route) {
+    document.getElementById('routeFunction').textContent = route.functionId || '-';
+    document.getElementById('routePlugin').textContent = route.pluginId || '-';
+    document.getElementById('routeStatus').textContent = route.disposition || '-';
+    document.getElementById('routeConfidence').textContent = route.semanticIntent ? route.semanticIntent + '（' + Math.round((route.semanticConfidence || 0) * 100) + '%）' : '-';
+    document.getElementById('routeScore').textContent = route.reasonCode || '-';
+  }
+
+  /** 创建 Pi Agent 流式气泡，带 Thinking 指示器；增量期间纯文本追加。
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  function createPiHostBubble() {
+    var div = document.createElement('div');
+    div.className = 'msg bot';
+    var textEl = document.createElement('div');
+    textEl.className = 'md-body';
+    var stageEl = document.createElement('span');
+    stageEl.className = 'thinking';
+    stageEl.textContent = 'Thinking';
+    div.appendChild(textEl);
+    div.appendChild(stageEl);
+    piHostMessagesEl.appendChild(div);
+    piHostMessagesEl.scrollTop = piHostMessagesEl.scrollHeight;
+    piHostBubble = { div: div, textEl: textEl, stageEl: stageEl, gotDelta: false };
+  }
+
+  /** 追加 Pi Agent 增量，首个增量到达时移除 Thinking 指示器。 */
+  function appendPiHostDelta(text) {
+    if (!piHostBubble) createPiHostBubble();
+    if (!piHostBubble.gotDelta) { piHostBubble.gotDelta = true; piHostBubble.stageEl.remove(); }
+    piHostBubble.textEl.textContent += text;
+    piHostMessagesEl.scrollTop = piHostMessagesEl.scrollHeight;
+  }
+
+  /** 结束 Pi Agent 气泡：终态后统一做 Markdown 渲染并记录历史。
+   * @param reply - 服务端回传的完整回复
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  function finalizePiHostBubble(reply) {
+    if (!piHostBubble) { if (reply) appendMsg('bot', reply, 'Pi 兜底'); return; }
+    var bubble = piHostBubble;
+    piHostBubble = null;
+    bubble.stageEl.remove();
+    if (!bubble.gotDelta && !reply) { bubble.div.remove(); return; }
+    if (!bubble.gotDelta) bubble.textEl.textContent = reply;
+    bubble.textEl.innerHTML = renderMarkdown(bubble.textEl.textContent);
+    appendMessageMeta(bubble.div, 'Pi 兜底');
+    recordPiHostConversation('bot', bubble.textEl.textContent, 'Pi 兜底');
+    piHostMessagesEl.scrollTop = piHostMessagesEl.scrollHeight;
+  }
+
+  /** 校验并渲染 IAR entry，异常信封直接忽略，避免空卡片污染会话。
+   * 仅接受 iar-bridge 自定义类型，content 以纯文本展示。
+   * handled 时把本轮路由的 Function 写进状态标签，与沙箱页同一展示词汇。
+   * @param entry - SSE entry 事件负载
+   * @returns 是否完成渲染
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  function renderPiHostEntry(entry) {
+    var data = (entry && typeof entry === 'object' && 'data' in entry && entry.data && typeof entry.data === 'object') ? entry.data : null;
+    if (!data || entry.customType !== 'iar-bridge' || typeof data.content !== 'string') return false;
+    var meta = PI_HOST_DISPOSITION_META[data.disposition] || data.disposition || '已执行';
+    if (data.disposition === 'handled' && piHostPendingRoute && piHostPendingRoute.functionId) meta += ' · ' + piHostPendingRoute.functionId;
+    appendMsg('bot', data.content, meta);
+    recordPiHostConversation('bot', data.content, meta);
+    if (data.disposition === 'handled') highlightPiHostFlow(['input', 'hook', 'iar', 'handled']);
+    return true;
+  }
+
+  /** 移除全部确认卡片；新确认事件或清空事件都走这里。 */
+  function clearPiHostConfirmBoxes() {
+    document.querySelectorAll('.confirm-box').forEach(function (box) { box.remove(); });
+  }
+
+  /** 展示待确认动作卡片，确认/取消回到 IAR 权威会话。
+   * 卡片样式与沙箱页一致；点击后移除卡片并等待 SSE entry 渲染结果。
+   * @param pending - bridge 待确认动作
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  function showPiHostConfirmBox(pending) {
+    clearPiHostConfirmBoxes();
+    var box = document.createElement('div');
+    box.className = 'confirm-box';
+    var title = document.createElement('div');
+    title.textContent = '待确认动作：' + pending.functionId + ' / ' + pending.pluginId + '（风险等级 ' + pending.riskLevel + '）';
+    var detail = document.createElement('div');
+    detail.style.cssText = 'margin-top:6px;font-family:var(--mono);font-size:11px;color:var(--muted)';
+    detail.textContent = JSON.stringify({ actionId: pending.actionId, runId: pending.runId });
+    var actions = document.createElement('div');
+    actions.className = 'actions';
+    actions.appendChild(piHostConfirmButton('确认执行', 'ok', true));
+    actions.appendChild(piHostConfirmButton('取消', 'danger', false));
+    box.appendChild(title);
+    box.appendChild(detail);
+    box.appendChild(actions);
+    piHostMessagesEl.appendChild(box);
+    piHostMessagesEl.scrollTop = piHostMessagesEl.scrollHeight;
+  }
+
+  /** 构造确认按钮；禁用与忙碌检查在点击时再次生效，防止外部脚本跳过校验。 */
+  function piHostConfirmButton(label, style, accepted) {
+    var button = document.createElement('button');
+    button.className = style;
+    button.textContent = label;
+    button.disabled = piHostBusy;
+    button.onclick = function () {
+      if (piHostBusy) return;
+      clearPiHostConfirmBoxes();
+      setPiHostBusy(true);
+      piHostPost('/api/pi-host/confirm', { session: piHostSessionId, accepted: accepted })
+        .catch(function () { appendMsg('bot', '确认请求失败，请检查状态后重试。', '失败'); })
+        .finally(function () { setPiHostBusy(false); });
+    };
+    return button;
+  }
+
+  /** 发送 Pi host JSON 请求；非成功响应抛出由调用方统一提示。
+   * @param path - 请求路径
+   * @param body - 请求体
+   * @returns 解析后的响应对象 Promise
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  function piHostPost(path, body) {
+    return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (res) { if (!res.ok) throw new Error('request_failed'); return res.json(); });
+  }
+
+  /** 提交一轮用户输入；handled 由 entry 事件渲染，continue 由 piDone 收尾。
+   * 网络失败恢复输入文本，不自动重试可能已经执行的输入。
+   * @param text - 用户提交的消息
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  function submitPiHostTurn(text) {
+    setPiHostBusy(true);
+    appendMsg('user', text);
+    recordPiHostConversation('user', text);
+    highlightPiHostFlow(['input']);
+    piHostPost('/api/pi-host/chat', { session: piHostSessionId, text: text })
+      .then(function (result) { if (result && result.action === 'handled') setPiHostBusy(false); })
+      .catch(function () {
+        piHostInputEl.value = text;
+        appendMsg('bot', '请求未完成，结果可能未知；请检查状态后再重试。', '失败');
+        setPiHostBusy(false);
+      });
+  }
+
+  /** 绑定 SSE 事件源；断线只更新连接徽标，页面状态等待下一次事件。
+   * 所有事件负载先校验再使用，异常事件不中断后续处理。
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  function connectPiHostEvents() {
+    var es = new EventSource('/api/pi-host/events?session=' + encodeURIComponent(piHostSessionId));
+    var connBadge = document.getElementById('connBadge');
+    es.addEventListener('ready', function (event) {
+      var info = JSON.parse(event.data);
+      var brain = info.mode === 'brain';
+      var modeBadge = document.getElementById('modeBadge');
+      modeBadge.textContent = brain ? 'brain real · 真实 LLM' : 'brain scripted · 离线假大脑';
+      modeBadge.className = 'badge' + (brain ? '' : ' scripted');
+      document.getElementById('bridgeBadge').textContent = 'bridge ' + info.bridgeUrl;
+      connBadge.textContent = '已连接';
+      connBadge.className = 'badge';
+      document.getElementById('sessionJson').textContent = JSON.stringify({ sessionId: piHostSessionId, mode: info.mode, bridgeUrl: info.bridgeUrl }, null, 2);
+    });
+    es.onerror = function () { connBadge.textContent = '断开'; connBadge.className = 'badge scripted'; };
+    es.addEventListener('route', function (event) {
+      piHostPendingRoute = JSON.parse(event.data);
+      updatePiHostRoutePanel(piHostPendingRoute);
+      highlightPiHostFlow(['input', 'hook', 'iar']);
+      recordPiHostEvent('路由', piHostPendingRoute.disposition || '-');
+    });
+    es.addEventListener('entry', function (event) {
+      var entry;
+      try { entry = JSON.parse(event.data); } catch (err) { return; }
+      if (renderPiHostEntry(entry)) recordPiHostEvent('IAR', (entry.data && entry.data.disposition) || '-');
+    });
+    es.addEventListener('confirm', function (event) {
+      var pending = JSON.parse(event.data);
+      if (pending) { showPiHostConfirmBox(pending); recordPiHostEvent('确认', '等待 ' + pending.actionId); }
+      else { clearPiHostConfirmBoxes(); recordPiHostEvent('确认', '已清空'); }
+    });
+    es.addEventListener('notify', function (event) {
+      var notification = JSON.parse(event.data);
+      appendMsg('bot', notification.message, notification.type === 'error' ? '错误' : '提示');
+      recordPiHostEvent('通知', notification.message.slice(0, 24));
+    });
+    es.addEventListener('piDelta', function (event) { appendPiHostDelta(JSON.parse(event.data)); });
+    es.addEventListener('piDone', function (event) {
+      finalizePiHostBubble(JSON.parse(event.data));
+      highlightPiHostFlow(['input', 'hook', 'iar', 'continue']);
+      setPiHostBusy(false);
+      recordPiHostEvent('Pi', '回答完成');
+    });
+  }
+
+  // 表单提交由脚本拦截；欢迎消息只在无本地历史时展示一次。
+  // 与沙箱页一致，服务端终态以 SSE 事件为准，页面忙碌状态随事件收尾。
+  document.getElementById('inputBar').onsubmit = function (event) {
+    event.preventDefault();
+    if (piHostBusy) return;
+    var text = piHostInputEl.value.trim();
+    if (!text) return;
+    piHostInputEl.value = '';
+    submitPiHostTurn(text);
+  };
+  if (readPiHostHistory().length === 0) {
+    appendMsg('bot', '你好，这里是 Pi × IAR 前置意图路由演示。本页与 8787 IAR Agent Sandbox 共用同一套界面与渲染资源，仅底层协议不同：每轮输入先经 Pi input hook 交给 IAR 意图识别与 Plugin/Function 动态路由，命中即展示 IAR 结果并阻断 Pi Agent；未命中才由进程内 Pi Agent 流式回答。右侧可查看调用链、路由证据与会话信息。');
+  } else {
+    renderPiHostHistory();
+  }
+  connectPiHostEvents();
