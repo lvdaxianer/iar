@@ -14,8 +14,9 @@
 IAR SHALL provide a public `@iar/runtime` package entry that can initialize an
 intent and action runtime from installed Plugin packages and a decision provider.
 The entry SHALL default to installing the built-in self-introduction Plugin,
-shall accept an Agent-level disabled Plugin set and supplementary self-introduction
-prompt, and SHALL retain those validated values in the created Agent configuration.
+shall accept an Agent-level disabled Plugin set including the built-in Plugin and
+supplementary self-introduction prompt, and SHALL retain those validated values
+in the created Agent configuration.
 
 #### Scenario: Application initializes the standalone runtime
 
@@ -34,6 +35,11 @@ prompt, and SHALL retain those validated values in the created Agent configurati
 
 - **WHEN** an application creates an Agent without an explicit disable rule for self-introduction
 - **THEN** the Agent includes the built-in self-introduction Function and its configuration is available to the session/runtime integration
+
+#### Scenario: Agent creation can disable built-in self-introduction
+
+- **WHEN** an application creates an Agent with the built-in self-introduction Plugin ID in `disabledPluginIds`
+- **THEN** the Agent excludes that Plugin from executable capabilities and routing/context descriptors while other supplied Plugins remain available
 
 #### Scenario: Agent creation filters explicitly disabled Plugins
 

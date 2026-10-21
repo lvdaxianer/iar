@@ -84,7 +84,6 @@ function normalizeConfiguration(options: IarRuntimeOptions, availablePlugins: re
   const disabledPluginIds = [...(options.disabledPluginIds ?? [])];
   const availableIds = new Set(availablePlugins.map((plugin) => plugin.manifest.pluginId));
   if (new Set(disabledPluginIds).size !== disabledPluginIds.length || disabledPluginIds.some((id) => typeof id !== 'string' || id.length === 0)) throw new ContractValidationError('disabledPluginIds 必须是唯一的非空 Plugin 标识');
-  if (disabledPluginIds.includes(SELF_INTRODUCTION_PLUGIN_ID)) throw new ContractValidationError('内置自我介绍 Plugin 不允许关闭');
   if (disabledPluginIds.some((id) => !availableIds.has(id))) throw new ContractValidationError('disabledPluginIds 包含未注册 Plugin');
   const extraPrompt = options.selfIntroduction?.extraPrompt;
   if (extraPrompt !== undefined && (typeof extraPrompt !== 'string' || extraPrompt.length > SELF_INTRODUCTION_MAX_PROMPT_LENGTH)) throw new ContractValidationError('自我介绍额外提示词超过长度限制');
@@ -102,7 +101,8 @@ function normalizeConfiguration(options: IarRuntimeOptions, availablePlugins: re
 function selectPlugins(plugins: readonly PluginPackage[], disabledPluginIds: readonly string[]): PluginPackage[] {
   const disabled = new Set(disabledPluginIds);
   const selected = plugins.filter((plugin) => plugin.manifest.pluginId !== SELF_INTRODUCTION_PLUGIN_ID && !disabled.has(plugin.manifest.pluginId));
-  selected.push(selfIntroductionPlugin);
+  // 内置自我介绍默认启用，但必须服从 Agent 创建时的显式关闭配置。
+  if (!disabled.has(SELF_INTRODUCTION_PLUGIN_ID)) selected.push(selfIntroductionPlugin);
   return selected;
 }
 

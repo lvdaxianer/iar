@@ -17,6 +17,33 @@ test('IAR bridge client sends bounded input and validates the response', async (
   assert.deepEqual(JSON.parse(calls[0]?.body ?? '{}'), { text: '普通问题' });
 });
 
+test('IAR bridge client accepts optional pass-through capability context', async () => {
+  const client = new IarBridgeClient({
+    baseUrl: 'http://iar.test',
+    fetch: async () => Response.json({
+      version: PI_BRIDGE_VERSION,
+      iarSessionId: 'iar-1',
+      disposition: 'pass_through',
+      capabilityContext: { functionDescriptors: [{ functionId: 'f', pluginId: 'p', description: '可查询', actionTypes: ['query'] }] }
+    })
+  });
+  const result = await client.input('iar-1', '普通问题');
+  assert.deepEqual(result.capabilityContext, { functionDescriptors: [{ functionId: 'f', pluginId: 'p', description: '可查询', actionTypes: ['query'] }] });
+});
+
+test('IAR bridge client rejects oversized pass-through capability context', async () => {
+  const client = new IarBridgeClient({
+    baseUrl: 'http://iar.test',
+    fetch: async () => Response.json({
+      version: PI_BRIDGE_VERSION,
+      iarSessionId: 'iar-1',
+      disposition: 'pass_through',
+      capabilityContext: { functionDescriptors: Array.from({ length: 129 }, (_, index) => ({ functionId: `f-${index}`, pluginId: 'p', description: '可查询', actionTypes: ['query'] })) }
+    })
+  });
+  await assert.rejects(() => client.input('iar-1', '普通问题'), (error: unknown) => error instanceof BridgeClientError && error.code === 'invalid_bridge_response');
+});
+
 test('IAR bridge client covers open, confirm, state and HTTP failure paths', async () => {
   const paths: string[] = [];
   const client = new IarBridgeClient({

@@ -142,7 +142,7 @@ export class SandboxSessionStreamTurn {
     const delegate = this.context.piAgent;
     if (!delegate || !canPassThrough(behaviorContext, evidence, selectedDescriptor)) return undefined;
     emit({ type: 'stage', stage: 'response' });
-    const reply = await runPiAgentDelegate(delegate, userText, (delta) => emit({ type: 'delta', text: delta }));
+    const reply = await runPiAgentDelegate(delegate, userText, (delta) => emit({ type: 'delta', text: delta }), this.context.functionDescriptors);
     if (reply === undefined) return undefined;
     this.context.pushMessages(userText, reply);
     return { status: 'agent', reply, route: evidence };

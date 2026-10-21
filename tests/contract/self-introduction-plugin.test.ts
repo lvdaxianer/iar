@@ -58,9 +58,10 @@ test('新建 Agent 默认安装自我介绍 Plugin，并持久化关闭项与提
   assert.deepEqual(agent.functionRegistry.list().map((definition) => definition.functionId), [SELF_INTRODUCTION_FUNCTION_ID]);
 });
 
-test('自我介绍 Plugin 不能被关闭，未知关闭项被拒绝', () => {
+test('自我介绍 Plugin 默认开启且允许显式关闭，未知关闭项仍被拒绝', () => {
   const ticketPlugin = pluginPackage(loadBusinessManifest(), 'ticket.query');
-  assert.throws(() => createIarAgent({ plugins: [ticketPlugin], decisionProvider, disabledPluginIds: [SELF_INTRODUCTION_PLUGIN_ID] }), /自我介绍|关闭|disable/i);
+  const disabled = createIarAgent({ plugins: [ticketPlugin], decisionProvider, disabledPluginIds: [SELF_INTRODUCTION_PLUGIN_ID] });
+  assert.deepEqual(disabled.functionRegistry.list().map((definition) => definition.functionId), ['ticket.query']);
   assert.throws(() => createIarAgent({ plugins: [ticketPlugin], decisionProvider, disabledPluginIds: ['plugin.unknown'] }), /未知|不存在|plugin/i);
   assert.throws(() => createIarAgent({ plugins: [ticketPlugin], decisionProvider, selfIntroduction: { extraPrompt: 'x'.repeat(1001) } }), /提示词|长度/i);
 });

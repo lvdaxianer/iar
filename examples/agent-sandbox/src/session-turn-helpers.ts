@@ -10,7 +10,7 @@ import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { resolveSandboxTraceId, writeSafeLog } from './safe-log.js';
 import type { SandboxSessionReplies } from './session-replies.js';
 import { hasVerifiedFactsForFollowUp } from './session-clarification.js';
-import type { ConfirmResult, RouteEvidence, TurnResult } from './session-types.js';
+import type { ConfirmResult, PassThroughCapabilityContext, RouteEvidence, TurnResult } from './session-types.js';
 
 /** 构造待确认期间的 bridge 澄清结果。 */
 export function pendingBridgeResult(): TurnResult {
@@ -30,9 +30,9 @@ export function canPassThrough(context: BehaviorContext, evidence: RouteEvidence
  * @author lvdaxianer@yeah.net
  * @date 2026-10-21
  */
-export async function runPiAgentDelegate(delegate: PiAgentDelegate, userText: string, onDelta: (delta: string) => void): Promise<string | undefined> {
+export async function runPiAgentDelegate(delegate: PiAgentDelegate, userText: string, onDelta: (delta: string) => void, functionDescriptors: readonly PluginDescriptor[] = []): Promise<string | undefined> {
   try {
-    return await delegate.run(userText, onDelta);
+    return await delegate.run(userText, onDelta, functionDescriptors);
   } catch {
     writeSafeLog({ level: 'warn', event: 'sandbox.pi_agent', outcome: 'agent_unavailable' });
     return undefined;
@@ -46,15 +46,20 @@ export async function runPiAgentDelegate(delegate: PiAgentDelegate, userText: st
  * @author lvdaxianer@yeah.net
  * @date 2026-10-21
  */
-export async function resolveNoMatchTurn(context: { piAgent: PiAgentDelegate | undefined; pushMessages: (userText: string, reply: string) => void; passThroughOnNoMatch: boolean; userText: string; evidence: RouteEvidence; behaviorContext: BehaviorContext; selectedDescriptor: PluginDescriptor | undefined }): Promise<TurnResult | undefined> {
-  const { piAgent, pushMessages, passThroughOnNoMatch, userText, evidence, behaviorContext, selectedDescriptor } = context;
+export async function resolveNoMatchTurn(context: { piAgent: PiAgentDelegate | undefined; pushMessages: (userText: string, reply: string) => void; passThroughOnNoMatch: boolean; userText: string; evidence: RouteEvidence; behaviorContext: BehaviorContext; selectedDescriptor: PluginDescriptor | undefined; functionDescriptors: readonly PluginDescriptor[] }): Promise<TurnResult | undefined> {
+  const { piAgent, pushMessages, passThroughOnNoMatch, userText, evidence, behaviorContext, selectedDescriptor, functionDescriptors } = context;
   if (!canPassThrough(behaviorContext, evidence, selectedDescriptor)) return undefined;
-  if (passThroughOnNoMatch) return evidence.status === 'noul' ? { status: 'pass_through', route: evidence } : undefined;
+  if (passThroughOnNoMatch) return evidence.status === 'noul' ? { status: 'pass_through', route: evidence, capabilityContext: passThroughCapabilityContext(functionDescriptors) } : undefined;
   if (!piAgent) return undefined;
-  const reply = await runPiAgentDelegate(piAgent, userText, () => undefined);
+  const reply = await runPiAgentDelegate(piAgent, userText, () => undefined, functionDescriptors);
   if (reply === undefined) return undefined;
   pushMessages(userText, reply);
   return { status: 'agent', reply, route: evidence };
+}
+
+/** 只把能力目录中的公开描述投影给 pass-through 下游模型。 */
+function passThroughCapabilityContext(functionDescriptors: readonly PluginDescriptor[]): PassThroughCapabilityContext {
+  return { functionDescriptors: functionDescriptors.map(({ functionId, pluginId, description, actionTypes }) => ({ functionId, pluginId, description, actionTypes })) };
 }
 
 /** 把 IAR 已处理轮次以备注写入 Pi 上下文；Pi 自己处理的轮次不重复记录。

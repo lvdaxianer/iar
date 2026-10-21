@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-10-21
+goal: 默认提供自我介绍能力，同时尊重 Agent 创建时关闭 Plugin 的配置，并始终向模型提供当前启用能力上下文

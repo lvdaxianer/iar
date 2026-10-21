@@ -90,12 +90,22 @@ The system SHALL persist accepted messages and structured context through the co
 
 ### Requirement: Model calls receive structured conversational context
 
-The system SHALL include current routing scope, verified facts, pending clarification, bounded recent messages and the current user message in applicable model calls. Recent messages SHALL be labeled untrusted, bounded by count and size, and non-authoritative. Self-introduction responses SHALL also receive the bounded capability inventory and Agent supplementary prompt; compaction SHALL exclude raw message history.
+The system SHALL include current routing scope, verified facts, pending clarification, bounded recent messages and the current user message in applicable model calls. The current Agent's enabled and authorized capability descriptions SHALL be included as bounded model context for semantic extraction, fallback replies and Pi delegation. Recent messages SHALL be labeled untrusted, bounded by count and size, and non-authoritative. Self-introduction responses SHALL also receive the bounded capability inventory and Agent supplementary prompt; compaction SHALL exclude raw message history.
 
 #### Scenario: A later question is processed
 
 - **WHEN** a user sends a follow-up after an action completes
 - **THEN** semantic extraction and response generation receive the current message, the bounded recent-message window and structured context containing the relevant prior outcome
+
+#### Scenario: Enabled capability descriptions are baseline context
+
+- **WHEN** any model call handles an Agent input
+- **THEN** it receives only the current Agent's enabled and authorized capability descriptions as bounded context, whether or not a Function is selected for the current input
+
+#### Scenario: Disabled capability descriptions are absent
+
+- **WHEN** an Agent Plugin is disabled before a model call
+- **THEN** its Function and Plugin descriptions are absent from semantic candidates, fallback context, Pi context and self-introduction inventory
 
 #### Scenario: Raw history cannot authorize an action
 

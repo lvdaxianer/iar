@@ -26,15 +26,16 @@ intent 必须从当前请求提供的 Function 描述中选择，不能凭空创
 1. 缺槽位时只抽取已有的槽位，不要编造。
 2. confidence 取 0 到 1。
 3. references 解析输入中的历史指代，没有则为空数组；新版关系引用只能包含 text、anchorRecordId、relation、scope、offset，其中 anchorRecordId 必须是不透明 recordId，不能填写业务值。relation 只能是 current、previous、next、first、last、offset；offset 只能是有限整数。无法确认锚点时省略 anchorRecordId，由运行时使用当前焦点解析；不能猜测记录 ID。
-4. 用户询问助手身份或纯闲聊寒暄（如「你是谁呢」「你好」「今天天气怎么样」）时，intent 取 unknown。
-5. action 必须始终填写，且只能是 query、create、update、delete、transfer、execute、unknown 之一；不能填写业务自定义动作名。
-6. 询问事实、结果、状态、进度、数量、位置、编号，或引用当前会话已确认事实的问题，一律优先判断为 query；不能因为问题提到历史动作或业务对象就再次判断为副作用动作。
-7. 只有用户明确要求产生新副作用时，才使用 create、update、delete、transfer 或 execute；不明确时使用 query 或 unknown。
-8. 如果当前问题可以直接由 BehaviorContext.factHistory 中的可信记录回答，且没有明确要求重新查询或执行新动作，则 intent 取 unknown、action 取 query，让回答模型基于事实回答或反问。
-9. slots.operation 只在当前问题明确提供了目标 Function 所需的操作信息时给出；没有明确新操作时只保留 query/params 等已有信息，不要编造。
-10. subject 只能包含 type、id、source 三个可选字段（source 取值仅限 input/context/event/plugin），不要输出 domain、entity 等其他字段；不确定时省略 subject。
-11. factHistory.records 是运行时累加的可信事实记录，values 中的字段名和值只能原样引用；自然语言“上一个/前一个/当前/最后一个”等只转换为关系，不要把 values 中的业务值写进 references。
-12. 只输出一个 JSON 对象，不要输出 Markdown、解释文字或代码围栏。`;
+4. 当当前 Function 描述中存在自我介绍 Function，且用户询问助手身份、能力或可用功能（如「你是谁呢」「介绍下自己」「你能做什么」）时，intent 必须取该自我介绍 Function 的 functionId。
+5. 只有当前 Function 描述中不存在自我介绍 Function 时，身份/能力询问才按 unknown 处理；纯闲聊寒暄（如「你好」「今天天气怎么样」）仍使用 unknown。
+6. action 必须始终填写，且只能是 query、create、update、delete、transfer、execute、unknown 之一；不能填写业务自定义动作名。
+7. 询问事实、结果、状态、进度、数量、位置、编号，或引用当前会话已确认事实的问题，一律优先判断为 query；不能因为问题提到历史动作或业务对象就再次判断为副作用动作。
+8. 只有用户明确要求产生新副作用时，才使用 create、update、delete、transfer 或 execute；不明确时使用 query 或 unknown。
+9. 如果当前问题可以直接由 BehaviorContext.factHistory 中的可信记录回答，且没有明确要求重新查询或执行新动作，则 intent 取 unknown、action 取 query，让回答模型基于事实回答或反问。
+10. slots.operation 只在当前问题明确提供了目标 Function 所需的操作信息时给出；没有明确新操作时只保留 query/params 等已有信息，不要编造。
+11. subject 只能包含 type、id、source 三个可选字段（source 取值仅限 input/context/event/plugin），不要输出 domain、entity 等其他字段；不确定时省略 subject。
+12. factHistory.records 是运行时累加的可信事实记录，values 中的字段名和值只能原样引用；自然语言“上一个/前一个/当前/最后一个”等只转换为关系，不要把 values 中的业务值写进 references。
+13. 只输出一个 JSON 对象，不要输出 Markdown、解释文字或代码围栏。`;
 
 /** 拼装语义抽取输入，当前问题与结构化上下文始终分栏传递。 */
 export function buildSemanticUserPrompt(input: Record<string, unknown>): string {

@@ -5,7 +5,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-21
  */
-import { createIarExtension, IarBridgeClient, type BridgeConfirmResponse, type BridgeInputResponse, type BridgePendingAction, type IarBridgeClientLike, type PiExtensionAPI, type PiExtensionContext, type PiInputResult } from '@iar/pi-bridge';
+import { createIarExtension, IarBridgeClient, type BridgeCapabilityDescriptor, type BridgeConfirmResponse, type BridgeInputResponse, type BridgePendingAction, type IarBridgeClientLike, type PiExtensionAPI, type PiExtensionContext, type PiInputResult } from '@iar/pi-bridge';
 import { createPiAgentDelegate, type PiAgentDelegate } from '../models/pi-agent-delegate.js';
 import type { SandboxMode } from '../session-types.js';
 
@@ -64,6 +64,8 @@ export class PiHostSession {
   private readonly delegate: PiAgentDelegate;
   private readonly events: PiHostSessionEvents;
   private readonly context: PiExtensionContext;
+  /** 当前 pass-through 请求携带的有界能力目录。 */
+  private passThroughDescriptors: BridgeCapabilityDescriptor[] = [];
   /** 同一会话的轮次串行，保持与 Pi 单会话输入队列一致的语义。 */
   private chain: Promise<unknown> = Promise.resolve();
   /** 当前轮收集的 entry，handled 后以备注形式写进 Pi 委托上下文。 */
@@ -74,7 +76,7 @@ export class PiHostSession {
     this.delegate = options.piAgent ?? createPiAgentDelegate({ mode: options.mode, sessionId: options.sessionId });
     const baseClient = options.client ?? new IarBridgeClient({ baseUrl: options.bridgeUrl ?? process.env.IAR_PI_BRIDGE_URL ?? 'http://127.0.0.1:8787' });
     const client = observeClient(baseClient, {
-      input: (response) => { this.publishRoute(response); this.events.onConfirm?.(response.pending ?? null); },
+      input: (response) => { this.passThroughDescriptors = response.disposition === 'pass_through' ? response.capabilityContext?.functionDescriptors ?? [] : []; this.publishRoute(response); this.events.onConfirm?.(response.pending ?? null); },
       confirm: (response) => { this.events.onConfirm?.(response.pending ?? null); }
     });
     const pi: PiExtensionAPI = {
@@ -126,6 +128,8 @@ export class PiHostSession {
 
   /** 单轮输入处理：handled 直接结束，continue 由进程内 Pi Agent 回答。 */
   private async processInput(text: string): Promise<PiHostInputResult> {
+    // 每轮先清空，避免桥接失败或旧版响应缺少字段时把上一轮能力目录带入下一轮。
+    this.passThroughDescriptors = [];
     const inputHandler = this.handlers.get('input');
     if (!inputHandler) return { action: 'continue' };
     this.collectedEntries = [];
@@ -139,7 +143,7 @@ export class PiHostSession {
       return { action: 'handled' };
     }
     try {
-      const reply = await this.delegate.run(text, (delta) => { this.events.onPiDelta?.(delta); });
+      const reply = await this.delegate.run(text, (delta) => { this.events.onPiDelta?.(delta); }, this.passThroughDescriptors);
       this.events.onPiDone?.(reply);
     } catch {
       this.events.onNotify?.('Pi Agent 本轮回答失败。', 'error');

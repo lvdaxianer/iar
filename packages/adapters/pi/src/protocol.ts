@@ -27,6 +27,12 @@ export type BridgeOpenResponse = { version: typeof PI_BRIDGE_VERSION; piSessionI
 /** 路由公开证据，不包含模型原文、权限或敏感输入。 */
 export type BridgeRouteEvidence = { status: string; reasonCode: string; semanticIntent: string; semanticConfidence: number; functionId?: string; pluginId?: string };
 
+/** pass-through 交给下游模型的有界能力描述。 */
+export type BridgeCapabilityDescriptor = { functionId: string; pluginId: string; description: string; actionTypes: string[] };
+
+/** pass-through 的模型上下文，只描述能力，不授予执行权限。 */
+export type BridgeCapabilityContext = { functionDescriptors: BridgeCapabilityDescriptor[] };
+
 /** 待确认动作的公开摘要。 */
 export type BridgePendingAction = { actionId: string; runId: string; functionId: string; pluginId: string; riskLevel: string; confirmationRequired: boolean };
 
@@ -34,7 +40,7 @@ export type BridgePendingAction = { actionId: string; runId: string; functionId:
 export type BridgeInputRequest = { text: string; requestId?: string };
 
 /** 输入响应。 */
-export type BridgeInputResponse = { version: typeof PI_BRIDGE_VERSION; iarSessionId: IarSessionId; disposition: BridgeDisposition; reply?: string; reasonCode?: string; route?: BridgeRouteEvidence; pending?: BridgePendingAction };
+export type BridgeInputResponse = { version: typeof PI_BRIDGE_VERSION; iarSessionId: IarSessionId; disposition: BridgeDisposition; reply?: string; reasonCode?: string; route?: BridgeRouteEvidence; pending?: BridgePendingAction; capabilityContext?: BridgeCapabilityContext };
 
 /** 确认或取消请求。 */
 export type BridgeConfirmRequest = { actionId: string; accepted: boolean; requestId?: string };

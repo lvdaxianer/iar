@@ -89,6 +89,29 @@ test('Pi host session lets the Pi Agent answer non-business input', async () => 
   assert.deepEqual(probe.recorded, []);
 });
 
+test('Pi host session forwards pass-through capability context to the Pi Agent', async () => {
+  let seenDescriptors: unknown;
+  const piAgent: PiAgentDelegate = {
+    run: async (text: string, _onDelta: (delta: string) => void, descriptors?: unknown) => {
+      seenDescriptors = descriptors;
+      return `Pi 回答：${text}`;
+    },
+    recordHandledTurn: () => undefined,
+    reset: () => undefined
+  };
+  const client = makeFakeBridge({
+    input: () => ({
+      version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo', disposition: 'pass_through',
+      route: { status: 'noul', reasonCode: 'no_candidate', semanticIntent: 'unknown', semanticConfidence: 0.2 },
+      capabilityContext: { functionDescriptors: [{ functionId: 'function.visible', pluginId: 'plugin.visible', description: '当前可用能力', actionTypes: ['query'] }] }
+    } as unknown as BridgeInputResponse)
+  });
+  const probe = makeProbe({ client, piAgent });
+  await probe.session.start();
+  await probe.session.handleUserInput('你好');
+  assert.deepEqual(seenDescriptors, [{ functionId: 'function.visible', pluginId: 'plugin.visible', description: '当前可用能力', actionTypes: ['query'] }]);
+});
+
 test('Pi host session forwards iar-cancel and clears the pending banner', async () => {
   const confirmations: Array<{ actionId: string; accepted: boolean }> = [];
   const client = makeFakeBridge({

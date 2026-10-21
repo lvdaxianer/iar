@@ -5,7 +5,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-20
  */
-import { PI_BRIDGE_VERSION, isBridgeDisposition, type BridgeConfirmRequest, type BridgeConfirmResponse, type BridgeInputRequest, type BridgeInputResponse, type BridgeOpenRequest, type BridgeOpenResponse, type BridgePendingAction, type BridgeStateResponse, type IarSessionId } from './protocol.js';
+import { PI_BRIDGE_VERSION, isBridgeDisposition, type BridgeCapabilityContext, type BridgeConfirmRequest, type BridgeConfirmResponse, type BridgeInputRequest, type BridgeInputResponse, type BridgeOpenRequest, type BridgeOpenResponse, type BridgePendingAction, type BridgeStateResponse, type IarSessionId } from './protocol.js';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_TIMEOUT_MS = 60_000;
@@ -172,7 +172,20 @@ function validateOpenResponse(value: unknown): BridgeOpenResponse {
 function validateInputResponse(value: unknown): BridgeInputResponse {
   const record = validateCommonResponse(value);
   if (!isBridgeDisposition(record.disposition)) throw new BridgeClientError('invalid_bridge_response', 'IAR 桥接响应无效。', false);
-  return { version: PI_BRIDGE_VERSION, iarSessionId: record.iarSessionId, disposition: record.disposition, ...optionalString(record, 'reply'), ...optionalString(record, 'reasonCode'), ...(record.pending === undefined ? {} : { pending: validatePending(record.pending) }) };
+  const capabilityContext = record.capabilityContext === undefined ? undefined : validateCapabilityContext(record.capabilityContext);
+  return { version: PI_BRIDGE_VERSION, iarSessionId: record.iarSessionId, disposition: record.disposition, ...optionalString(record, 'reply'), ...optionalString(record, 'reasonCode'), ...(record.pending === undefined ? {} : { pending: validatePending(record.pending) }), ...(capabilityContext === undefined ? {} : { capabilityContext }) };
+}
+
+/** 校验 pass-through 能力上下文的有界公开字段。 */
+function validateCapabilityContext(value: unknown): BridgeCapabilityContext {
+  const record = asRecord(value);
+  if (!Array.isArray(record.functionDescriptors) || record.functionDescriptors.length > 128) throw new BridgeClientError('invalid_bridge_response', 'IAR 能力上下文无效。', false);
+  const functionDescriptors = record.functionDescriptors.map((item) => {
+    const descriptor = asRecord(item);
+    if (!isBoundedString(descriptor.functionId, 256) || !isBoundedString(descriptor.pluginId, 256) || !isBoundedString(descriptor.description, 400) || !Array.isArray(descriptor.actionTypes) || descriptor.actionTypes.length === 0 || descriptor.actionTypes.length > 8 || descriptor.actionTypes.some((action) => !isBoundedString(action, 32))) throw new BridgeClientError('invalid_bridge_response', 'IAR 能力上下文无效。', false);
+    return { functionId: descriptor.functionId, pluginId: descriptor.pluginId, description: descriptor.description, actionTypes: descriptor.actionTypes as string[] };
+  });
+  return { functionDescriptors };
 }
 
 /** 校验确认响应。 */
@@ -215,6 +228,9 @@ function failResponse(): never {
 
 /** 判断有限字符串。 */
 function isString(value: unknown): value is string { return typeof value === 'string' && value.length > 0; }
+
+/** 判断有长度上限的公开字符串。 */
+function isBoundedString(value: unknown, maxLength: number): value is string { return isString(value) && value.length <= maxLength; }
 
 /** 将未知值收窄为普通对象。 */
 function asRecord(value: unknown): Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
