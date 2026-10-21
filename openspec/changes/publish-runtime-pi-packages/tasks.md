@@ -8,8 +8,8 @@
 
 ## 2. 发布边界校验与回归验证
 
-- [ ] 2.1 扩展发布校验器，检查 Runtime/Pi Bridge 的可发布性、Pi Extension 子路径、`pi.extensions` 元数据和 tarball 文件白名单；先用当前实现运行校验确认新增断言能捕获缺失配置，再完成实现。
-- [ ] 2.2 运行构建、发布校验、目标包 dry-run 打包和相关测试，确认所有 `.d.ts` 与公共入口存在、源码和部署配置未进入 tarball；记录命令结果并修复发现的问题。
+- [x] 2.1 扩展发布校验器，检查 Runtime/Pi Bridge 的可发布性、Pi Extension 子路径、`pi.extensions` 元数据和 tarball 文件白名单；先用当前实现运行校验确认新增断言能捕获缺失配置，再完成实现。
+- [x] 2.2 运行构建、发布校验、目标包 dry-run 打包和相关测试，确认所有 `.d.ts` 与公共入口存在、源码和部署配置未进入 tarball；记录命令结果并修复发现的问题。
 
 ## Workflow follow-up
 

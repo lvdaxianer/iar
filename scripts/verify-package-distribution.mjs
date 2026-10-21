@@ -72,9 +72,15 @@ for (const { directory, manifest } of manifests) {
   assert.ok(paths.includes('dist/index.js'), `${name} tarball must contain JavaScript`);
   assert.ok(paths.includes('dist/index.d.ts'), `${name} tarball must contain declarations`);
   assert.ok(!paths.some((file) => file.startsWith('src/')), `${name} tarball must not contain src`);
+  assert.ok(!paths.some((file) => file.startsWith('.env') || file.startsWith('config/') || file.startsWith('.vscode/')), `${name} tarball must not contain deployment or editor configuration`);
   assert.ok(paths.every((file) => file === 'package.json' || file.startsWith('dist/')), `${name} tarball contains an unexpected file`);
 
   await import(name);
+  if (name === '@iar/pi-bridge') {
+    assert.ok(paths.includes('dist/pi-extension.js'), `${name} tarball must contain the Pi extension entry`);
+    assert.ok(paths.includes('dist/pi-extension.d.ts'), `${name} tarball must contain the Pi extension declaration`);
+    await import(`${name}/pi-extension`);
+  }
   try {
     await import(`${name}/src/index.js`);
     assert.fail(`${name}/src/index.js unexpectedly crossed the package boundary`);
@@ -95,7 +101,16 @@ const manifestByName = new Map(manifests.map(({ manifest }) => [manifest.name, m
 const runtimeDependencies = Object.keys(manifestByName.get('@iar/runtime')?.dependencies ?? {});
 assert.ok(runtimeDependencies.every((name) => !name.startsWith('@iar/adapters-')), '@iar/runtime must not depend on host adapters');
 assert.ok(!runtimeDependencies.includes('@iar/pi-bridge'), '@iar/runtime must not depend on Pi');
-assert.equal(manifestByName.get('@iar/pi-bridge')?.dependencies, undefined, '@iar/pi-bridge must remain a standalone host adapter');
+const runtimeManifest = manifestByName.get('@iar/runtime');
+const piBridgeManifest = manifestByName.get('@iar/pi-bridge');
+assert.equal(runtimeManifest?.publishConfig?.access, 'public', '@iar/runtime must be configured for public scoped publishing');
+assert.equal(piBridgeManifest?.publishConfig?.access, 'public', '@iar/pi-bridge must be configured for public scoped publishing');
+assert.equal(piBridgeManifest?.dependencies, undefined, '@iar/pi-bridge must remain a standalone host adapter');
+assert.deepEqual(piBridgeManifest?.exports?.['./pi-extension'], {
+  types: './dist/pi-extension.d.ts',
+  import: './dist/pi-extension.js',
+}, '@iar/pi-bridge must expose its Pi extension entry');
+assert.deepEqual(piBridgeManifest?.pi?.extensions, ['./dist/pi-extension.js'], '@iar/pi-bridge must identify its Pi extension metadata');
 assert.equal(manifestByName.get('@iar/adapters-postgres')?.dependencies?.['@iar/storage'], '0.1.0', 'PostgreSQL must depend on storage');
 assert.equal(manifestByName.get('@iar/adapters-temporal')?.dependencies?.['@iar/runtime'], '0.1.0', 'Temporal must depend on runtime execution contracts');
 assert.ok(!manifestByName.has('@iar/agent'), '@iar/agent must not remain a publishable package');
