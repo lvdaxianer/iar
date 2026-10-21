@@ -1,6 +1,7 @@
 /** 验证 @iar/runtime 的独立入口和 Pi 宿主适配边界。 */
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { SELF_INTRODUCTION_FUNCTION_ID } from '@iar/plugins';
 import { PI_BRIDGE_VERSION } from '@iar/pi-bridge';
 import { createIarRuntime, type AsyncDecisionAdapter } from '@iar/runtime';
 import { loadBusinessManifest, pluginPackage } from './fixtures/plugin-package.js';
@@ -26,7 +27,7 @@ test('standalone runtime initializes from a valid Plugin package', () => {
   });
 
   assert.equal(runtime.decisionProvider, decisionProvider);
-  assert.deepEqual(runtime.functionRegistry.list().map((definition) => definition.functionId), ['ticket.query']);
+  assert.deepEqual(runtime.functionRegistry.list().map((definition) => definition.functionId), ['ticket.query', SELF_INTRODUCTION_FUNCTION_ID]);
 });
 
 test('standalone runtime rejects an invalid Plugin before exposing partial state', () => {

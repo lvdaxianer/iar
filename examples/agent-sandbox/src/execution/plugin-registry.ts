@@ -8,9 +8,10 @@
  * @date 2026-10-18
  */
 import type { PluginPackage } from '@iar/plugin';
+import { selfIntroductionPlugin } from '@iar/plugins';
 import { allSandboxPlugins } from '../functions/index.js';
 
 /** pluginId 到插件注册对象的确定性映射。 */
 export const sandboxPluginRegistry: Readonly<Record<string, PluginPackage>> = Object.fromEntries(
-  allSandboxPlugins.map((registration) => [registration.manifest.pluginId, registration])
+  [...allSandboxPlugins, selfIntroductionPlugin].map((registration) => [registration.manifest.pluginId, registration])
 );

@@ -4,6 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { SELF_INTRODUCTION_FUNCTION_ID } from '@iar/plugins';
 import { IarSandboxSession } from '../../../examples/agent-sandbox/src/session.js';
 import { FALLBACK_REPLY_TEXT } from '../../../examples/agent-sandbox/src/session-core.js';
 import { createPiAgentDelegate, createSingleTextEvents, type PiAgentDelegate, type PiStreamFn } from '../../../examples/agent-sandbox/src/models/pi-agent-delegate.js';
@@ -130,12 +131,12 @@ test('Pi 委托故障时回退 IAR 兜底回复，会话不中断', async () => 
   }
 });
 
-test('真实 Pi 循环处理闲聊：注入 streamFn 探针证明 Agent 循环真实运转', async () => {
+test('真实 Pi 循环处理普通闲聊：注入 streamFn 探针证明 Agent 循环真实运转', async () => {
   const seen: unknown[][] = [];
   const delegate = createPiAgentDelegate({ mode: 'scripted', sessionId: 'pi-demo', streamFn: contextProbe('探针回复', seen) });
   const session = new IarSandboxSession({ mode: 'scripted', piAgent: delegate });
   try {
-    const result = await session.turnStreamed('你是谁呢', () => undefined);
+    const result = await session.turnStreamed('讲个笑话', () => undefined);
     assert.equal(result.status, 'agent');
     assert.equal(result.reply, '探针回复');
     assert.ok(seen.length >= 1);
@@ -144,13 +145,15 @@ test('真实 Pi 循环处理闲聊：注入 streamFn 探针证明 Agent 循环�
   }
 });
 
-test('真实 Pi 循环默认 scripted 回复：身份问题复刻沙箱模板', async () => {
+test('自我介绍意图由内置 Plugin 执行，不再交给 Pi 循环', async () => {
   const delegate = createPiAgentDelegate({ mode: 'scripted', sessionId: 'pi-demo-1' });
   const session = new IarSandboxSession({ mode: 'scripted', piAgent: delegate });
   try {
     const result = await session.turn('你是谁呢');
-    assert.equal(result.status, 'agent');
-    assert.ok(result.reply.includes('我是 IAR Agent Sandbox'));
+    assert.equal(result.status, 'executed');
+    if (result.status !== 'executed') return;
+    assert.equal(result.route.functionId, SELF_INTRODUCTION_FUNCTION_ID);
+    assert.ok(result.reply.includes('我是 IAR Agent'));
     assert.ok(result.reply.includes('当前可用能力'));
   } finally {
     session.dispose();

@@ -39,6 +39,7 @@ export class IarSandboxSession extends SandboxSessionCore {
     return new SandboxSessionRouting({
       get mode() { return session.mode; }, get registry() { return session.registry; },
       get gateway() { return session.gateway; }, get pluginHost() { return session.pluginHost; },
+      get configuration() { return session.configuration; },
       get recentMessages() { return session.recentMessages; },
       get functionDecisionAdapter() { return session.functionDecisionAdapter; },
       get pluginDecisionAdapter() { return session.pluginDecisionAdapter; },

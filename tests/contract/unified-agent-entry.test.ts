@@ -1,6 +1,7 @@
 /** 验证 Runtime 入口及迁移期 Agent 别名负责完整 Plugin 包装配。 */
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { SELF_INTRODUCTION_FUNCTION_ID } from '@iar/plugins';
 import { createIarAgent, createIarRuntime } from '@iar/runtime';
 import { loadBusinessManifest, pluginPackage } from './fixtures/plugin-package.js';
 
@@ -25,9 +26,9 @@ test('unified Agent rejects partial initialization when a Plugin is invalid', ()
 test('unified Agent FunctionRegistry follows Plugin lifecycle changes', () => {
   const plugin = pluginPackage(loadBusinessManifest(), 'ticket.query');
   const agent = createIarAgent({ plugins: [plugin], decisionProvider });
-  assert.deepEqual(agent.functionRegistry.list().map((definition) => definition.functionId), ['ticket.query']);
+  assert.deepEqual(agent.functionRegistry.list().map((definition) => definition.functionId), ['ticket.query', SELF_INTRODUCTION_FUNCTION_ID]);
   assert.equal(agent.pluginHost.disable(plugin.manifest.pluginId).ok, true);
-  assert.deepEqual(agent.functionRegistry.list(), []);
+  assert.deepEqual(agent.functionRegistry.list().map((definition) => definition.functionId), [SELF_INTRODUCTION_FUNCTION_ID]);
   assert.equal(agent.pluginHost.enable(plugin.manifest.pluginId).ok, true);
-  assert.deepEqual(agent.functionRegistry.list().map((definition) => definition.functionId), ['ticket.query']);
+  assert.deepEqual(agent.functionRegistry.list().map((definition) => definition.functionId), ['ticket.query', SELF_INTRODUCTION_FUNCTION_ID]);
 });

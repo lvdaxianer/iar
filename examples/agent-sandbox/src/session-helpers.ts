@@ -3,6 +3,7 @@
  * @date 2026-10-18
  */
 import type { ActionDefinition, BehaviorContext, JsonValue, PluginOperation, SlotValue } from '@iar/contracts';
+import { SELF_INTRODUCTION_FUNCTION_ID, type PluginDescriptor } from '@iar/plugins';
 import type { SemanticActionType, SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
 import type { RuleEvaluationFacts } from '@iar/runtime';
@@ -95,6 +96,21 @@ export function buildActionInput(functionId: string, slots: Record<string, JsonV
   if (query) input.query = query.slice(0, 500);
   if (params) input.params = params;
   return { input };
+}
+
+/** 构造内置自我介绍 Plugin 的受控能力清单输入。
+ *
+ * @param descriptors - 当前宿主可路由的能力描述
+ * @param extraPrompt - Agent 创建时保存的额外提示词
+ * @returns 自我介绍 Handler 的 JSON 输入
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-21
+ */
+export function buildSelfIntroductionInput(descriptors: readonly PluginDescriptor[], extraPrompt?: string): JsonValue {
+  const plugins = descriptors
+    .filter((descriptor) => descriptor.functionId !== SELF_INTRODUCTION_FUNCTION_ID)
+    .map(({ pluginId, functionId, description }) => ({ pluginId, functionId, description }));
+  return { plugins, ...(extraPrompt === undefined ? {} : { extraPrompt }) };
 }
 
 /** 选择与固定语义动作类型兼容的操作目录项。 */

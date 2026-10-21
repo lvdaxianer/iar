@@ -233,12 +233,21 @@ export class PluginHost {
 
   /** 投影当前启用且通过调用方授权的通用 Plugin 描述。 */
   public descriptors(options: PluginDescriptorOptions = {}): PluginDescriptor[] {
+    return this.allDescriptors(options).slice(0, MAX_ROUTING_SCOPE_PLUGINS);
+  }
+
+  /** 投影全部当前启用的业务 Plugin 描述，供聚合型内置能力使用。
+   *
+   * @param options - 可选的调用方授权过滤器
+   * @returns 不受路由候选上限截断的能力描述快照
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  public allDescriptors(options: PluginDescriptorOptions = {}): PluginDescriptor[] {
     const authorize = options.authorize ?? (() => true);
     return this.businessCandidates()
       .filter((record) => authorize(record))
-      .slice(0, MAX_ROUTING_SCOPE_PLUGINS)
-      .flatMap((record) => [...record.functions.keys()].map((functionId) => descriptorOf(record, functionId)))
-      .slice(0, MAX_ROUTING_SCOPE_PLUGINS);
+      .flatMap((record) => [...record.functions.keys()].map((functionId) => descriptorOf(record, functionId)));
   }
   /**
    * 解析单个候选并为 Function 归属失败留下可审计错误。
