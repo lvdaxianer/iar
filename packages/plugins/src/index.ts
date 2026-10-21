@@ -8,3 +8,4 @@
  */
 export * from './sdk/index.js';
 export * from './host/index.js';
+export * from './builtins/self-introduction.js';

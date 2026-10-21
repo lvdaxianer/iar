@@ -13,6 +13,7 @@
  */
 import type { JsonValue } from '@iar/contracts';
 import type { PluginDescriptor } from '@iar/plugins';
+import { SELF_INTRODUCTION_FUNCTION_ID } from '@iar/plugins';
 import { REQUIRED_PRESERVED_FACTS } from '@iar/contracts';
 import type { ModelProvider, ModelProviderRequest } from '@iar/runtime';
 
@@ -58,6 +59,7 @@ export class ScriptedModelProvider implements ModelProvider {
     if (trimmed.length === 0) return frame('unknown', {}, 0.1, 'unknown');
     // 已有可信事实的追问优先交给通用回复模型，不能因业务名词重复触发默认动作。
     if (hasVerifiedFacts(behaviorContext) && isFactFollowUp(trimmed) && !isExplicitNewOperation(trimmed)) return frame('unknown', {}, 0.95, 'query', historicalReference(trimmed));
+    if (isSelfIntroductionRequest(trimmed)) return frame(SELF_INTRODUCTION_FUNCTION_ID, {}, 0.99, 'query');
     // howTo 用于区分「如何/怎么/怎样」类咨询与真正的动作请求。
     const howTo = /(如何|怎么|怎样)/.test(trimmed);
     // 人工优先于工单和查询，避免“转人工查问题”被误判。
@@ -144,7 +146,9 @@ export class ScriptedModelProvider implements ModelProvider {
     const descriptors = Array.isArray(input.functionDescriptors) ? input.functionDescriptors.filter(isRecord) as unknown as PluginDescriptor[] : [];
     const subsystem = descriptors.find((descriptor) => descriptor.functionId === functionId)?.description ?? functionId;
     let text: string;
-    if (status !== 'succeeded') {
+    if (functionId === SELF_INTRODUCTION_FUNCTION_ID && status === 'succeeded') {
+      text = generateSelfIntroduction(output);
+    } else if (status !== 'succeeded') {
       text = `【${subsystem}】动作执行失败（${typeof output.errorCode === 'string' ? output.errorCode : 'unknown'}），请稍后重试。`;
     } else {
       const operation = readString(output, 'operation') ?? '';
@@ -169,6 +173,33 @@ export class ScriptedModelProvider implements ModelProvider {
     }
     return { schemaVersion: 'iar.response/v1', text };
   }
+}
+
+/** 将自我介绍 Plugin 的结构化输出转换为离线模型回复。
+ *
+ * @param output - 自我介绍 Handler 的结构化输出
+ * @returns 面向用户的离线模型回复
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-21
+ */
+function generateSelfIntroduction(output: Record<string, unknown>): string {
+  const plugins = Array.isArray(output.plugins) ? output.plugins.filter(isRecord) : [];
+  const descriptions = plugins.map((plugin, index) => `${String(index + 1)}）${readString(plugin, 'description') ?? '未命名能力'}`);
+  const prompt = readString(output, 'extraPrompt');
+  const prefix = '我是 IAR Agent，一个由 Plugin 组合能力的运行时 Agent。当前可用能力：';
+  const suffix = descriptions.length > 0 ? descriptions.join('；') : '当前没有其他可用业务能力。';
+  return `${prompt ? `${prompt}。` : ''}${prefix}${suffix}`;
+}
+
+/** 判断用户是否表达自我介绍或能力概览意图。
+ *
+ * @param text - 用户当前输入
+ * @returns 是否进入内置自我介绍 Function
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-21
+ */
+function isSelfIntroductionRequest(text: string): boolean {
+  return /^(hi|hello|你是谁|你叫什么|你能做什么|你会什么|介绍一下自己|介绍下自己|自我介绍)/i.test(text);
 }
 
 /** 判断结构化上下文中是否存在可供追问使用的 verified 事实。 */

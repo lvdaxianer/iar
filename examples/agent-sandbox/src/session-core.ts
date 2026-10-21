@@ -9,7 +9,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_RECENT_MESSAGE_LIMIT, MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGE_LIMIT, SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type ClarificationState, type EventName, type JsonValue, type PendingInput, type PendingReference, type WorkflowDefinition } from '@iar/contracts';
-import { ModelGateway, ModelProfileRegistry } from '@iar/runtime';
+import { ModelGateway, ModelProfileRegistry, type IarRuntimeConfiguration, type SelfIntroductionOptions } from '@iar/runtime';
 import { PersistenceSubscriptionBridge } from '@iar/storage';
 import type { SessionMessage, SessionPersistenceProvider } from '@iar/storage';
 import { PluginHost } from '@iar/plugins';
@@ -21,7 +21,7 @@ import { SyncPluginBridge } from './execution/sync-plugin-bridge.js';
 import { BrainModelProvider } from './models/llm-provider.js';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
 import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
-import { createSandboxModels, createSandboxPluginHost } from './session-dependencies.js';
+import { createSandboxModels, createSandboxRuntime } from './session-dependencies.js';
 import { summarizeAction } from './session-helpers.js';
 import { writeSafeLog } from './safe-log.js';
 import type { SandboxDecisionBackend, SandboxMode, SandboxState } from './session-types.js';
@@ -56,6 +56,20 @@ type RestorableSnapshot = {
   eventId: string;
   revision: number;
   context: import('@iar/contracts').BehaviorContext;
+};
+
+/** sandbox 会话构造参数，集中约束 Agent 级运行时配置。 */
+type SandboxSessionOptions = {
+  mode: SandboxMode;
+  decisionBackend?: SandboxDecisionBackend;
+  sessionId?: string;
+  snapshotStore?: SnapshotStore;
+  persistenceProvider?: SessionPersistenceProvider;
+  persistenceProviderOpened?: boolean;
+  recentMessageLimit?: number;
+  piAgent?: PiAgentDelegate;
+  disabledPluginIds?: readonly string[];
+  selfIntroduction?: SelfIntroductionOptions;
 };
 
 /** sandbox 单轮执行状态机定义。 */
@@ -96,6 +110,8 @@ export class SandboxSessionCore {
   protected readonly mode: SandboxMode;
   /** 会话私有插件宿主，执行时只访问已启用候选。 */
   protected readonly pluginHost: PluginHost;
+  /** 创建 Agent 时固化的插件开关和自我介绍提示词。 */
+  protected readonly configuration: IarRuntimeConfiguration;
   /** 回复使用的 provider；scripted 模式不访问上游。 */
   protected readonly brainProvider: BrainModelProvider | ScriptedModelProvider;
   /** 可选的进程内 Pi 兜底委托；未注入时未命中路由走 IAR 兜底回复。 */
@@ -137,20 +153,21 @@ export class SandboxSessionCore {
   /**
    * 安装并启用十个子系统插件，预加载全部本地知识库，构建 gateway 和首个 Workflow 实例。
    *
-   * @param options - sandbox 模式（brain/scripted）
+   * @param options - sandbox 模式及 Agent 级 Plugin 配置
    * @throws Error 当插件安装失败、模型配置非法或任一知识库加载失败
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public constructor(options: { mode: SandboxMode; decisionBackend?: SandboxDecisionBackend; sessionId?: string; snapshotStore?: SnapshotStore; persistenceProvider?: SessionPersistenceProvider; persistenceProviderOpened?: boolean; recentMessageLimit?: number; piAgent?: PiAgentDelegate }) {
+  public constructor(options: SandboxSessionOptions) {
     try {
       this.mode = options.mode; this.sessionId = options.sessionId ?? SESSION_RUN_ID;
       this.piAgent = options.piAgent;
       this.recentMessageLimit = normalizeRecentMessageLimit(options.recentMessageLimit);
       this.snapshotStore = options.snapshotStore; this.persistenceProvider = options.persistenceProvider;
-      this.persistenceDispatcher = this.createPersistenceDispatcher(options.persistenceProvider);
-      const models = createSandboxModels(options);
-      this.pluginHost = createSandboxPluginHost(models.functionAdapter);
+      const { dispatcher, models, runtime } = this.createSessionDependencies(options);
+      this.persistenceDispatcher = dispatcher;
+      this.pluginHost = runtime.pluginHost;
+      this.configuration = runtime.configuration;
       this.brainProvider = models.brain; this.registry = models.registry; this.gateway = models.gateway;
       this.functionDecisionAdapter = models.functionAdapter; this.pluginDecisionAdapter = models.pluginAdapter;
       this.workflow = this.createWorkflow();
@@ -160,6 +177,25 @@ export class SandboxSessionCore {
       this.bridge.dispose();
       throw error;
     }
+  }
+
+  /**
+   * 创建会话所需的持久化桥、模型依赖和插件运行时。
+   *
+   * @param options - sandbox 会话构造参数
+   * @returns 会话初始化依赖
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  private createSessionDependencies(options: SandboxSessionOptions): {
+    dispatcher: SubscriptionDispatcher | undefined;
+    models: ReturnType<typeof createSandboxModels>;
+    runtime: ReturnType<typeof createSandboxRuntime>;
+  } {
+    const dispatcher = this.createPersistenceDispatcher(options.persistenceProvider);
+    const models = createSandboxModels(options);
+    const runtime = createSandboxRuntime(models.functionAdapter, options);
+    return { dispatcher, models, runtime };
   }
 
   /** 等待持久化上下文恢复完成，避免新问题读取到半初始化状态。 */

@@ -36,8 +36,16 @@ const decisionProvider = {
 const iar = createIarRuntime({
   plugins: [ticketPlugin],
   decisionProvider,
+  disabledPluginIds: ['ticket-plugin-id'],
+  selfIntroduction: { extraPrompt: '先给结论，再列出能力' },
 });
 ```
+
+Runtime 会自动加入内置 `iar.self-introduction` Plugin。用户在创建 Agent 时通过
+`disabledPluginIds` 关闭外部 Plugin，通过 `selfIntroduction.extraPrompt` 配置只作用于
+自我介绍回复的额外提示词；两项配置都会固化在返回值的 `configuration` 快照中。
+内置自我介绍 Plugin 不允许关闭，未知关闭项会让 Agent 初始化失败。自我介绍意图命中后，
+Runtime 将当前已启用 Plugin 的描述交给该 Function，再把结构化执行结果交给回复模型。
 
 初始化过程为：
 
@@ -60,6 +68,10 @@ type IarRuntime = {
   pluginHost: PluginHost;
   functionRegistry: FunctionRegistry;
   decisionProvider: AsyncDecisionAdapter;
+  configuration: {
+    disabledPluginIds: readonly string[];
+    selfIntroduction: { extraPrompt?: string };
+  };
 };
 ```
 
