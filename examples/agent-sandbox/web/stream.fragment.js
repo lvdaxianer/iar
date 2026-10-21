@@ -72,7 +72,8 @@
    * 尚未执行的失败和需要澄清使用不同状态文字。
    * 待确认终态从服务端快照构建绑定 actionId 的确认控件。
    * 没有终态时不将当前气泡渲染为完整回复。
-   * Markdown 渲染仅发生在终态之后。
+   * Markdown 渲染仅发生在终态之后；原始文本在替换 innerHTML 前快照，
+   * 渲染后的 textContent 会丢失换行与标记，不能直接写入历史。
    * @param state - 当前气泡及阶段
    * @param result - 服务端最终结果
    * @returns 无返回值
@@ -82,14 +83,15 @@
     state.stageEl.remove();
     if (!result) return;
     if ((state.textEl.textContent.length === 0 || result.reasonCode === 'model_response_too_large') && result.reply) state.textEl.textContent = result.reply;
-    state.textEl.innerHTML = renderMarkdown(state.textEl.textContent);
+    var rawText = state.textEl.textContent;
+    state.textEl.innerHTML = renderMarkdown(rawText);
     var metaText = result.reasonCode === 'model_response_too_large' && result.status === 'executed' ? '已执行 · 回复不完整' : result.status === 'executed'
       ? '已执行 · ' + (result.route && result.route.functionId ? result.route.functionId : '')
       : result.status === 'awaiting_confirmation' ? '等待确认'
       : result.status === 'agent' ? 'Pi 兜底'
       : result.status === 'clarification' ? '需要澄清' : '失败';
     appendMessageMeta(state.div, metaText);
-    recordConversation('bot', state.textEl.textContent, metaText);
+    recordConversation('bot', rawText, metaText);
     messagesEl.scrollTop = messagesEl.scrollHeight;
     if (result.status === 'awaiting_confirmation' && result.pending) runConfirm(result.pending);
   }

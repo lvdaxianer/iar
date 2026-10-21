@@ -186,21 +186,23 @@
   }
 
   /** 结束 Pi Agent 气泡：终态后统一做 Markdown 渲染并记录历史。
+   * 原始文本必须在替换 innerHTML 前快照，渲染后的 textContent 会丢失换行与标记。
    * @param reply - 服务端回传的完整回复
    * @returns 无返回值
    * @author lvdaxianer@yeah.net
    * @date 2026-10-21
    */
   function finalizePiHostBubble(reply) {
-    if (!piHostBubble) { if (reply) appendMsg('bot', reply, 'Pi 兜底'); return; }
+    if (!piHostBubble) { if (reply) { appendMsg('bot', reply, 'Pi 兜底'); recordPiHostConversation('bot', reply, 'Pi 兜底'); } return; }
     var bubble = piHostBubble;
     piHostBubble = null;
     bubble.stageEl.remove();
     if (!bubble.gotDelta && !reply) { bubble.div.remove(); return; }
     if (!bubble.gotDelta) bubble.textEl.textContent = reply;
-    bubble.textEl.innerHTML = renderMarkdown(bubble.textEl.textContent);
+    var rawText = bubble.textEl.textContent;
+    bubble.textEl.innerHTML = renderMarkdown(rawText);
     appendMessageMeta(bubble.div, 'Pi 兜底');
-    recordPiHostConversation('bot', bubble.textEl.textContent, 'Pi 兜底');
+    recordPiHostConversation('bot', rawText, 'Pi 兜底');
     piHostMessagesEl.scrollTop = piHostMessagesEl.scrollHeight;
   }
 

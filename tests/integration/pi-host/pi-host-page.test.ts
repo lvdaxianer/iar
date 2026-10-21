@@ -56,6 +56,17 @@ test('Pi host 协议适配片段校验 IAR entry 信封后再渲染', () => {
   assert.match(adapter, /renderPiHostEntry\(entry\)/);
 });
 
+/* 历史回放依赖原始 Markdown：渲染后的 textContent 会丢失换行与标记，
+ * 快照必须发生在 innerHTML 替换之前。 */
+test('Pi host 气泡历史在 Markdown 渲染前快照原始文本', () => {
+  const adapter = readFileSync(join(PAGE_DIR, 'pi-host.fragment.js'), 'utf8');
+  const finalize = /function finalizePiHostBubble\([\s\S]*?\n  \}/.exec(adapter)?.[0] ?? '';
+  const snapshot = finalize.indexOf('var rawText = bubble.textEl.textContent;');
+  const render = finalize.indexOf('bubble.textEl.innerHTML = renderMarkdown(rawText);');
+  assert.ok(snapshot >= 0 && render > snapshot, 'rawText 快照必须先于 renderMarkdown');
+  assert.match(finalize, /recordPiHostConversation\('bot', rawText/);
+});
+
 /* 与沙箱页同一展示契约：消息追加、条目渲染、确认卡片与流式气泡都要有界。 */
 test('Pi host 页面交互入口按职责拆分且有界', () => {
   const adapter = readFileSync(join(PAGE_DIR, 'pi-host.fragment.js'), 'utf8');

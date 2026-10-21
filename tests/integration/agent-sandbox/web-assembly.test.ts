@@ -90,6 +90,17 @@ test('页面消息及流式气泡入口不超过 20 行', () => {
   }
 });
 
+/* 历史回放依赖原始 Markdown：innerHTML 替换后的 textContent 会丢失换行与标记，
+ * 快照必须发生在 renderMarkdown 之前，否则刷新后列表和段落结构全部塌缩。 */
+test('流式气泡历史在 Markdown 渲染前快照原始文本', () => {
+  const source = readFileSync('examples/agent-sandbox/web/stream.fragment.js', 'utf8');
+  const finalize = /  function finalizeStreamBubble\([\s\S]*?\n  \}/.exec(source)?.[0] ?? '';
+  const snapshot = finalize.indexOf('var rawText = state.textEl.textContent;');
+  const render = finalize.indexOf('state.textEl.innerHTML = renderMarkdown(rawText);');
+  assert.ok(snapshot >= 0 && render > snapshot, 'rawText 快照必须先于 renderMarkdown');
+  assert.match(finalize, /recordConversation\('bot', rawText, metaText\)/);
+});
+
 /** 使用临时端口启动真实沙箱，避免测试之间端口冲突。
  * 先释放端口探针，再让服务绑定；绑定失败必须向测试传播。
  * 返回句柄由调用方在 finally 中关闭，确保线程得到释放。
