@@ -78,15 +78,15 @@
 
 ## 6. Revalidate adapter and infrastructure boundaries
 
-- [ ] 6.1 Update `packages/control-plane`, `packages/adapters/service`,
+- [x] 6.1 Update `packages/control-plane`, `packages/adapters/service`,
   `packages/adapters/fastify`, and `packages/adapters/executors` manifests and
   imports to use the consolidated runtime while keeping `storage` and
   `subscriptions` as separate dependencies; verify their focused contract,
   service, distribution, and executor tests pass.
-- [ ] 6.2 Keep `packages/adapters/pi` as `@iar/pi-bridge` with its existing
+- [x] 6.2 Keep `packages/adapters/pi` as `@iar/pi-bridge` with its existing
   protocol, Pi extension subpath, and no runtime implementation ownership;
   verify the Pi bridge context-isolation and host demo tests pass unchanged.
-- [ ] 6.3 Keep `packages/adapters/postgres` dependent on `@iar/storage` and
+- [x] 6.3 Keep `packages/adapters/postgres` dependent on `@iar/storage` and
   `packages/adapters/temporal` dependent on runtime execution contracts without
   adding database or Temporal dependencies to the runtime core; verify package
   manifests and `npm run verify:packages` enforce the dependency direction.
