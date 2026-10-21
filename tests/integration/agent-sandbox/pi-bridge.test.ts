@@ -3,6 +3,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:net';
 import test from 'node:test';
 import { PI_BRIDGE_VERSION } from '@iar/pi-bridge';
+import { SELF_INTRODUCTION_FUNCTION_ID } from '@iar/plugins';
 import { startSandboxServer } from '../../../examples/agent-sandbox/src/server.js';
 
 test('IAR bridge maps Pi sessions and passes through non-business input', async () => {
@@ -16,6 +17,11 @@ test('IAR bridge maps Pi sessions and passes through non-business input', async 
     assert.equal(resumed.json().iarSessionId, first.iarSessionId); assert.equal(resumed.json().resumed, true);
     const passThrough = await server.app.inject({ method: 'POST', url: `/api/bridge/v1/sessions/${first.iarSessionId}/input`, payload: { text: '帮我写一个 TypeScript 函数' } });
     assert.equal(passThrough.statusCode, 200); assert.equal(passThrough.json().disposition, 'pass_through');
+    const capabilityContext = passThrough.json().capabilityContext as { functionDescriptors: Array<{ functionId: string; pluginId: string; description: string; actionTypes: string[] }> };
+    assert.ok(Array.isArray(capabilityContext.functionDescriptors));
+    assert.ok(capabilityContext.functionDescriptors.some((descriptor) => descriptor.functionId === SELF_INTRODUCTION_FUNCTION_ID));
+    assert.equal(capabilityContext.functionDescriptors.some((descriptor) => descriptor.pluginId === 'knowledge-query-v1'), true);
+    assert.ok(capabilityContext.functionDescriptors.every((descriptor) => !('input' in descriptor)));
     const ordinary = await server.app.inject({ method: 'POST', url: '/api/chat', payload: { message: '帮我写一个 TypeScript 函数' } });
     assert.equal(ordinary.statusCode, 200); assert.equal(ordinary.json().status, 'agent');
   } finally { await server.close(); }

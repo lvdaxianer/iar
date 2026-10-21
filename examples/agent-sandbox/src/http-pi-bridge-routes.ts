@@ -100,7 +100,7 @@ async function handleState(session: IarSandboxSession, sessionId: string): Promi
 
 /** 将 IAR TurnResult 转成公开输入 response。 */
 function toInputResponse(sessionId: string, result: TurnResult): BridgeInputResponse {
-  if (result.status === 'pass_through') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'pass_through', route: toRouteEvidence(result.route) };
+  if (result.status === 'pass_through') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'pass_through', route: toRouteEvidence(result.route), capabilityContext: result.capabilityContext };
   if (result.status === 'awaiting_confirmation') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'awaiting_confirmation', reply: result.reply, pending: toPendingAction(result.pending), route: toRouteEvidence(result.route) };
   if (result.status === 'clarification') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'clarification', reply: result.reply, reasonCode: result.reasonCode, route: toRouteEvidence(result.route) };
   if (result.status === 'executed') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'handled', reply: result.reply, ...(result.reasonCode === undefined ? {} : { reasonCode: result.reasonCode }), route: toRouteEvidence(result.route) };

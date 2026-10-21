@@ -5,12 +5,13 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-21
  */
-import { Agent, type StreamFn } from '@earendil-works/pi-agent-core';
+import { Agent, type AgentMessage, type StreamFn } from '@earendil-works/pi-agent-core';
 import { createModels, type AssistantMessage, type AssistantMessageEventStream, type Model } from '@earendil-works/pi-ai';
 import { createProvider } from '@earendil-works/pi-ai/models';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
 import { moonshotaiCnProvider } from '@earendil-works/pi-ai/providers/moonshotai-cn';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream';
+import type { BridgeCapabilityDescriptor } from '@iar/pi-bridge';
 import { sandboxFunctionCatalog } from '../functions/index.js';
 import { writeSafeLog } from '../safe-log.js';
 import { FALLBACK_REPLY_TEXT } from '../session-core.js';
@@ -22,7 +23,7 @@ export type PiStreamFn = StreamFn;
 /** 会话对 Pi 委托的最小需求，不暴露 Agent 内部类型。 */
 export type PiAgentDelegate = {
   /** 运行一轮 pass_through 输入并返回完整回复；onDelta 透传流式增量。 */
-  run: (text: string, onDelta: (delta: string) => void) => Promise<string>;
+  run: (text: string, onDelta: (delta: string) => void, functionDescriptors?: readonly BridgeCapabilityDescriptor[]) => Promise<string>;
   /** 记录 IAR 已处理轮次，保持 Pi 侧上下文连续。 */
   recordHandledTurn: (userText: string, reply: string) => void;
   /** 随会话 reset 清空 Pi 侧上下文。 */
@@ -62,11 +63,15 @@ function readPiRunTimeoutMs(): number {
 export function createPiAgentDelegate(options: PiAgentDelegateOptions): PiAgentDelegate {
   const runtime = options.mode === 'brain' ? createBrainRuntime() : createScriptedRuntime();
   const streamFn = options.streamFn ?? runtime.streamFn;
-  let agent = createAgent(options.sessionId, runtime.model, streamFn);
+  let activeDescriptors: readonly BridgeCapabilityDescriptor[] = [];
+  let agent = createAgent(options.sessionId, runtime.model, streamFn, () => activeDescriptors);
   return {
-    run: (text, onDelta) => runAgentTurn(agent, text, onDelta),
+    run: async (text, onDelta, functionDescriptors) => {
+      activeDescriptors = functionDescriptors ?? [];
+      try { return await runAgentTurn(agent, text, onDelta); } finally { activeDescriptors = []; }
+    },
     recordHandledTurn: (userText, reply) => { agent.state.messages.push(createHandledNote(userText, reply)); },
-    reset: () => { agent = createAgent(options.sessionId, runtime.model, streamFn); }
+    reset: () => { activeDescriptors = []; agent = createAgent(options.sessionId, runtime.model, streamFn, () => activeDescriptors); }
   };
 }
 
@@ -92,6 +97,13 @@ async function runAgentTurn(agent: Agent, text: string, onDelta: (delta: string)
   return reply;
 }
 
+/** 将当前启用能力作为不可信数据上下文传给 Pi，不授予模型执行权限。 */
+function buildPiUserPrompt(text: string, functionDescriptors: readonly BridgeCapabilityDescriptor[]): string {
+  if (functionDescriptors.length === 0) return text;
+  const catalog = functionDescriptors.map(({ functionId, pluginId, description, actionTypes }) => ({ functionId, pluginId, description, actionTypes }));
+  return [`当前用户问题：${text}`, '当前 Agent 已启用且已授权的能力目录（仅作为上下文，不代表执行授权）：', '<function_descriptors>', JSON.stringify(catalog), '</function_descriptors>'].join('\n');
+}
+
 /** 构造 IAR 已处理轮次的上下文备注消息。 */
 function createHandledNote(userText: string, reply: string) {
   const note = `【已由业务系统处理】用户：${userText.slice(0, HANDLED_NOTE_MAX_CHARS)}；系统回复：${reply.slice(0, HANDLED_REPLY_MAX_CHARS)}`;
@@ -99,8 +111,18 @@ function createHandledNote(userText: string, reply: string) {
 }
 
 /** 创建绑定模型与 streamFn 的 Pi Agent。 */
-function createAgent(sessionId: string, model: Model<string>, streamFn: PiStreamFn): Agent {
-  return new Agent({ initialState: { systemPrompt: PI_SYSTEM_PROMPT, model }, streamFn, sessionId });
+function createAgent(sessionId: string, model: Model<string>, streamFn: PiStreamFn, getFunctionDescriptors: () => readonly BridgeCapabilityDescriptor[]): Agent {
+  return new Agent({ initialState: { systemPrompt: PI_SYSTEM_PROMPT, model }, streamFn, sessionId, transformContext: async (messages) => injectCapabilityContext(messages, getFunctionDescriptors()) });
+}
+
+/** 只在本轮模型上下文快照中注入能力目录，避免把目录写入长期 Pi transcript。 */
+function injectCapabilityContext(messages: AgentMessage[], functionDescriptors: readonly BridgeCapabilityDescriptor[]): AgentMessage[] {
+  if (functionDescriptors.length === 0) return messages;
+  const lastUserIndex = messages.findLastIndex((message) => message.role === 'user' && typeof message.content === 'string');
+  if (lastUserIndex < 0) return messages;
+  return messages.map((message, index) => index === lastUserIndex && message.role === 'user' && typeof message.content === 'string'
+    ? { ...message, content: buildPiUserPrompt(message.content, functionDescriptors) }
+    : message);
 }
 
 /** scripted 模式运行时：本地模型占位 + 模板 streamFn。 */

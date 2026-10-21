@@ -11,6 +11,7 @@
  */
 import type { ActionDefinition, ActionResult, BehaviorContext, EventEnvelope, JsonValue, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { DecisionBackend, SemanticFrame } from '@iar/runtime';
+import type { PluginDescriptor } from '@iar/plugins';
 
 /** sandbox 模式：brain 使用真实 LLM，scripted 使用离线假大脑。 */
 export type SandboxMode = 'brain' | 'scripted';
@@ -40,6 +41,9 @@ export type RouteEvidence = {
   semanticFallback?: boolean;
 };
 
+/** pass-through 交给 Pi Host 的当前能力目录。 */
+export type PassThroughCapabilityContext = { functionDescriptors: Array<Pick<PluginDescriptor, 'functionId' | 'pluginId' | 'description' | 'actionTypes'>> };
+
 /** 待确认动作摘要，供前端渲染确认按钮。 */
 export type PendingActionSummary = {
   /** Action 标识。 */
@@ -60,7 +64,7 @@ export type PendingActionSummary = {
 
 /** 单轮对话结果联合。 */
 export type TurnResult =
-  | { status: 'pass_through'; route: RouteEvidence }
+  | { status: 'pass_through'; route: RouteEvidence; capabilityContext: PassThroughCapabilityContext }
   | { status: 'agent'; reply: string; route: RouteEvidence }
   | { status: 'executed'; reply: string; route: RouteEvidence; actionResult: ActionResult; reasonCode?: string }
   | { status: 'awaiting_confirmation'; reply: string; route: RouteEvidence; pending: PendingActionSummary }

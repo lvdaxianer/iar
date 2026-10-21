@@ -8,12 +8,22 @@
 
 ### Requirement: Self-introduction is a routable built-in capability
 
-The runtime SHALL provide a built-in self-introduction Plugin with one bounded Function that can be selected by the intent model and executed through the same routing and policy gates as other business capabilities.
+The runtime SHALL provide a built-in self-introduction Plugin with one bounded Function that can be selected by the intent model and executed through the same routing and policy gates as other business capabilities. When the Plugin is enabled, identity and capability-introduction requests SHALL be eligible for this Function; when it is disabled, those requests SHALL not select it.
 
 #### Scenario: Greeting selects self-introduction
 
-- **WHEN** an enabled Agent receives an input such as `hi`, `你好`, `你是谁` or `你能做什么`
+- **WHEN** an enabled Agent receives an input such as `你是谁`, `介绍下自己` or `你能做什么`
 - **THEN** the semantic decision can select the self-introduction Function and the runtime executes that Plugin without selecting an unrelated business Function
+
+#### Scenario: Pure greeting remains ordinary conversation
+
+- **WHEN** an enabled Agent receives a pure greeting such as `你好` without an identity or capability question
+- **THEN** the semantic decision keeps the input on the ordinary unknown-input path instead of forcing self-introduction
+
+#### Scenario: Disabled self-introduction is not selected
+
+- **WHEN** an Agent is created with the self-introduction Plugin disabled and receives an identity or capability-introduction request
+- **THEN** the request remains available to the normal unknown-input handling path and no self-introduction Function or Plugin is selected
 
 #### Scenario: Self-introduction is not a privileged bypass
 

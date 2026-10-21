@@ -145,6 +145,42 @@ test('真实 Pi 循环处理普通闲聊：注入 streamFn 探针证明 Agent �
   }
 });
 
+test('未命中路由时 Pi Agent 收到当前启用能力目录', async () => {
+  const seen: Array<{ text: string; descriptors?: unknown }> = [];
+  const delegate: PiAgentDelegate = {
+    run: async (text: string, _onDelta: (delta: string) => void, descriptors?: unknown) => {
+      seen.push({ text, ...(descriptors === undefined ? {} : { descriptors }) });
+      return '探针回复';
+    },
+    recordHandledTurn: () => undefined,
+    reset: () => undefined
+  };
+  const session = new IarSandboxSession({ mode: 'scripted', disabledPluginIds: ['knowledge-query-v1'], piAgent: delegate });
+  try {
+    const result = await session.turn('你好');
+    assert.equal(result.status, 'agent');
+    assert.ok(Array.isArray(seen[0]?.descriptors));
+    const descriptors = seen[0]?.descriptors as Array<{ pluginId?: string }>;
+    assert.equal(descriptors.some((item) => item.pluginId === 'knowledge-query-v1'), false);
+  } finally {
+    session.dispose();
+  }
+});
+
+test('Pi 委托将能力目录序列化到模型输入上下文', async () => {
+  const seen: unknown[][] = [];
+  const delegate = createPiAgentDelegate({ mode: 'scripted', sessionId: 'pi-descriptor-context', streamFn: contextProbe('探针回复', seen) });
+  await delegate.run('你好', () => undefined, [{
+    functionId: 'function.visible', pluginId: 'plugin.visible', description: '当前可用能力', actionTypes: ['query']
+  }]);
+  const context = seen[0]?.[1] as { messages?: Array<{ content?: unknown }> };
+  assert.match(JSON.stringify(context.messages ?? []), /当前可用能力/u);
+  assert.match(JSON.stringify(context.messages ?? []), /function\.visible/u);
+  await delegate.run('继续聊聊', () => undefined);
+  const nextContext = seen[1]?.[1] as { messages?: Array<{ content?: unknown }> };
+  assert.doesNotMatch(JSON.stringify(nextContext.messages ?? []), /当前可用能力|function\.visible/u);
+});
+
 test('自我介绍意图由内置 Plugin 执行，不再交给 Pi 循环', async () => {
   const delegate = createPiAgentDelegate({ mode: 'scripted', sessionId: 'pi-demo-1' });
   const session = new IarSandboxSession({ mode: 'scripted', piAgent: delegate });

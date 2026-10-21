@@ -142,6 +142,16 @@ test('共享语义系统提示词不内置业务功能目录，描述由调用�
   assert.match(prompt, /动态能力描述/);
 });
 
+test('semantic prompt routes identity questions to enabled self-introduction', () => {
+  assert.doesNotMatch(SEMANTIC_SYSTEM_PROMPT, /询问助手身份或纯闲聊寒暄.*intent 取 unknown/u);
+  assert.match(SEMANTIC_SYSTEM_PROMPT, /自我介绍 Function/u);
+  const prompt = buildSemanticUserPrompt({
+    text: '介绍下自己呢',
+    functionDescriptors: [{ functionId: 'iar.self-introduction', pluginId: 'iar.self-introduction', description: '介绍当前 Agent 能力', actionTypes: ['query'] }]
+  });
+  assert.match(prompt, /iar\.self-introduction/u);
+});
+
 test('JEV and Intent Model receive the same structured context without changing the decision contract', async () => {
   const context = createInitialContext('run-context');
   context.factHistory = {
