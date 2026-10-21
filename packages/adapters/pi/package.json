@@ -2,6 +2,7 @@
   "name": "@iar/pi-bridge",
   "version": "0.1.0",
   "type": "module",
+  "keywords": ["pi-package", "iar", "intent-routing"],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

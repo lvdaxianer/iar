@@ -116,3 +116,96 @@ test('Pi extension fails closed when IAR is unavailable', async () => {
   assert.deepEqual(notifications, ['IAR 桥接不可用，当前输入已安全阻断。']);
   assert.deepEqual(await handlers.get('input')?.({ text: '业务请求', source: 'interactive' }, context), { action: 'handled' });
 });
+
+test('Pi extension forwards iar-cancel and clears the consumed pending actionId', async () => {
+  const handlers = new Map<string, (event: unknown, context: PiExtensionContext) => Promise<unknown> | unknown>();
+  const commands = new Map<string, { handler: (args: string, context: PiExtensionContext) => Promise<void> }>();
+  const entries: Array<{ customType: string; data: unknown }> = [];
+  const confirmations: Array<{ actionId: string; accepted: boolean }> = [];
+  const fakeClient = {
+    openSession: async () => ({ version: PI_BRIDGE_VERSION, piSessionId: 'pi-1', iarSessionId: 'iar-1', resumed: true }),
+    input: async () => ({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-1', disposition: 'awaiting_confirmation' as const, reply: '请确认', pending: { actionId: 'action-9', runId: 'run-9', functionId: 'ticket.create', pluginId: 'ticket-create-v1', riskLevel: 'high', confirmationRequired: true } }),
+    confirm: async (_sessionId: string, actionId: string, accepted: boolean) => { confirmations.push({ actionId, accepted }); return { version: PI_BRIDGE_VERSION, iarSessionId: 'iar-1', disposition: 'handled' as const, reply: '已取消该操作。' }; },
+    state: async () => ({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-1' })
+  };
+  const pi: PiExtensionAPI = {
+    on: (event, handler) => { handlers.set(event, handler); },
+    registerCommand: (name, definition) => { commands.set(name, definition); },
+    appendEntry: (customType, data) => { entries.push({ customType, data }); },
+    registerEntryRenderer: () => {}
+  };
+  await createIarExtension({ client: fakeClient })(pi);
+  const context = { sessionManager: { getSessionId: () => 'pi-1' }, ui: { notify: () => {} } };
+  await handlers.get('session_start')?.({}, context);
+  assert.deepEqual(await handlers.get('input')?.({ text: '删除数据集', source: 'interactive' }, context), { action: 'handled' });
+  await commands.get('iar-cancel')?.handler('', context);
+  assert.deepEqual(confirmations, [{ actionId: 'action-9', accepted: false }]);
+  assert.deepEqual(entries[1], { customType: 'iar-bridge', data: { content: '已取消该操作。', disposition: 'cancelled' } });
+  // 待确认已消费；再次取消应提示而没有新的桥接调用。
+  await commands.get('iar-cancel')?.handler('', context);
+  assert.equal(confirmations.length, 1);
+});
+
+test('Pi extension presents clarification as handled and blocks the Pi Agent', async () => {
+  const handlers = new Map<string, (event: unknown, context: PiExtensionContext) => Promise<unknown> | unknown>();
+  const entries: Array<{ customType: string; data: unknown }> = [];
+  const notifications: string[] = [];
+  const fakeClient = {
+    openSession: async () => ({ version: PI_BRIDGE_VERSION, piSessionId: 'pi-1', iarSessionId: 'iar-1', resumed: false }),
+    input: async () => ({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-1', disposition: 'clarification' as const, reply: '请补充工单标题。', reasonCode: 'needs_clarification' }),
+    confirm: async () => { throw new Error('unreachable'); },
+    state: async () => ({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-1' })
+  };
+  const pi: PiExtensionAPI = {
+    on: (event, handler) => { handlers.set(event, handler); },
+    registerCommand: () => {},
+    appendEntry: (customType, data) => { entries.push({ customType, data }); },
+    registerEntryRenderer: () => {}
+  };
+  await createIarExtension({ client: fakeClient })(pi);
+  const context = { sessionManager: { getSessionId: () => 'pi-1' }, ui: { notify: (message: string) => notifications.push(message) }, mode: 'rpc' as const };
+  await handlers.get('session_start')?.({}, context);
+  assert.deepEqual(await handlers.get('input')?.({ text: '提个工单', source: 'rpc' }, context), { action: 'handled' });
+  assert.deepEqual(entries[0], { customType: 'iar-bridge', data: { content: '请补充工单标题。', disposition: 'clarification' } });
+  assert.deepEqual(notifications, ['请补充工单标题。']);
+});
+
+test('Pi extension honors onUnavailable continue to fall through to the Pi Agent', async () => {
+  const handlers = new Map<string, (event: unknown, context: PiExtensionContext) => Promise<unknown> | unknown>();
+  const notifications: string[] = [];
+  const pi: PiExtensionAPI = {
+    on: (event, handler) => { handlers.set(event, handler); },
+    registerCommand: () => {},
+    appendEntry: () => {},
+    registerEntryRenderer: () => {}
+  };
+  const failingClient = { openSession: async () => { throw new BridgeClientError('bridge_unavailable', 'IAR 不可用', true); }, input: async () => { throw new Error('unreachable'); }, confirm: async () => { throw new Error('unreachable'); }, state: async () => { throw new Error('unreachable'); } };
+  await createIarExtension({ client: failingClient, onUnavailable: 'continue' })(pi);
+  const context = { sessionManager: { getSessionId: () => 'pi-1' }, ui: { notify: (message: string) => notifications.push(message) } };
+  await handlers.get('session_start')?.({}, context);
+  // 启动失败即放行给 Pi Agent；启动期保留一次桥接故障告知。
+  assert.deepEqual(await handlers.get('input')?.({ text: '业务请求', source: 'interactive' }, context), { action: 'continue' });
+  assert.deepEqual(notifications, ['IAR 桥接不可用，当前输入已安全阻断。']);
+
+  // 运行中桥接掉线同样放行，且后续输入不再重复通知。
+  let calls = 0;
+  const flakyClient = {
+    openSession: async () => ({ version: PI_BRIDGE_VERSION, piSessionId: 'pi-2', iarSessionId: 'iar-2', resumed: false }),
+    input: async () => { calls += 1; if (calls === 1) return { version: PI_BRIDGE_VERSION, iarSessionId: 'iar-2', disposition: 'handled' as const, reply: '已处理' }; throw new BridgeClientError('bridge_unavailable', 'IAR 不可用', true); },
+    confirm: async () => { throw new Error('unreachable'); },
+    state: async () => ({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-2' })
+  };
+  const handlers2 = new Map<string, (event: unknown, context: PiExtensionContext) => Promise<unknown> | unknown>();
+  const pi2: PiExtensionAPI = {
+    on: (event, handler) => { handlers2.set(event, handler); },
+    registerCommand: () => {},
+    appendEntry: () => {},
+    registerEntryRenderer: () => {}
+  };
+  await createIarExtension({ client: flakyClient, onUnavailable: 'continue' })(pi2);
+  const context2 = { sessionManager: { getSessionId: () => 'pi-2' }, ui: { notify: (message: string) => notifications.push(message) } };
+  await handlers2.get('session_start')?.({}, context2);
+  assert.deepEqual(await handlers2.get('input')?.({ text: '第一问', source: 'interactive' }, context2), { action: 'handled' });
+  assert.deepEqual(await handlers2.get('input')?.({ text: '第二问', source: 'interactive' }, context2), { action: 'continue' });
+  assert.deepEqual(notifications, ['IAR 桥接不可用，当前输入已安全阻断。']);
+});

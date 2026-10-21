@@ -183,7 +183,7 @@ flowchart TB
   -> 事件日志 + BehaviorContext 投影
 ```
 
-未命中且无 pending 澄清/事实追问的轮次不进入上述链路，整轮委托给进程内 Pi Agent 兜底；Pi 故障时回退运行时既有兜底回复（见 5.5）。
+未命中且无 pending 澄清/事实追问的轮次不进入上述链路，整轮委托给进程内 Pi Agent 兜底；Pi 故障时回退运行时既有兜底回复（沙箱演示路径见 5.6；对 Pi 宿主的前置集成见 5.5）。
 
 ## 4. 核心领域模型
 
@@ -361,20 +361,41 @@ Function 确定后，Registry 只加载该 Function 的已启用、版本固定�
 
 这三类只是验证 IAR 共通路由模型的示例，不属于 IAR 内置业务系统。
 
-### 5.5 未命中路由：与 Pi Agent 的协作兜底
+### 5.5 与 Pi 集成：IAR 作为前置意图路由层
 
-IAR 只负责它擅长的部分：意图识别、候选生成、受限决策和受控执行。对规则与候选集覆盖不了的开放式输入，运行时不在 IAR 内部拼凑“万能回复模型”，而是整轮委托给进程内 [Pi Agent](https://github.com/earendil-works/pi)（`@earendil-works/pi-agent-core` 的通用 Agent 循环 + `@earendil-works/pi-ai` 的模型目录）兜底：
+正式集成方向是 **Pi 做宿主、IAR 做前置层**：Pi 负责用户输入、通用对话、模型调用、会话历史和扩展生命周期；IAR 负责业务意图识别、Plugin/Function 动态路由、策略确认、Workflow 和可恢复业务状态。`@iar/pi-bridge` 适配包（`packages/adapters/pi`）把 IAR 接入 Pi 的扩展机制，不修改 Pi 仓库，也不是 IAR 核心依赖：
+
+```text
+用户输入 -> Pi AgentSession.prompt()
+  -> Pi input hook（@iar/pi-bridge 扩展，模型调用之前）
+  -> HTTP bridge -> IAR 意图识别 -> IAR Plugin/Function 动态路由
+命中：执行 / 进入确认流转 -> display-only custom entry 展示 -> 返回 handled，Pi Agent 不再处理本轮
+未命中：返回 continue，Pi 原有 Agent 正常回答
+```
+
+职责与边界：
+
+- **拦截与分流**：`input` hook 在 Pi 调用模型之前运行；IAR 命中业务 Function（含澄清、待确认）必须返回 `handled`，未命中必须返回 `continue`；`source === "extension"` 的输入直接放行，扩展自己产生的消息不递归进入 IAR。
+- **会话分离**：Pi 会话管理自然语言对话历史；IAR 会话管理 `BehaviorContext`、路由状态、pending 确认、Workflow 和业务事实。Bridge 只保存 `piSessionId → iarSessionId` 映射和当前 `actionId`，不复制 Pi 聊天历史。
+- **结果展示**：handled、clarification、awaiting_confirmation 和确认/取消结果通过 Pi custom entry（`appendEntry`，Pi 源码保证其不参与 LLM context）展示，不进入 Pi 后续模型上下文。
+- **确认命令**：`/iar-confirm` 与 `/iar-cancel` 在 Pi 侧注册为扩展命令，通过 bridge 回到对应 IAR 会话完成确认或取消。
+- **故障策略**：Bridge 不可用默认 fail-closed，当前输入被安全阻断；仅显式配置 `onUnavailable: "continue"` 才允许放行给 Pi Agent。
+
+参考实现：`packages/adapters/pi/src/extension.ts`（input hook、命令、entry 渲染）、`packages/adapters/pi/src/client.ts`（有界 HTTP client 与错误收敛）、`examples/agent-sandbox/src/http-pi-bridge-routes.ts`（bridge 服务端与 disposition 映射）。
+
+### 5.6 沙箱演示路径：网页会话的进程内 Pi 兜底
+
+沙箱网页入口是 IAR 能力的**演示界面**，不是 Pi 集成方式，与 5.5 明确区分。该路径里 IAR 自己当宿主：浏览器 `POST /api/sessions/:sessionId/chat` → IAR 意图识别与 Plugin/Function 路由 → 未命中时才整轮委托给**进程内** [Pi Agent](https://github.com/earendil-works/pi)（`@earendil-works/pi-agent-core` 循环 + `@earendil-works/pi-ai` 模型目录），保证没有外部 Pi 环境的演示对话也能连续：
 
 ```text
 命中路由的轮次 -> IAR 两阶段路由 -> 策略/确认 -> Workflow -> 插件结果回复
-未命中的轮次 -> Pi Agent 自由对话 -> 回复标注“Pi 兜底”
+未命中的轮次 -> 进程内 Pi Agent 自由对话 -> 回复标注“Pi 兜底”
                  若 Pi 故障 -> 回退 IAR 既有分层兜底
 ```
 
 职责与边界：
 
-- **IAR 侧**：命中 Function/Plugin 的轮次、澄清收敛、事实追问、确认/取消等，仍全部走第 5、7、8 节的既有链路，Pi 不参与决策与执行。
-- **触发条件**：仅当本轮意图未命中（无候选 Function）且不存在 pending 澄清、pending 引用或事实追问时，才整轮委托给 Pi；带 pending 状态的轮次由 IAR 兜底继续处理，不分流，也不重复路由。
+- **触发条件**：仅当本轮意图未命中（无候选 Function）且不存在 pending 澄清、pending 引用或事实追问时才分流；带 pending 状态的轮次由 IAR 兜底继续处理，不分流，也不重复路由。bridge 模式（5.5）下此分流被 `passThroughOnNoMatch` 关闭，`agent` 终态出现在 bridge 响应里属于协议不变量破坏。
 - **Pi 侧**：按通用 Agent 循环生成自然回复。它通过会话备注看到 IAR 已处理轮次的摘要，但拿不到任何插件句柄，不能触发路由、执行副作用或绕过授权与确认边界。
 - **上下文互通**：每个 IAR 会话挂一个独立 Pi Agent 实例。IAR 处理成功的轮次以「【已由业务系统处理】」备注进入 Pi 上下文，Pi 自己回答的轮次不重复记录，两侧对话都连续；同一会话内两类轮次可任意来回切换。会话 reset 时 IAR 状态与 Pi 上下文一起清空。
 
