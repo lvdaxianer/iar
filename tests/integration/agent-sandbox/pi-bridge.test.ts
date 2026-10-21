@@ -16,7 +16,7 @@ test('IAR bridge maps Pi sessions and passes through non-business input', async 
     const resumed = await server.app.inject({ method: 'POST', url: '/api/bridge/v1/sessions', payload: { piSessionId: 'pi-session-a' } });
     assert.equal(resumed.json().iarSessionId, first.iarSessionId); assert.equal(resumed.json().resumed, true);
     const passThrough = await server.app.inject({ method: 'POST', url: `/api/bridge/v1/sessions/${first.iarSessionId}/input`, payload: { text: '帮我写一个 TypeScript 函数' } });
-    assert.equal(passThrough.statusCode, 200); assert.equal(passThrough.json().disposition, 'pass_through');
+    assert.equal(passThrough.statusCode, 200); assert.equal(passThrough.json().disposition, 'pass_through'); assert.equal(passThrough.json().replySource, 'pi_agent');
     const capabilityContext = passThrough.json().capabilityContext as { functionDescriptors: Array<{ functionId: string; pluginId: string; description: string; actionTypes: string[] }> };
     assert.ok(Array.isArray(capabilityContext.functionDescriptors));
     assert.ok(capabilityContext.functionDescriptors.some((descriptor) => descriptor.functionId === SELF_INTRODUCTION_FUNCTION_ID));
@@ -32,7 +32,7 @@ test('IAR bridge handles business input and protects confirmation isolation', as
   try {
     const first = await openBridgeSession(server, 'pi-session-a');
     const handled = await server.app.inject({ method: 'POST', url: `/api/bridge/v1/sessions/${first}/input`, payload: { text: '查一下退款政策' } });
-    assert.equal(handled.statusCode, 200); assert.equal(handled.json().disposition, 'handled');
+    assert.equal(handled.statusCode, 200); assert.equal(handled.json().disposition, 'handled'); assert.equal(handled.json().replySource, 'response_model');
     const pendingResponse = await server.app.inject({ method: 'POST', url: `/api/bridge/v1/sessions/${first}/input`, payload: { text: '帮我创建工单' } });
     const pending = pendingResponse.json() as { disposition: string; pending: { actionId: string } };
     assert.equal(pending.disposition, 'awaiting_confirmation');

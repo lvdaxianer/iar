@@ -5,12 +5,12 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-21
  */
-import { createIarExtension, IarBridgeClient, type BridgeCapabilityDescriptor, type BridgeConfirmResponse, type BridgeInputResponse, type BridgePendingAction, type IarBridgeClientLike, type PiExtensionAPI, type PiExtensionContext, type PiInputResult } from '@iar/pi-bridge';
+import { createIarExtension, IarBridgeClient, type BridgeCapabilityDescriptor, type BridgeConfirmResponse, type BridgeInputResponse, type BridgePendingAction, type BridgeReplySource, type IarBridgeClientLike, type PiExtensionAPI, type PiExtensionContext, type PiInputResult } from '@iar/pi-bridge';
 import { createPiAgentDelegate, type PiAgentDelegate } from '../models/pi-agent-delegate.js';
 import type { SandboxMode } from '../session-types.js';
 
 /** 单次 IAR 路由的公开摘要，用于页面展示拦截证据。 */
-export type PiHostRouteInfo = { disposition: string; reasonCode: string; semanticIntent: string; semanticConfidence: number; functionId?: string; pluginId?: string };
+export type PiHostRouteInfo = { disposition: string; reasonCode: string; semanticIntent: string; semanticConfidence: number; functionId?: string; pluginId?: string; replySource?: BridgeReplySource };
 
 /** 会话对外事件；全部由 PiHostSession 在确定性时机触发。 */
 export type PiHostSessionEvents = {
@@ -163,7 +163,8 @@ export class PiHostSession {
       semanticIntent: route?.semanticIntent ?? 'unknown',
       semanticConfidence: route?.semanticConfidence ?? 0,
       ...(route?.functionId === undefined ? {} : { functionId: route.functionId }),
-      ...(route?.pluginId === undefined ? {} : { pluginId: route.pluginId })
+      ...(route?.pluginId === undefined ? {} : { pluginId: route.pluginId }),
+      ...(response.replySource === undefined ? {} : { replySource: response.replySource })
     });
   }
 }
