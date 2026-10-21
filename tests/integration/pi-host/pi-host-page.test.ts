@@ -72,6 +72,18 @@ test('Pi host 气泡历史在 Markdown 渲染前快照原始文本', () => {
   assert.match(finalize, /recordPiHostConversation\('bot', rawText/);
 });
 
+/* Pi host 的 timing 事件先到时，当前 entry/回复必须带上同一 trace；
+ * 完整 trace 另在右侧面板展示，避免卡片被长标识撑破。 */
+test('Pi host 回复 meta 与 Timing 面板展示服务端耗时和 traceId', () => {
+  const adapter = readFileSync(join(PAGE_DIR, 'pi-host.fragment.js'), 'utf8');
+  const page = readFileSync(join(PAGE_DIR, 'index.html'), 'utf8');
+  assert.match(adapter, /piHostPendingTiming/);
+  assert.match(adapter, /durationMs/);
+  assert.match(adapter, /traceId/);
+  assert.match(adapter, /title/);
+  assert.match(page, /id="timingTraceId"/);
+});
+
 /* 与沙箱页同一展示契约：消息追加、条目渲染、确认卡片与流式气泡都要有界。 */
 test('Pi host 页面交互入口按职责拆分且有界', () => {
   const adapter = readFileSync(join(PAGE_DIR, 'pi-host.fragment.js'), 'utf8');

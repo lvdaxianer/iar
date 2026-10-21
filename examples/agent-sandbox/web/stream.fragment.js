@@ -94,6 +94,7 @@
   function renderStreamTiming(summary) {
     if (!summary || typeof summary !== 'object') return;
     document.getElementById('timingTotal').textContent = typeof summary.durationMs === 'number' ? summary.durationMs + 'ms' : '-';
+    renderTimingTrace(summary);
     var list = document.getElementById('timingList');
     list.innerHTML = '';
     (Array.isArray(summary.stages) ? summary.stages : []).forEach(function (stage) {
@@ -124,15 +125,29 @@
     state.textEl.innerHTML = renderMarkdown(rawText);
     var sourceMeta = lastReplySource || '来源未知';
     document.getElementById('routeReplySource').textContent = sourceMeta;
-    var metaText = result.reasonCode === 'model_response_too_large' && result.status === 'executed' ? '已执行 · 回复不完整 · ' + sourceMeta : result.status === 'executed'
-      ? '已执行 · ' + (result.route && result.route.functionId ? result.route.functionId : '') + ' · ' + sourceMeta
-      : result.status === 'awaiting_confirmation' ? '等待确认 · ' + sourceMeta
-      : result.status === 'agent' ? 'Pi 兜底 · ' + sourceMeta
-      : result.status === 'clarification' ? '需要澄清 · ' + sourceMeta : '失败 · ' + sourceMeta;
-    appendMessageMeta(state.div, metaText);
-    recordConversation('bot', rawText, metaText);
+    var baseMeta = buildStreamResponseMeta(result, sourceMeta);
+    var meta = formatTimingMeta(baseMeta, result.timing);
+    appendMessageMeta(state.div, meta.text, meta.traceId);
+    recordConversation('bot', rawText, meta.text);
     messagesEl.scrollTop = messagesEl.scrollHeight;
     if (result.status === 'awaiting_confirmation' && result.pending) runConfirm(result.pending);
+  }
+
+  /**
+   * 将轮次状态转换为原有的回复来源 meta。
+   * @param result - 服务端终态结果
+   * @param sourceMeta - 回复来源文字
+   * @returns 原有状态 meta
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-22
+   */
+  function buildStreamResponseMeta(result, sourceMeta) {
+    if (result.reasonCode === 'model_response_too_large' && result.status === 'executed') return '已执行 · 回复不完整 · ' + sourceMeta;
+    if (result.status === 'executed') return '已执行 · ' + (result.route && result.route.functionId ? result.route.functionId : '') + ' · ' + sourceMeta;
+    if (result.status === 'awaiting_confirmation') return '等待确认 · ' + sourceMeta;
+    if (result.status === 'agent') return 'Pi 兜底 · ' + sourceMeta;
+    if (result.status === 'clarification') return '需要澄清 · ' + sourceMeta;
+    return '失败 · ' + sourceMeta;
   }
 
   /** 使用 SSE 流式聊天，明确不自动重试。

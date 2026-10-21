@@ -127,6 +127,7 @@
       lastReplySource = null;
       document.getElementById('routeReplySource').textContent = '-';
       document.getElementById('timingTotal').textContent = '-';
+      document.getElementById('timingTraceId').textContent = '-';
       document.getElementById('timingList').innerHTML = '';
       appendMsg('bot', '会话已重置，开始新的对话吧。');
       recordConversation('bot', '会话已重置，开始新的对话吧。');
@@ -151,6 +152,7 @@
     lastReplySource = null;
     document.getElementById('routeReplySource').textContent = '-';
     document.getElementById('timingTotal').textContent = '-';
+    document.getElementById('timingTraceId').textContent = '-';
     document.getElementById('timingList').innerHTML = '';
     document.getElementById('compactResult').className = '';
     appendMsg('bot', '新会话已建立，原会话已保留在会话列表中。');

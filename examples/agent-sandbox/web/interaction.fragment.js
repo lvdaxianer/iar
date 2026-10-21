@@ -27,13 +27,15 @@
   /** 在消息尾部显示动作或回复状态。
    * @param div - 消息容器
    * @param text - 用户可见状态
+   * @param traceId - 可选完整 traceId
    * @returns 无返回值
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  function appendMessageMeta(div, text) {
+  function appendMessageMeta(div, text, traceId) {
     var span = document.createElement('span');
     span.className = 'meta';
     span.textContent = text;
+    if (traceId) span.title = '完整 traceId: ' + traceId;
     div.appendChild(span);
   }
 
