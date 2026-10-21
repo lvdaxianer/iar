@@ -93,12 +93,12 @@
 
 ## 7. Documentation and architecture alignment
 
-- [ ] 7.1 Update `README.md`, `docs/README.md`,
+- [x] 7.1 Update `README.md`, `docs/README.md`,
   `docs/plugin-function-architecture.md`, and `docs/unified-entry.md` with the
   final package tree, standalone runtime example, Pi bridge flow, and adapter
   table; verify every current package name in active documentation matches the
   target boundary.
-- [ ] 7.2 Add a migration note mapping `@iar/agent`, `@iar/decision`,
+- [x] 7.2 Add a migration note mapping `@iar/agent`, `@iar/decision`,
   `@iar/rule-engine`, `@iar/workflow`, and `@iar/observability` to runtime
   subdirectories or public exports; verify the note contains no unresolved
   placeholders and all code examples type-check.
