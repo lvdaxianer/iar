@@ -96,10 +96,19 @@ export const ticketPlugin = definePlugin({
 应用只需要把 Plugin 包传给 `@iar/runtime`：
 
 ```ts
-import { createIarAgent } from '@iar/runtime';
+import { createIarRuntime, type AsyncDecisionAdapter } from '@iar/runtime';
 import { ticketPlugin } from './ticket-plugin.js';
 
-export const iar = createIarAgent({ plugins: [ticketPlugin] });
+const decisionProvider = {
+  decide: async () => ({
+    ok: false,
+    error: { code: 'model.no_profile', message: '决策模型 backend 未配置', retryable: false, details: {} },
+    audit: [],
+    events: [],
+  }),
+} satisfies AsyncDecisionAdapter;
+
+export const iar = createIarRuntime({ plugins: [ticketPlugin], decisionProvider });
 ```
 
 统一入口一次完成校验、原子安装、依赖排序、启用和 FunctionRegistry 构建。任何一个 Plugin 或 Function 失败，整个 Agent 初始化失败，不留下部分生命周期记录或路由索引。

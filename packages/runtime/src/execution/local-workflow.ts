@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import { type ActionResult, type EventEnvelope } from '@iar/contracts';
-import { ActionIdempotencyLedger } from '../action-idempotency.js';
+import { ActionIdempotencyLedger } from '../session/action-idempotency.js';
 import { ActionExecutionService } from './action-execution.js';
 import { WorkflowEventLog } from './event-log.js';
 import { confirmationScopeHash } from './policy-gate.js';
