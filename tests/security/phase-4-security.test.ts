@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SCHEMA_VERSIONS, type BusinessPluginManifest, type WorkflowDefinition } from '@iar/contracts';
-import { MockDecisionProvider } from '@iar/decision';
+import { MockDecisionProvider } from '@iar/runtime';
 import { PluginHost } from '@iar/plugins';
 import { createServiceApi, type ServiceApiRequest } from '@iar/adapters-service';
 import { TwoStageRouter } from '@iar/runtime';

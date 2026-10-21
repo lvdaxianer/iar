@@ -4,7 +4,7 @@ import { SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
 import { canPassThrough, runPiAgentDelegate } from './session-turn-helpers.js';
 import type { ActionDefinition, ActionResult, BehaviorContext, PendingReference, VerifiedFactRecord } from '@iar/contracts';
-import type { SemanticFrame } from '@iar/decision';
+import type { SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
 import type { PluginDescriptor } from '@iar/plugins';
 import type { ExecuteTurnOutcome, ExtractFrameOutcome, ReferenceResolution, ResolvedFactReference, RouteEvidence, StreamEvent, TurnResult } from './session-types.js';

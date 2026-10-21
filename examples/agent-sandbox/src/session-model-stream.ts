@@ -1,6 +1,6 @@
 /** 流式模型回复的超时、增量和回退边界。 */
 import type { JsonValue } from '@iar/contracts';
-import type { ClarificationMetadata, ModelProfileRegistry } from '@iar/decision';
+import type { ClarificationMetadata, ModelProfileRegistry } from '@iar/runtime';
 import { OpenAICompatibleModelProvider } from './models/llm-provider.js';
 import { ModelResponseLimitError } from './models/model-transport.js';
 import { readResponseText } from './session-helpers.js';

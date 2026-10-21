@@ -9,9 +9,9 @@ import {
   ModelGateway,
   ModelProfileRegistry,
   type ModelProvider
-} from '@iar/decision';
+} from '@iar/runtime';
 import { buildCompactionUserPrompt } from '../../../examples/agent-sandbox/src/models/model-input-transport.js';
-import { loadModelProfiles } from '@iar/decision';
+import { loadModelProfiles } from '@iar/runtime';
 
 /**
  * 创建适配器测试使用的最小合法压缩结果。

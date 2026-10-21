@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ModelProviderError } from '@iar/decision';
+import { ModelProviderError } from '@iar/runtime';
 import { createStreamRequest, createTestProvider, flushObservabilityLogs, withObservabilityFixture,
   type ObservabilityFixture } from './observability-fixture.js';
 

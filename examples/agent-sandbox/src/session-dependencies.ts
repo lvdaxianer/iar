@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SCHEMA_VERSIONS } from '@iar/contracts';
-import { DecisionBackendResolver, IntentModelDecisionAdapter, JevDecisionAdapter, ModelGateway, ModelProfileRegistry, UnifiedDecisionAdapter, loadModelProfiles, type DecisionRequest, type ModelProvider } from '@iar/decision';
+import { DecisionBackendResolver, IntentModelDecisionAdapter, JevDecisionAdapter, ModelGateway, ModelProfileRegistry, UnifiedDecisionAdapter, loadModelProfiles, type DecisionRequest, type ModelProvider } from '@iar/runtime';
 import { createIarAgent } from '@iar/agent';
 import { PluginHost } from '@iar/plugins';
 import { allSandboxPlugins, sandboxFunctionIds } from './functions/index.js';

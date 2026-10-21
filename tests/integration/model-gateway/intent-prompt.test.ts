@@ -4,8 +4,8 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildIntentDecisionInput, INTENT_DECISION_PROMPT_VERSION, INTENT_DECISION_SYSTEM_PROMPT } from '@iar/decision';
-import type { DecisionRequest } from '@iar/decision';
+import { buildIntentDecisionInput, INTENT_DECISION_PROMPT_VERSION, INTENT_DECISION_SYSTEM_PROMPT } from '@iar/runtime';
+import type { DecisionRequest } from '@iar/runtime';
 
 /**
  * 创建包含嵌套可变字段的稳定决策请求，供正常路径测试复用。

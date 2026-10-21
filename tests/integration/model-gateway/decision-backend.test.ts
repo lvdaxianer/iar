@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { DecisionBackendResolutionError, DecisionBackendResolver, ModelProfileRegistry, loadModelProfiles } from '@iar/decision';
+import { DecisionBackendResolutionError, DecisionBackendResolver, ModelProfileRegistry, loadModelProfiles } from '@iar/runtime';
 
 /**
  * 读取版本化模型配置文本。

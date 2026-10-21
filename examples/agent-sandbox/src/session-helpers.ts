@@ -3,9 +3,9 @@
  * @date 2026-10-18
  */
 import type { ActionDefinition, BehaviorContext, JsonValue, PluginOperation, SlotValue } from '@iar/contracts';
-import type { SemanticActionType, SemanticFrame } from '@iar/decision';
+import type { SemanticActionType, SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
-import type { RuleEvaluationFacts } from '@iar/rule-engine';
+import type { RuleEvaluationFacts } from '@iar/runtime';
 import type { PendingActionSummary, RouteEvidence } from './session-types.js';
 
 /**

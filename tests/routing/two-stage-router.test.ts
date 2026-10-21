@@ -59,7 +59,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import type { BusinessPluginManifest } from '@iar/contracts';
 import { SCHEMA_VERSIONS } from '@iar/contracts';
-import { DecisionBackendResolver, IntentModelDecisionAdapter, JevDecisionAdapter, loadModelProfiles, MockDecisionProvider, ModelGateway, ModelProfileRegistry, UnifiedDecisionAdapter, type DecisionRequest, type ModelProvider } from '@iar/decision';
+import { DecisionBackendResolver, IntentModelDecisionAdapter, JevDecisionAdapter, loadModelProfiles, MockDecisionProvider, ModelGateway, ModelProfileRegistry, UnifiedDecisionAdapter, type DecisionRequest, type ModelProvider } from '@iar/runtime';
 import { PluginHost } from '@iar/plugins';
 import { TwoStageRouter, type AsyncDecisionAdapter, type RouteRequest } from '@iar/runtime';
 import { facts, functionRule, pluginRule } from './rule-engine-fixtures.js';

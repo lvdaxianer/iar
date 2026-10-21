@@ -12,3 +12,5 @@ export * from './replay.js';
 export * from './action-idempotency.js';
 export * from './routing.js';
 export * from './bootstrap/index.js';
+export * from './intent/decision/index.js';
+export * from './intent/rules/index.js';

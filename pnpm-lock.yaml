@@ -109,12 +109,6 @@ importers:
         specifier: 0.1.0
         version: link:../plugins
 
-  packages/decision:
-    dependencies:
-      '@iar/contracts':
-        specifier: 0.1.0
-        version: link:../contracts
-
   packages/observability:
     dependencies:
       '@iar/contracts':
@@ -130,26 +124,14 @@ importers:
         specifier: 0.1.0
         version: link:../contracts
 
-  packages/rule-engine:
-    dependencies:
-      '@iar/contracts':
-        specifier: 0.1.0
-        version: link:../contracts
-
   packages/runtime:
     dependencies:
       '@iar/contracts':
         specifier: 0.1.0
         version: link:../contracts
-      '@iar/decision':
-        specifier: 0.1.0
-        version: link:../decision
       '@iar/plugins':
         specifier: 0.1.0
         version: link:../plugins
-      '@iar/rule-engine':
-        specifier: 0.1.0
-        version: link:../rule-engine
 
   packages/storage:
     dependencies:

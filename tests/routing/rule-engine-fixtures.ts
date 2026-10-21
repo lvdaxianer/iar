@@ -8,7 +8,7 @@
  * @date 2026-10-17
  */
 import { SCHEMA_VERSIONS, type RuleExpression } from '@iar/contracts';
-import type { FunctionRule, PluginCandidate, PluginRule, RuleEvaluationFacts } from '@iar/rule-engine';
+import type { FunctionRule, PluginCandidate, PluginRule, RuleEvaluationFacts } from '@iar/runtime';
 
 const BASE_RULE = {
   // 基础版本固定，确保所有测试结果可回放。

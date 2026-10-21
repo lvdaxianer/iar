@@ -7,9 +7,9 @@
  */
 import { randomUUID } from 'node:crypto';
 import { SCHEMA_VERSIONS, type ActionDefinition, type ActionType, type BehaviorContext, type EventEnvelope, type JsonValue, type PendingReference, type PluginOperation, type PluginPolicyMetadata, type RuleExpression, type VerifiedFactRecord } from '@iar/contracts';
-import { ModelGateway, SemanticExtractorAdapter, type HistoricalSemanticReference, type ModelGatewayResult, type ModelProfileRegistry, type SemanticFrame } from '@iar/decision';
+import { ModelGateway, SemanticExtractorAdapter, type HistoricalSemanticReference, type ModelGatewayResult, type ModelProfileRegistry, type SemanticFrame } from '@iar/runtime';
 import { PluginFirstRouter, resolveFactRelationCandidates, type AsyncDecisionAdapter, type FactRelationCandidateReference, type RouteResult } from '@iar/runtime';
-import type { FunctionRule, PluginRule } from '@iar/rule-engine';
+import type { FunctionRule, PluginRule } from '@iar/runtime';
 import type { PluginDescriptor, PluginHost } from '@iar/plugins';
 import type { ActionExecutor, LocalWorkflow } from '@iar/workflow';
 import { ScriptedModelProvider } from './models/scripted-provider.js';

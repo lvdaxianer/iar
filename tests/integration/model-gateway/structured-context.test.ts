@@ -10,9 +10,9 @@ import {
   ModelProfileRegistry,
   type DecisionRequest,
   type ModelProvider
-} from '@iar/decision';
+} from '@iar/runtime';
 import { buildFallbackUserPrompt, buildResponseUserPrompt, buildSemanticUserPrompt } from '../../../examples/agent-sandbox/src/models/model-input-transport.js';
-import { ResponseGeneratorAdapter } from '@iar/decision';
+import { ResponseGeneratorAdapter } from '@iar/runtime';
 import { PluginHost } from '@iar/plugins';
 import type { ActionType } from '@iar/contracts';
 import { SEMANTIC_SYSTEM_PROMPT } from '../../../examples/agent-sandbox/src/models/model-input-transport.js';

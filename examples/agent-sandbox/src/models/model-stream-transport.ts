@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import { ModelProviderError, type ClarificationMetadata } from '@iar/decision';
+import { ModelProviderError, type ClarificationMetadata } from '@iar/runtime';
 import { logModelInvalidResponse, logModelNetworkFailure, logModelSuccess } from '../safe-log.js';
 import { cancelModelBody, countModelBytes, fetchModelResponse, ModelResponseLimitError, type ModelTransportRequest } from './model-transport.js';
 

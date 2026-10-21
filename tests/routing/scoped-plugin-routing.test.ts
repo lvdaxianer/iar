@@ -13,7 +13,7 @@ import {
   type BusinessPluginManifest,
   type ActionType
 } from '@iar/contracts';
-import { buildIntentDecisionInput, type DecisionRequest } from '@iar/decision';
+import { buildIntentDecisionInput, type DecisionRequest } from '@iar/runtime';
 import { defineFunction } from '@iar/plugin';
 import { PluginHost } from '@iar/plugins';
 import { BehaviorContextProjector, createInitialContext, PluginFirstRouter, type AsyncDecisionAdapter } from '@iar/runtime';
