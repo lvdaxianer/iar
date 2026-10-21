@@ -13,29 +13,40 @@ IAR 的 Node.js 包必须提供稳定、可安装、可类型检查且不暴露�
 
 每个可发布包 SHALL 从自身包目录的构建产物提供公共运行时入口；
 `@iar/plugin` SHALL 提供插件作者定义 Plugin/Function 的入口，
-`@iar/runtime` SHALL 提供独立 IAR 运行时入口，消费者不得依赖仓库根目录、
+`@iar/runtime` SHALL 提供独立 IAR 运行时入口，`@iar/pi-bridge` SHALL 提供
+Pi Bridge SDK 根入口和 Pi Extension 子入口，消费者不得依赖仓库根目录、
 其他包的 `src` 目录或包外构建路径。
 
 #### Scenario: Consumer imports the package root
 
-- **WHEN** 消费者从安装后的 `@iar/plugin` 或 `@iar/runtime` 导入公共 API
+- **WHEN** 消费者从安装后的 `@iar/plugin`、`@iar/runtime` 或 `@iar/pi-bridge` 导入公共 API
 - **THEN** Node.js 能从该包自身声明的编译产物加载 JavaScript，而不需要
   TypeScript loader 或仓库根目录
 
+#### Scenario: Pi loads the declared extension entry
+
+- **WHEN** Pi 根据 `@iar/pi-bridge` 的包元数据加载 `./pi-extension`
+- **THEN** Node.js 能解析到包内的编译 Extension 入口，且不会穿透到 `src` 或未声明路径
+
 #### Scenario: Consumer uses an undeclared internal path
 
-- **WHEN** 消费者导入 `@iar/plugin`、`@iar/runtime` 或其他包未声明的内部路径
+- **WHEN** 消费者导入 `@iar/plugin`、`@iar/runtime`、`@iar/pi-bridge` 或其他包未声明的内部路径
 - **THEN** 包边界拒绝该导入，不把 `src`、内部实现目录或未声明构建文件视为
   公共 API
 
 ### Requirement: Package publishes matching type declarations
 
-每个可发布包 SHALL 随运行时代码发布与公共入口对应的 `.d.ts` 类型声明，并通过包元数据提供给 TypeScript 消费者。
+每个可发布包 SHALL 随运行时代码发布与公共入口对应的 `.d.ts` 类型声明，并通过包元数据提供给 TypeScript 消费者；`@iar/pi-bridge` 的 `./pi-extension` 子入口 SHALL 提供对应的子路径声明。
 
 #### Scenario: TypeScript consumer imports the package
 
 - **WHEN** TypeScript 消费者导入包公共 API
 - **THEN** TypeScript 能解析与运行时入口对应的声明文件，并获得公共类型检查
+
+#### Scenario: TypeScript consumer imports the Pi extension
+
+- **WHEN** TypeScript 消费者导入 `@iar/pi-bridge/pi-extension`
+- **THEN** TypeScript 能解析 `dist/pi-extension.d.ts` 并获得 Pi Extension 入口类型
 
 #### Scenario: Package is packed for publication
 
@@ -61,9 +72,9 @@ IAR 的 Node.js 包必须提供稳定、可安装、可类型检查且不暴露�
 
 ### Requirement: Build output is reproducible and validated
 
-仓库 SHALL 能从干净检出重新生成 `@iar/plugin` 和 `@iar/runtime` 的
-JavaScript、声明文件和必要 source map，并在发布前验证两个公共入口的导入
-和包内容边界。
+仓库 SHALL 能从干净检出重新生成 `@iar/plugin`、`@iar/runtime` 和
+`@iar/pi-bridge` 的 JavaScript、声明文件和必要 source map，并在发布前验证
+三个公共入口、Pi Extension 元数据和包内容边界。
 
 #### Scenario: Clean checkout builds packages
 
@@ -74,8 +85,31 @@ JavaScript、声明文件和必要 source map，并在发布前验证两个公�
 #### Scenario: Package smoke check runs
 
 - **WHEN** 执行发布包冒烟检查
-- **THEN** 检查能够从打包内容导入 `@iar/plugin` 与 `@iar/runtime`，解析类型
-  声明，并发现缺失或越界的发布文件
+- **THEN** 检查能够从打包内容导入 `@iar/plugin`、`@iar/runtime` 与
+  `@iar/pi-bridge`，解析类型声明，并发现缺失或越界的发布文件
+
+#### Scenario: Targeted package packing runs
+
+- **WHEN** 发布者执行 Runtime 或 Pi Bridge 的定向打包命令
+- **THEN** 命令只生成目标包的 npm tarball，并使用该包的 `dist` 构建产物和 `package.json`
+
+### Requirement: Pi bridge metadata identifies a loadable extension
+
+`@iar/pi-bridge` SHALL 声明稳定的 `./pi-extension` 导出、Pi Extension 文件入口和公共发布范围，使 Pi 宿主可以按包元数据加载扩展。
+
+#### Scenario: Pi package metadata is inspected
+
+- **WHEN** 发布校验读取 `@iar/pi-bridge/package.json`
+- **THEN** 校验确认 `exports`、`pi.extensions` 和 `files` 都指向包内的 `dist` 文件，且包不依赖 `@iar/runtime`
+
+### Requirement: Publish configuration excludes deployment secrets
+
+目标包 SHALL 只发布编译产物和包元数据；模型配置、端口配置、环境变量文件、源码、测试和本地编辑器配置 SHALL 不进入 npm tarball。
+
+#### Scenario: Package tarball is inspected
+
+- **WHEN** 发布者执行 Runtime 或 Pi Bridge 的 `npm pack --dry-run`
+- **THEN** tarball 只包含 `package.json` 和 `dist/**`，不包含 `src/**`、`.env`、`config/**` 或 `.vscode/**`
 
 ### Requirement: Unified package entries are publishable
 
