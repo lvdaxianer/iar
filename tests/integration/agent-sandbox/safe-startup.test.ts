@@ -27,7 +27,7 @@ const secret = 'private-startup-key-sentinel';
  * @date 2026-10-18
  */
 function start(args: string[], key: string, port: number): Record<string, unknown> {
-  const env = { ...process.env, IAR_SANDBOX_PORT: String(port), IAR_LLM_API_KEY: key, IAR_MODEL_API_KEY: 'CHANGE_ME',
+  const env = { ...process.env, IAR_LOG_FORMAT: 'json', IAR_SANDBOX_PORT: String(port), IAR_LLM_API_KEY: key, IAR_MODEL_API_KEY: 'CHANGE_ME',
     IAR_LLM_BASE_URL: 'http://127.0.0.1:1' };
   // 启动包含 node:sqlite 工作线程初始化；超时只保护测试不挂死，不是服务 SLA。
   const child = spawnSync(process.execPath, ['scripts/run-agent-sandbox.mjs', ...args], { encoding: 'utf8', env, timeout: 2000 });
@@ -87,7 +87,7 @@ test('自动选择真实模式时日志不泄漏凭据', () => {
  * @date 2026-10-18
  */
 test('启动失败只输出安全固定分类', () => {
-  const env = { ...process.env, IAR_SANDBOX_PORT: '65536', IAR_LLM_API_KEY: secret, IAR_MODEL_API_KEY: 'CHANGE_ME' };
+  const env = { ...process.env, IAR_LOG_FORMAT: 'json', IAR_SANDBOX_PORT: '65536', IAR_LLM_API_KEY: secret, IAR_MODEL_API_KEY: 'CHANGE_ME' };
   const child = spawnSync(process.execPath, ['scripts/run-agent-sandbox.mjs', '--brain', 'scripted'], { encoding: 'utf8', env, timeout: 2000 });
   assert.equal(child.status, 1);
   assert.equal(child.stdout, '');
@@ -109,7 +109,7 @@ test('端口占用输出 port_in_use 及恢复提示', async () => {
   const address = blocker.address();
   assert.ok(address && typeof address !== 'string');
   try {
-    const env = { ...process.env, IAR_SANDBOX_PORT: String(address.port), IAR_LLM_API_KEY: 'CHANGE_ME', IAR_MODEL_API_KEY: 'CHANGE_ME' };
+    const env = { ...process.env, IAR_LOG_FORMAT: 'json', IAR_SANDBOX_PORT: String(address.port), IAR_LLM_API_KEY: 'CHANGE_ME', IAR_MODEL_API_KEY: 'CHANGE_ME' };
     const child = spawnSync(process.execPath, ['scripts/run-agent-sandbox.mjs', '--brain', 'scripted'], { encoding: 'utf8', env, timeout: 2000 });
     assert.equal(child.status, 1);
     assert.deepEqual(parseStartupLog(child.stderr), { level: 'warn', event: 'sandbox.start_failed', outcome: 'port_in_use' });
@@ -129,7 +129,7 @@ test('端口占用输出 port_in_use 及恢复提示', async () => {
  * @date 2026-10-18
  */
 function checkArgumentFailure(args: string[], outcome: string): void {
-  const env = { ...process.env, IAR_LLM_API_KEY: 'CHANGE_ME', IAR_MODEL_API_KEY: 'CHANGE_ME' };
+  const env = { ...process.env, IAR_LOG_FORMAT: 'json', IAR_LLM_API_KEY: 'CHANGE_ME', IAR_MODEL_API_KEY: 'CHANGE_ME' };
   const child = spawnSync(process.execPath, ['scripts/run-agent-sandbox.mjs', ...args], { encoding: 'utf8', env, timeout: 2000 });
   assert.equal(child.status, 1);
   assert.equal(child.stdout, '');
@@ -156,7 +156,7 @@ test('启动前配置读取失败不输出自由错误', () => {
   mkdirSync(dotEnv);
   try {
     const child = spawnSync(process.execPath, [resolve('scripts/run-agent-sandbox.mjs')],
-      { cwd: directory, encoding: 'utf8', timeout: 2000 });
+      { cwd: directory, encoding: 'utf8', timeout: 2000, env: { ...process.env, IAR_LOG_FORMAT: 'json' } });
     assert.equal(child.status, 1);
     assert.equal(child.stdout, '');
     assert.deepEqual(parseStartupLog(child.stderr), { level: 'warn', event: 'sandbox.start_failed', outcome: 'startup_failed' });
@@ -195,12 +195,12 @@ test('脚本关闭失败输出固定分类而不泄漏原始错误', () => {
   const logUrl = pathToFileURL(resolve('dist/examples/agent-sandbox/src/safe-log.js')).href;
   const source = readFileSync('scripts/run-agent-sandbox.mjs', 'utf8')
     .replace("import { loadDotEnv } from '../dist/examples/agent-sandbox/src/env.js';", 'const loadDotEnv = () => {};')
-    .replace("import { startSandboxServer } from '../dist/examples/agent-sandbox/src/server.js';",
+    .replace("const { startSandboxServer } = await import('../dist/examples/agent-sandbox/src/server.js');",
       "const startSandboxServer = async () => ({port: 1, mode: 'scripted', close: async () => {throw new Error('private-shutdown-error')}});")
-    .replace("'../dist/examples/agent-sandbox/src/safe-log.js'", JSON.stringify(logUrl));
+    .replaceAll("'../dist/examples/agent-sandbox/src/safe-log.js'", JSON.stringify(logUrl));
   const encoded = Buffer.from(source).toString('base64');
   const script = `setInterval(()=>{},1000); setTimeout(()=>process.kill(process.pid,'SIGTERM'),200); await import('data:text/javascript;base64,${encoded}');`;
-  const env = { ...process.env, IAR_LLM_API_KEY: 'CHANGE_ME', IAR_MODEL_API_KEY: 'CHANGE_ME' };
+  const env = { ...process.env, IAR_LOG_FORMAT: 'json', IAR_LLM_API_KEY: 'CHANGE_ME', IAR_MODEL_API_KEY: 'CHANGE_ME' };
   const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', env, timeout: 2000 });
   assert.equal(child.status, 1);
   assert.doesNotMatch(child.stderr, /private-shutdown-error/);

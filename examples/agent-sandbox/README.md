@@ -60,7 +60,7 @@ IAR_SANDBOX_PORT=8788 npm run demo:sandbox
 | `IAR_LLM_API_KEY` | real 模式的 API Key（兼容 `IAR_MODEL_API_KEY`） | 无 |
 | `IAR_LLM_BASE_URL` | OpenAI 兼容接口地址 | `https://api.moonshot.cn/v1` |
 | `IAR_LLM_MODEL_ID` | 普通交互模型名称；profile 映射优先使用它 | profile `modelId` |
-| `IAR_LOG_FORMAT` | 日志输出格式：`json` 或 `pretty`（中文+英文安全摘要） | `json` |
+| `IAR_LOG_FORMAT` | 日志输出格式：`json` 或 `pretty`（中文+英文安全摘要） | `pretty` |
 | `IAR_INTENT_MODEL_ENDPOINT` | Intent Model 独立 OpenAI 兼容接口地址 | 无，缺失时 fail-closed |
 | `IAR_INTENT_MODEL_API_KEY` | Intent Model 独立 API Key | 无，缺失时 fail-closed |
 | `IAR_INTENT_MODEL_ID` | Intent Model 名称 | profile `modelId` |
