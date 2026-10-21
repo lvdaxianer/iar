@@ -109,7 +109,7 @@ test('宿主可注入专用异步输出并保留安全过滤', () => {
   const script = `import {configureSafeLogWriter,writeSafeLog} from './dist/examples/agent-sandbox/src/safe-log.js';
     configureSafeLogWriter((buffer,done)=>{process.stderr.write(buffer);done(null,buffer.length)});
     writeSafeLog({level:'warn',event:'model.http',secret:'private-sentinel'}); process.stdout.write('protocol\\n');`;
-  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' });
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', env: { ...process.env, IAR_LOG_FORMAT: 'json' } });
   assert.equal(child.status, 0);
   assert.equal(child.stdout, 'protocol\n');
   assert.deepEqual(JSON.parse(child.stderr), record);
@@ -142,7 +142,7 @@ test('进程级卡住状态可读取且不能并发切换输出', () => {
 test('默认日志不污染宿主 stdout 协议', () => {
   const script = `import {writeSafeLog} from './dist/examples/agent-sandbox/src/safe-log.js';
     process.stdout.write('protocol-line\\n'); writeSafeLog({level:'warn',event:'model.http'});`;
-  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' });
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', env: { ...process.env, IAR_LOG_FORMAT: 'json' } });
   assert.equal(child.status, 0);
   assert.equal(child.stdout, 'protocol-line\n');
   assert.deepEqual(JSON.parse(child.stderr), record);

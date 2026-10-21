@@ -122,18 +122,68 @@ export function createBilingualLogWriter(writer: SafeLogWriter): SafeLogWriter {
   return (buffer, done) => {
     try {
       const record = JSON.parse(buffer.toString('utf8')) as Record<string, unknown>;
-      writer(Buffer.from(`${formatBilingualLogLine(record)}\n`), done);
+      const formatted = Buffer.from(`${formatBilingualLogLine(record)}\n`);
+      let offset = 0;
+      const writePart = (): void => writer(formatted.subarray(offset), (error, written) => {
+        if (error || !Number.isInteger(written) || written <= 0 || written > formatted.length - offset) {
+          done(error ?? new Error('bilingual log writer stalled'), 0);
+          return;
+        }
+        offset += written;
+        if (offset < formatted.length) writePart();
+        else done(null, buffer.length);
+      });
+      writePart();
     } catch {
       writer(buffer, done);
     }
   };
 }
 
+/** 日志格式只允许机器 JSON 或终端可读摘要。 */
+type LogFormat = 'json' | 'pretty';
+
 /**
- * 当前进程的默认安全接收器；IAR_LOG_FORMAT=pretty 时启用双语终端输出。
+ * 解析当前进程的日志格式配置。
+ *
+ * 未配置或配置为未知值时使用终端可读摘要；需要机器解析时显式设置 json。
+ * @returns 规范化后的日志格式
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-22
  */
-const initialWriter = process.env.IAR_LOG_FORMAT === 'pretty' ? createBilingualLogWriter(defaultLogWriter) : defaultLogWriter;
-let sink = createSafeLogSink(initialWriter, MAX_LOG_QUEUE);
+function resolveLogFormat(): LogFormat {
+  return process.env.IAR_LOG_FORMAT?.trim().toLowerCase() === 'json' ? 'json' : 'pretty';
+}
+
+/**
+ * 按环境配置创建默认日志写入器。
+ * @param format - 目标日志格式
+ * @returns 默认安全日志写入器
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-22
+ */
+function createEnvironmentWriter(format: LogFormat): SafeLogWriter {
+  return format === 'pretty' ? createBilingualLogWriter(defaultLogWriter) : defaultLogWriter;
+}
+let environmentFormat = resolveLogFormat();
+let sinkMode: 'environment' | 'custom' = 'environment';
+let sink = createSafeLogSink(createEnvironmentWriter(environmentFormat), MAX_LOG_QUEUE);
+
+/**
+ * 在首次写入前同步环境文件加载后的日志格式变化。
+ *
+ * 自定义宿主写入器和已有排队记录不参与切换，避免并发输出到两个接收器。
+ * @returns 无返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-22
+ */
+function refreshEnvironmentWriter(): void {
+  if (sinkMode !== 'environment' || !sink.isIdle()) return;
+  const format = resolveLogFormat();
+  if (format === environmentFormat) return;
+  sink = createSafeLogSink(createEnvironmentWriter(format), MAX_LOG_QUEUE);
+  environmentFormat = format;
+}
 
 /**
  * 在空闲时安装宿主专用异步写入边界，不关闭宿主资源。
@@ -145,6 +195,7 @@ let sink = createSafeLogSink(initialWriter, MAX_LOG_QUEUE);
 export function configureSafeLogWriter(writer: SafeLogWriter): void {
   // 在途写入或排队期间禁止切换，避免两个接收器并发输出。
   if (!sink.isIdle()) throw new Error('safe log sink is not idle');
+  sinkMode = 'custom';
   sink = createSafeLogSink(writer, MAX_LOG_QUEUE);
 }
 
@@ -165,10 +216,12 @@ export function getSafeLogSinkStatus(): Readonly<SafeLogSinkStatus> { return sin
  */
 export function setSafeLogWriterForTesting(writer: SafeLogWriter): () => void {
   const previous = sink;
+  const previousMode = sinkMode;
   const replacement = createSafeLogSink(writer, MAX_LOG_QUEUE);
+  sinkMode = 'custom';
   sink = replacement;
   // 仅当测试接收器仍是当前接收器时才恢复，避免覆盖其他替换。
-  return () => { if (sink === replacement) sink = previous; };
+  return () => { if (sink === replacement) { sink = previous; sinkMode = previousMode; } };
 }
 
 /**
@@ -188,6 +241,7 @@ export function safeLogIsIdleForTesting(): boolean { return sink.isIdle(); }
  * @date 2026-10-18
  */
 export function writeSafeLog(record: Record<string, unknown>): void {
+  refreshEnvironmentWriter();
   sink.write(record);
 }
 

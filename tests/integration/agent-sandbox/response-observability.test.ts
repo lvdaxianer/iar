@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { callModelStream } from '../../../examples/agent-sandbox/src/models/model-stream-transport.js';
-import { createBilingualLogWriter, formatBilingualLogLine } from '../../../examples/agent-sandbox/src/safe-log.js';
+import { createBilingualLogWriter, createSafeLogSink, formatBilingualLogLine } from '../../../examples/agent-sandbox/src/safe-log.js';
 import { TurnTimingTracker } from '../../../examples/agent-sandbox/src/turn-timing.js';
 
 test('计时追踪器记录总耗时、阶段耗时和首 token 耗时', () => {
@@ -45,9 +47,28 @@ test('双语日志格式只展示受控摘要，不包含请求正文', () => {
 test('双语日志写入器将结构化 JSON 转成可读单行', async () => {
   let output = '';
   const writer = createBilingualLogWriter((buffer, done) => { output += buffer.toString('utf8'); done(null, buffer.length); });
-  await new Promise<void>((resolve) => writer(Buffer.from('{"level":"info","event":"iar.turn.stage","stage":"route.select","durationMs":8}\n'), (error) => { assert.equal(error, null); resolve(); }));
+  const sink = createSafeLogSink(writer, 2);
+  sink.write({ level: 'info', event: 'iar.turn.stage', stage: 'route.select', durationMs: 8 });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await new Promise<void>((resolve) => setImmediate(resolve));
   assert.match(output, /阶段耗时 \/ Stage timing/);
   assert.match(output, /route\.select/);
+  assert.equal(output.trim().split('\n').length, 1);
+});
+
+test('日志模块先加载后仍能采用随后加载的 pretty 配置', () => {
+  const safeLogPath = resolve(process.cwd(), 'dist/examples/agent-sandbox/src/safe-log.js');
+  const script = [
+    `const { writeSafeLog } = await import(${JSON.stringify(safeLogPath)});`,
+    "process.env.IAR_LOG_FORMAT = 'pretty';",
+    "writeSafeLog({ level: 'info', event: 'iar.turn.completed', traceId: '123e4567-e89b-12d3-a456-426614174000', durationMs: 12 });",
+    'await new Promise((resolve) => setTimeout(resolve, 50));'
+  ].join('\n');
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', env: { ...process.env, IAR_LOG_FORMAT: '' } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /轮次完成 \/ Turn completed/);
+  assert.doesNotMatch(result.stderr, /"event":"iar\.turn\.completed"/);
+  assert.equal(result.stderr.trim().split('\n').length, 1);
 });
 
 test('模型 SSE 将 reasoning_content 和 content 分别交付', async () => {

@@ -167,6 +167,8 @@ IAR 提供 `@iar/pi-bridge` Pi Package，把 Pi 的输入扩展为一层可选�
 npm run demo:sandbox
 ```
 
+演示日志默认以中文+英文可读摘要输出，包含总耗时和各阶段耗时；如需机器解析，可设置 `IAR_LOG_FORMAT=json npm run demo:sandbox`。也可以在根目录 `.env` 中配置 `IAR_LOG_FORMAT=pretty` 或 `json`，重启后生效。
+
 `npm run demo:pi-host` 会同时启动 Bridge（:8787）和一个 Pi 宿主演示页（:8788，Pi 宿主模拟）：页面输入经 `@iar/pi-bridge` 扩展的 input hook 先走 IAR，命中展示 IAR custom entry 并阻断模拟的 Pi Agent，未命中才由进程内 pi-agent-core 回答，待确认动作对应 `/iar-confirm` 与 `/iar-cancel`。演示页与 `demo:sandbox` 的网页共用同一套样式与安全 Markdown 渲染资源（`examples/agent-sandbox/web/styles.css` 与 Markdown 片段），视觉与交互一致，仅底层协议不同。
 
 如果包已发布到 npm，可直接安装到 Pi：

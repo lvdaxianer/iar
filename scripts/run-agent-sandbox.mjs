@@ -10,8 +10,6 @@
  * @date 2026-10-17
  */
 import { loadDotEnv } from '../dist/examples/agent-sandbox/src/env.js';
-import { startSandboxServer } from '../dist/examples/agent-sandbox/src/server.js';
-import { writeSafeLog } from '../dist/examples/agent-sandbox/src/safe-log.js';
 
 /** 启动失败时给予异步日志的有限调度时间，单位毫秒。 */
 const STARTUP_LOG_GRACE_MS = 100;
@@ -58,8 +56,14 @@ async function exitStartupFailure(outcome = 'startup_failed') {
 
 // 模式判定依赖环境变量，读取失败也不得泄露文件系统异常。
 try { loadDotEnv(); } catch {
-  await exitStartupFailure();
+  const { writeSafeLog } = await import('../dist/examples/agent-sandbox/src/safe-log.js');
+  writeSafeLog({ level: 'warn', event: 'sandbox.start_failed', outcome: 'startup_failed' });
+  await new Promise((resolve) => setTimeout(resolve, STARTUP_LOG_GRACE_MS));
+  process.exit(1);
 }
+
+const { startSandboxServer } = await import('../dist/examples/agent-sandbox/src/server.js');
+const { writeSafeLog } = await import('../dist/examples/agent-sandbox/src/safe-log.js');
 
 const args = process.argv.slice(2);
 const brainFlagIndex = args.indexOf('--brain');
