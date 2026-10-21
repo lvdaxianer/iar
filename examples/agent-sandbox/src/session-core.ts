@@ -20,6 +20,7 @@ import { LocalWorkflow, WorkflowEventLog, type ActionExecutor } from '@iar/workf
 import { SyncPluginBridge } from './execution/sync-plugin-bridge.js';
 import { BrainModelProvider } from './models/llm-provider.js';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
+import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { createSandboxModels, createSandboxPluginHost } from './session-dependencies.js';
 import { summarizeAction } from './session-helpers.js';
 import { writeSafeLog } from './safe-log.js';
@@ -97,6 +98,8 @@ export class SandboxSessionCore {
   protected readonly pluginHost: PluginHost;
   /** 回复使用的 provider；scripted 模式不访问上游。 */
   protected readonly brainProvider: BrainModelProvider | ScriptedModelProvider;
+  /** 可选的进程内 Pi 兜底委托；未注入时未命中路由走 IAR 兜底回复。 */
+  protected readonly piAgent: PiAgentDelegate | undefined;
   /** 根据角色获取模型策略及超时配置。 */
   protected readonly registry: ModelProfileRegistry;
   /** 将模型请求分派到配置的 provider。 */
@@ -139,9 +142,10 @@ export class SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public constructor(options: { mode: SandboxMode; decisionBackend?: SandboxDecisionBackend; sessionId?: string; snapshotStore?: SnapshotStore; persistenceProvider?: SessionPersistenceProvider; persistenceProviderOpened?: boolean; recentMessageLimit?: number }) {
+  public constructor(options: { mode: SandboxMode; decisionBackend?: SandboxDecisionBackend; sessionId?: string; snapshotStore?: SnapshotStore; persistenceProvider?: SessionPersistenceProvider; persistenceProviderOpened?: boolean; recentMessageLimit?: number; piAgent?: PiAgentDelegate }) {
     try {
       this.mode = options.mode; this.sessionId = options.sessionId ?? SESSION_RUN_ID;
+      this.piAgent = options.piAgent;
       this.recentMessageLimit = normalizeRecentMessageLimit(options.recentMessageLimit);
       this.snapshotStore = options.snapshotStore; this.persistenceProvider = options.persistenceProvider;
       this.persistenceDispatcher = this.createPersistenceDispatcher(options.persistenceProvider);
@@ -211,6 +215,7 @@ export class SandboxSessionCore {
     this.compactCount = 0;
     this.decisionEventCount = 0;
     this.consumedWorkflowEvents = 0;
+    this.piAgent?.reset();
     this.queueSnapshot('reset');
   }
 

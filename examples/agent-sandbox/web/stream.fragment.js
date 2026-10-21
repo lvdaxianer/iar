@@ -86,6 +86,7 @@
     var metaText = result.reasonCode === 'model_response_too_large' && result.status === 'executed' ? '已执行 · 回复不完整' : result.status === 'executed'
       ? '已执行 · ' + (result.route && result.route.functionId ? result.route.functionId : '')
       : result.status === 'awaiting_confirmation' ? '等待确认'
+      : result.status === 'agent' ? 'Pi 兜底'
       : result.status === 'clarification' ? '需要澄清' : '失败';
     appendMessageMeta(state.div, metaText);
     recordConversation('bot', state.textEl.textContent, metaText);

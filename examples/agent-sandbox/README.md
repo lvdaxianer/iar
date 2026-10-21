@@ -2,6 +2,8 @@
 
 可交互的 IAR 插件沙盒示例：在网页输入一句话，后端走完「语义抽取 → 两阶段路由 → 策略/确认 → 插件执行 → 回复生成」全链路，右侧调试面板实时展示路由证据、事件流和 BehaviorContext，并支持显式触发上下文压缩。
 
+未命中业务路由的输入交给**进程内 Pi Agent**（[pi-agent-core](https://www.npmjs.com/package/@earendil-works/pi-agent-core)）兜底：scripted 模式用离线模板 streamFn，brain 模式用 pi-ai 真实模型（moonshotai-cn 目录）；IAR 处理的轮次以备注进入 Pi 上下文，网页里的对话在两侧都连续。
+
 当前沙盒模拟一个**企业数据平台**，共 **10 个子系统 = 10 个 Function**：每个 Function 对应一个本地插件（确定性 fixture，无真实副作用），并挂一个本地中文知识库（概念解释、操作步骤、常见问题、排错指南）。
 
 | Function | 子系统 | 操作（read 免确认 / action 需确认） |
@@ -62,6 +64,9 @@ IAR_SANDBOX_PORT=8788 npm run demo:sandbox
 | `IAR_INTENT_MODEL_API_KEY` | Intent Model 独立 API Key | 无，缺失时 fail-closed |
 | `IAR_INTENT_MODEL_ID` | Intent Model 名称 | profile `modelId` |
 | `IAR_SANDBOX_DECISION_BACKEND` | 决策 backend：`jev` 或 `intent-model`；不设置时 JEV 优先 | JEV 优先 |
+| `IAR_PI_MODEL_ID` | Pi 兜底 Agent 的模型标识（moonshotai-cn 目录内）；缺省依次尝试 `IAR_LLM_MODEL_ID`、`kimi-k2.6` | `kimi-k2.6` |
+| `IAR_PI_TIMEOUT_MS` | Pi 兜底单轮调用的超时毫秒数，超时中止并回退 IAR 兜底 | `120000` |
+| `MOONSHOT_API_KEY` | Pi 兜底 Agent 的 API Key；未设置时自动复用 `IAR_LLM_API_KEY` | 无 |
 | `IAR_SANDBOX_PORT` | 服务端口 | `8787` |
 | `IAR_PERSISTENCE_PROVIDER` | 会话 Provider 标识；默认内置 `sqlite` | `sqlite` |
 | `IAR_PERSISTENCE_MODULE` | 外部 Provider 的动态模块入口 | 无（内置 Provider 不需要） |
@@ -111,12 +116,17 @@ scripted 模式没有真实流，回复阶段会一次性下发 delta 与 done�
 
 ## 兜底回复
 
-路由未命中（unknown 意图或需澄清）时不再只回固定话术，而是分层兜底：
+路由未命中分两层兜底：
+
+- **Pi 兜底（默认）**：`semantic.intent` 为 `unknown` 且没有待确认事实/候选选择时，输入交给进程内 pi-agent-core 循环。scripted 模式用本地模板（身份与能力问题复刻沙箱话术，其余回退固定话术）；brain 模式用 pi-ai `moonshotai-cn` 真实模型。Pi 故障时自动回退下述 IAR 兜底。
+- **IAR 兜底**：非 pass-through 未命中（事实追问、候选选择、引用澄清等）或 Pi 不可用时的既有分层兜底：
 
 - **brain 模式**：先用 Response Generator 生成兜底回复，输入包含用户消息、最近对话、可用功能（10 个子系统的 functionId）和未命中原因码；提示词要求基于对话历史自然回答（如「你是谁呢」→ 自我介绍为 IAR Agent Sandbox；「我刚才让你干啥来着」→ 根据历史回答），或自然解释能做什么。只有生成失败才回退固定话术。
 - **scripted 模式**：轻量模板兜底，覆盖「你是谁 / 你能做什么（十项能力）/ 我刚才让你做什么（基于最近对话的关键词回忆）」，模板覆盖不了再回退固定话术。
 
 另外，brain 模式下语义抽取失败时会自动用离线 `ScriptedModelProvider` 重试一次，成功则继续走正常链路，并在路由证据里标注 `semanticFallback: true`；重试仍失败才返回错误回复。
+
+IAR 处理的每一轮（含确认/取消）都会以「【已由业务系统处理】」备注进入 Pi 上下文，Pi 自己回答的轮次不重复记录；会话 reset 时两侧一起清空。
 
 ## 确认策略
 
@@ -150,7 +160,7 @@ examples/agent-sandbox/
 │   ├── knowledge/
 │   │   ├── retrieval.ts          # 知识库加载（构造期校验）与确定性检索（字二元组 + 加权评分）
 │   │   └── bases/<functionId>.json ×10  # 每个子系统一个本地中文知识库（≥10 条）
-│   ├── models/                   # brain 真实 LLM provider / scripted 离线假大脑
+│   ├── models/                   # brain 真实 LLM provider / scripted 离线假大脑 / 进程内 Pi 兜底委托
 │   └── execution/                # worker 线程插件执行桥与注册表
 └── web/index.html                # 单文件聊天与调试面板
 ```

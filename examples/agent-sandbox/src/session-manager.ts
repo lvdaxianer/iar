@@ -6,6 +6,7 @@
 import { randomBytes } from 'node:crypto';
 import { AsyncResource } from 'node:async_hooks';
 import { IarSandboxSession, type SandboxMode } from './session.js';
+import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import type { SnapshotStore } from '@iar/storage';
 import type { SessionListPage, SessionListQuery, SessionPersistenceProvider } from '@iar/storage';
 
@@ -48,7 +49,7 @@ export class SandboxSessionManager {
    * @param mode - 会话运行模式 @param session - 兼容会话 @param limits - 资源上限
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  public constructor(private readonly mode: SandboxMode, session: IarSandboxSession, limits: SandboxSessionLimits = {}, private readonly snapshotStore?: SnapshotStore, private readonly persistenceProvider?: SessionPersistenceProvider, private readonly persistenceProviderOpened = false) {
+  public constructor(private readonly mode: SandboxMode, session: IarSandboxSession, limits: SandboxSessionLimits = {}, private readonly snapshotStore?: SnapshotStore, private readonly persistenceProvider?: SessionPersistenceProvider, private readonly persistenceProviderOpened = false, private readonly piAgentFactory?: (sessionId: string) => PiAgentDelegate) {
     this.limits = { ...DEFAULT_LIMITS, ...limits };
     if (Object.values(this.limits).some((value) => !Number.isSafeInteger(value) || value <= 0)) throw new Error('Invalid session limits');
     this.legacy = this.createEntry(session);
@@ -325,13 +326,14 @@ export class SandboxSessionManager {
   }
 
   /** 为所有独立会话注入同一套可替换持久化依赖，同时保持旧快照接口兼容。 */
-  private sessionOptions(id: string): { mode: SandboxMode; sessionId: string; snapshotStore?: SnapshotStore; persistenceProvider?: SessionPersistenceProvider; persistenceProviderOpened?: boolean } {
+  private sessionOptions(id: string): { mode: SandboxMode; sessionId: string; snapshotStore?: SnapshotStore; persistenceProvider?: SessionPersistenceProvider; persistenceProviderOpened?: boolean; piAgent?: PiAgentDelegate } {
     return {
       mode: this.mode,
       sessionId: id,
       ...(this.snapshotStore ? { snapshotStore: this.snapshotStore } : {}),
       ...(this.persistenceProvider ? { persistenceProvider: this.persistenceProvider } : {}),
-      ...(this.persistenceProviderOpened ? { persistenceProviderOpened: true } : {})
+      ...(this.persistenceProviderOpened ? { persistenceProviderOpened: true } : {}),
+      ...(this.piAgentFactory ? { piAgent: this.piAgentFactory(id) } : {})
     };
   }
 

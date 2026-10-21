@@ -9,6 +9,7 @@
  */
 import { startSandboxServer, type SandboxServerHandle } from '../../../examples/agent-sandbox/src/server.js';
 import { BrainModelProvider } from '../../../examples/agent-sandbox/src/models/llm-provider.js';
+import type { PiAgentDelegate } from '../../../examples/agent-sandbox/src/models/pi-agent-delegate.js';
 import type { ModelProviderRequest } from '@iar/decision';
 import type { ModelGateway } from '@iar/decision';
 import { safeLogIsIdleForTesting, setSafeLogWriterForTesting } from '../../../examples/agent-sandbox/src/safe-log.js';
@@ -52,7 +53,7 @@ export class ObservabilityFixture {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public async start(options: { mode: 'brain' | 'scripted'; port: number }): Promise<SandboxServerHandle> {
+  public async start(options: { mode: 'brain' | 'scripted'; port: number; piAgentFactory?: (sessionId: string) => PiAgentDelegate }): Promise<SandboxServerHandle> {
     // 只有 brain 模式需要测试连接，scripted 保持原有环境。
     if (options.mode === 'brain') {
       process.env.IAR_LLM_API_KEY = TEST_CONNECTION.apiKey;

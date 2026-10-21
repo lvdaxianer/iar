@@ -1,6 +1,8 @@
 import { ModelResponseLimitError, trackModelResponseLimit } from './models/model-transport.js';
+import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
+import { canPassThrough, runPiAgentDelegate } from './session-turn-helpers.js';
 import type { ActionDefinition, ActionResult, BehaviorContext, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/decision';
 import type { RouteResult } from '@iar/runtime';
@@ -33,6 +35,8 @@ export type StreamTurnContext = {
   currentBehaviorContext: () => BehaviorContext;
   /** 仅完整回复可写入宿主持有的历史。 */
   pushMessages: (userText: string, reply: string) => void;
+  /** 可选的进程内 Pi 委托，未命中业务路由时接管 eligible 输入。 */
+  piAgent?: PiAgentDelegate | undefined;
 };
 
 /** 流式对话阶段和终态。
@@ -117,11 +121,31 @@ export class SandboxSessionStreamTurn {
     const evidence = buildEvidence(route, frame);
     if (extracted.semanticFallback) evidence.semanticFallback = true;
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
+      const agentResult = await this.runStreamAgent({ userText, emit, evidence, behaviorContext, selectedDescriptor });
+      if (agentResult !== undefined) return agentResult;
       return this.finishStreamFallback({ userText, traceId, emit, behaviorContext: routeContext, evidence, resolvedReferences: references.references });
     }
     emit({ type: 'stage', stage: 'action' });
     const outcome = await this.context.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame, route, behaviorContext: routeContext });
     return this.finishStreamOutcome({ userText, traceId, emit, evidence, outcome });
+  }
+
+  /** 未命中业务路由时交给进程内 Pi Agent 流式处理；委托缺失、不适用或故障时返回 undefined。
+   * Pi 接管时不增加 unresolved streak，委托故障时回退 IAR 兜底回复。
+   * @param context - 用户输入、事件回调、证据与 eligibility 上下文
+   * @returns agent 结果或 undefined
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  protected async runStreamAgent(context: { userText: string; emit: (event: StreamEvent) => void; evidence: RouteEvidence; behaviorContext: BehaviorContext; selectedDescriptor?: PluginDescriptor | undefined }): Promise<TurnResult | undefined> {
+    const { userText, emit, evidence, behaviorContext, selectedDescriptor } = context;
+    const delegate = this.context.piAgent;
+    if (!delegate || !canPassThrough(behaviorContext, evidence, selectedDescriptor)) return undefined;
+    emit({ type: 'stage', stage: 'response' });
+    const reply = await runPiAgentDelegate(delegate, userText, (delta) => emit({ type: 'delta', text: delta }));
+    if (reply === undefined) return undefined;
+    this.context.pushMessages(userText, reply);
+    return { status: 'agent', reply, route: evidence };
   }
 
   /** 流式生成未命中路由的回复，超限结果不写入历史。

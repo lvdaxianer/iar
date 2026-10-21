@@ -15,7 +15,7 @@ import { confirmationScopeHash } from '@iar/workflow';
 import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
 import { createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
-import { canPassThrough, finishConfirmedAction, pendingBridgeResult, rejectSelection, resolveSelection } from './session-turn-helpers.js';
+import { finishConfirmedAction, pendingBridgeResult, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection } from './session-turn-helpers.js';
 import type { CompactResult, ConfirmResult, ExecuteTurnOutcome, ExtractFrameOutcome, RouteEvidence, StreamEvent, TurnResult } from './session-types.js';
 export type { CompactResult, ConfirmResult, PendingActionSummary, RouteEvidence, SandboxDecisionBackend, SandboxMode, SandboxState, StreamEvent, TurnResult, TurnStage } from './session-types.js';
 /** 公开会话对话和确认入口。
@@ -108,7 +108,8 @@ export class IarSandboxSession extends SandboxSessionCore {
       fallbackReplyStreamed: (context, onDelta) => this.replies.fallbackReplyStreamed(context, onDelta),
       generateReplyStreamed: (context, onDelta) => this.replies.generateReplyStreamed(context, onDelta),
       currentBehaviorContext: () => this.projector.current(),
-      pushMessages: (text, reply) => this.replies.pushMessages(text, reply)
+      pushMessages: (text, reply) => this.replies.pushMessages(text, reply),
+      piAgent: this.piAgent
     });
   }
 
@@ -120,7 +121,7 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @date 2026-10-19
    */
   public turnStreamed(text: string, emit: (event: StreamEvent) => void): Promise<TurnResult> {
-    return this.whenReady().then(() => this.streaming.turnStreamed(text, emit));
+    return this.whenReady().then(() => this.streaming.turnStreamed(text, emit)).then((result) => recordAgentExchange(this.piAgent, text, result));
   }
   /**
    * 执行一轮对话：抽取 → 路由 → 策略/确认 → 执行 → 回复生成。
@@ -131,7 +132,7 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @date 2026-10-18
    */
   public async turn(text: string): Promise<TurnResult> {
-    return this.turnInternal(text, false);
+    return recordAgentExchange(this.piAgent, text, await this.turnInternal(text, false));
   }
 
   /**
@@ -193,8 +194,8 @@ export class IarSandboxSession extends SandboxSessionCore {
     // 抽取降级须保留在返回的路由证据中。
     if (extracted.semanticFallback) evidence.semanticFallback = true;
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
-      if (passThroughOnNoMatch && route.status === 'noul' && canPassThrough(behaviorContext, evidence, selectedDescriptor)) return { status: 'pass_through', route: evidence };
-      return this.finishNormalFallback({ userText, traceId, behaviorContext: routeContext, evidence, resolvedReferences: references.references });
+      const resolved = await resolveNoMatchTurn({ piAgent: this.piAgent, pushMessages: this.replies.pushMessages.bind(this.replies), passThroughOnNoMatch, userText, evidence, behaviorContext, selectedDescriptor });
+      return resolved ?? this.finishNormalFallback({ userText, traceId, behaviorContext: routeContext, evidence, resolvedReferences: references.references });
     }
     const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame: extracted.frame, route, behaviorContext: routeContext });
     return this.finishNormalOutcome({ userText, traceId, evidence, outcome });
@@ -301,8 +302,8 @@ export class IarSandboxSession extends SandboxSessionCore {
     if (!this.pending) return { status: 'failed', reply: '当前没有待确认的操作。', reasonCode: 'no_pending_confirmation' };
     const { action } = this.pending;
     // 取消路径不调用执行器，避免产生副作用。
-    if (!accepted) return this.cancelConfirmation(action);
-    return this.executeConfirmation(action);
+    const result = accepted ? await this.executeConfirmation(action) : await this.cancelConfirmation(action);
+    return recordAgentExchange(this.piAgent, accepted ? '（确认执行）' : '（取消操作）', result);
   }
   /** 取消当前动作并先投影工作流事件。
    * @param action - 用户取消的待确认动作

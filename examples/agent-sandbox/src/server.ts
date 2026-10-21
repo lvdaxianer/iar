@@ -15,6 +15,7 @@ import { IarSandboxSession, type SandboxMode } from './session.js';
 import { registerSandboxRoutes } from './http-transport.js';
 import { SandboxSessionManager, type SandboxSessionLimits } from './session-manager.js';
 import { loadSandboxPage } from './page-template.js';
+import { createPiAgentDelegate, type PiAgentDelegate } from './models/pi-agent-delegate.js';
 import type { SnapshotStore } from '@iar/storage';
 import type { SessionPersistenceProvider } from '@iar/storage';
 import { loadSandboxPersistenceProvider } from './persistence-provider.js';
@@ -33,6 +34,8 @@ export type SandboxServerOptions = {
   snapshotStore?: SnapshotStore;
   /** 可替换的会话持久化 Provider；未提供时加载内置或环境配置 Provider。 */
   persistenceProvider?: SessionPersistenceProvider;
+  /** 自定义 Pi 委托工厂；未提供时按模式创建内置进程内 Pi 兜底。 */
+  piAgentFactory?: (sessionId: string) => PiAgentDelegate;
 };
 type ClosableSnapshotStore = SnapshotStore & { close?: () => Promise<void> };
 type ClosablePersistenceProvider = SessionPersistenceProvider;
@@ -101,8 +104,9 @@ async function createSandboxStartupResources(options: SandboxServerOptions): Pro
   try {
     if (options.persistenceProvider) await persistenceProvider?.open(undefined);
     const persistenceProviderOpened = persistenceProvider !== undefined;
-    const session = new IarSandboxSession({ mode: options.mode, sessionId: 'legacy', ...(snapshotStore ? { snapshotStore } : {}), ...(persistenceProvider ? { persistenceProvider, persistenceProviderOpened: true } : {}) });
-    return { session, manager: new SandboxSessionManager(options.mode, session, options.sessionLimits, snapshotStore, persistenceProvider, persistenceProviderOpened), ...(snapshotStore ? { snapshotStore } : {}), ...(persistenceProvider ? { persistenceProvider, persistenceProviderOpened: true } : {}) };
+    const piAgentFactory = options.piAgentFactory ?? ((sessionId: string) => createPiAgentDelegate({ mode: options.mode, sessionId }));
+    const session = new IarSandboxSession({ mode: options.mode, sessionId: 'legacy', piAgent: piAgentFactory('legacy'), ...(snapshotStore ? { snapshotStore } : {}), ...(persistenceProvider ? { persistenceProvider, persistenceProviderOpened: true } : {}) });
+    return { session, manager: new SandboxSessionManager(options.mode, session, options.sessionLimits, snapshotStore, persistenceProvider, persistenceProviderOpened, piAgentFactory), ...(snapshotStore ? { snapshotStore } : {}), ...(persistenceProvider ? { persistenceProvider, persistenceProviderOpened: true } : {}) };
   } catch (error) {
     try { await persistenceProvider?.close(); } catch { /* 保留原始启动故障。 */ }
     throw error;

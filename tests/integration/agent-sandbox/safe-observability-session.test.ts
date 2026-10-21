@@ -10,9 +10,23 @@ import { createServer } from 'node:net';
 import test from 'node:test';
 import type { ModelProfileRegistry } from '@iar/decision';
 import { MAX_MODEL_RESPONSE_BYTES } from '../../../examples/agent-sandbox/src/models/model-transport.js';
+import type { PiAgentDelegate } from '../../../examples/agent-sandbox/src/models/pi-agent-delegate.js';
 import { safeModelTraceId } from '../../../examples/agent-sandbox/src/safe-log.js';
 import { createStreamRequest, createTestProvider, flushObservabilityLogs, observeAuditTraces, withObservabilityFixture,
   type ObservabilityFixture } from './observability-fixture.js';
+
+/** 传输层用例只锁定 IAR 模型链路，Pi 兜底以立即失败的委托旁路。
+ * @returns 立即拒绝的 Pi 委托
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-21
+ */
+function disabledPiAgentFactory(): PiAgentDelegate {
+  return {
+    run: () => Promise.reject(new Error('pi disabled in transport test')),
+    recordHandledTurn: () => undefined,
+    reset: () => undefined
+  };
+}
 
 /** 流先交付可观察增量，再超过响应上限，以验证不完整结果处理。
  * @param state - 记录服务端是否取消上游流
@@ -107,7 +121,7 @@ test('模型响应超限时普通和流式会话明确失败，不保存截断�
   const probe = createServer().listen(0, '127.0.0.1'); await once(probe, 'listening');
   const address = probe.address(); assert.ok(address && typeof address !== 'string');
   await new Promise<void>((resolve) => probe.close(() => resolve()));
-  const server = await fixture.start({ mode: 'brain', port: address.port });
+  const server = await fixture.start({ mode: 'brain', port: address.port, piAgentFactory: disabledPiAgentFactory });
   await assertOversizedFallback(server);
   await assertOversizedExecution(server);
   await assertOversizedHttpStream(server, state);
@@ -144,7 +158,7 @@ async function timeoutFetch(_url: string | URL | Request, options?: RequestInit)
  */
 async function checkSessionTimeouts(fixture: ObservabilityFixture): Promise<void> {
   globalThis.fetch = timeoutFetch;
-  const server = await fixture.start({ mode: 'brain', port: 29885 });
+  const server = await fixture.start({ mode: 'brain', port: 29885, piAgentFactory: disabledPiAgentFactory });
   const auditTraces = observeAuditTraces(server);
   const registry = (server.session as unknown as { registry: ModelProfileRegistry }).registry;
   const original = registry.forRole.bind(registry);
@@ -253,7 +267,7 @@ function installSessionCancellation(controllers: AbortController[]): () => void 
 async function checkSessionCancellation(fixture: ObservabilityFixture): Promise<void> {
   const restore = installSessionCancellation([]);
   try {
-    const server = await fixture.start({ mode: 'brain', port: 29887 });
+    const server = await fixture.start({ mode: 'brain', port: 29887, piAgentFactory: disabledPiAgentFactory });
     assert.equal((await server.session.turnStreamed('你好', () => {})).status, 'clarification');
     await flushObservabilityLogs();
     const records = fixture.records();

@@ -17,7 +17,7 @@ test('IAR bridge maps Pi sessions and passes through non-business input', async 
     const passThrough = await server.app.inject({ method: 'POST', url: `/api/bridge/v1/sessions/${first.iarSessionId}/input`, payload: { text: '帮我写一个 TypeScript 函数' } });
     assert.equal(passThrough.statusCode, 200); assert.equal(passThrough.json().disposition, 'pass_through');
     const ordinary = await server.app.inject({ method: 'POST', url: '/api/chat', payload: { message: '帮我写一个 TypeScript 函数' } });
-    assert.equal(ordinary.statusCode, 200); assert.equal(ordinary.json().status, 'clarification');
+    assert.equal(ordinary.statusCode, 200); assert.equal(ordinary.json().status, 'agent');
   } finally { await server.close(); }
 });
 
