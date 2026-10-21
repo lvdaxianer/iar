@@ -8,7 +8,7 @@
 ## 2. 验证与集成
 
 - [x] 2.1 运行构建、日志专项测试和全量测试，确认耗时日志字段、脱敏与业务行为不回归。
-- [ ] 2.2 运行 `openspec validate fix-log-format-loading --strict`，完成代码审查、提交并合并回 `master`。
+- [x] 2.2 运行 `openspec validate fix-log-format-loading --strict`，完成代码审查、提交并合并回 `master`。
 
 ## Workflow follow-up
 
