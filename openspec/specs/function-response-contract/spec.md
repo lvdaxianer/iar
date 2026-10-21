@@ -27,3 +27,19 @@ Every Function Handler result SHALL use a versioned response contract with one o
 
 - **WHEN** a Handler omits required response fields, uses an unknown mode, attaches text to `none` or exceeds response bounds
 - **THEN** the runtime rejects the result with a stable validation error and does not expose the invalid content
+
+### Requirement: Model response text may contain Markdown
+
+The response contract SHALL continue to require a valid `iar.response/v1` envelope while allowing the generated `text` field to contain bounded Markdown; Markdown fences SHALL NOT be used to wrap the outer JSON response.
+
+#### Scenario: Markdown is returned in text
+- **WHEN** a `model` Function result is sent to `response.generate` and the Agent prompt requests Markdown
+- **THEN** the validated response contains Markdown in `text` and remains a valid `iar.response/v1` object
+
+#### Scenario: Direct result remains direct
+- **WHEN** a Function returns `direct`
+- **THEN** the runtime returns the validated direct text without invoking the response model, regardless of the Agent overall prompt
+
+#### Scenario: None result remains silent
+- **WHEN** a Function returns `none`
+- **THEN** the runtime does not create a normal assistant chat reply or invoke the response model
