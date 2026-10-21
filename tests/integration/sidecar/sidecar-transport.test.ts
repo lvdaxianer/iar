@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createServiceApi, type ServiceApiRequest } from '@iar/adapters-service';
 import { createSidecarServer, createSidecarTransport } from '@iar/adapters-sidecar';
-import { LocalWorkflow } from '@iar/workflow';
+import { LocalWorkflow } from '@iar/runtime';
 import { PluginHost } from '@iar/plugins';
 import { SCHEMA_VERSIONS, type WorkflowDefinition } from '@iar/contracts';
 

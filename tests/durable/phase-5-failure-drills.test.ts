@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type WorkflowDefinition } from '@iar/contracts';
 import { InMemoryDurableWorkflowStore, DurableWorkflowRuntime, evaluateDurableAdmission, type DurableExecuteRequest, type DurableWorkflowStore } from '@iar/adapters-temporal';
-import { LocalWorkflow, type WorkflowRequest } from '@iar/workflow';
+import { LocalWorkflow, type WorkflowRequest } from '@iar/runtime';
 
 /**
  * 创建带有可恢复状态转移的 Workflow 定义。

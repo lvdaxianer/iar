@@ -14,3 +14,5 @@ export * from './routing.js';
 export * from './bootstrap/index.js';
 export * from './intent/decision/index.js';
 export * from './intent/rules/index.js';
+export * from './execution/index.js';
+export * from './observability/index.js';

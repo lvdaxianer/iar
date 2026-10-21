@@ -7,7 +7,7 @@
 import { createHash } from 'node:crypto';
 import { type ActionResult, type JsonValue } from '@iar/contracts';
 import type { DurableExecuteRequest, DurableStepData } from './types.js';
-import type { WorkflowResult, WorkflowRun } from '@iar/workflow';
+import type { WorkflowResult, WorkflowRun } from '@iar/runtime';
 
 /**
  * 将 Action 输入替换为不可逆摘要。

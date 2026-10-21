@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import { type ActionResult } from '@iar/contracts';
-import { LocalWorkflow, PolicyGate, WorkflowEventLog, type ActionExecutor, type WorkflowRequest, type WorkflowResult, type WorkflowRun } from '@iar/workflow';
+import { LocalWorkflow, PolicyGate, WorkflowEventLog, type ActionExecutor, type WorkflowRequest, type WorkflowResult, type WorkflowRun } from '@iar/runtime';
 import { evaluateDurableAdmission } from './admission.js';
 import { validateDurableSnapshot } from './durable-store.js';
 import { actionDigest, createSnapshot, durableEvent, failure, findAction, isWorkflowRequest, nextSequence, nextStepId, repairLocalConfirmation, replayExisting, replaySnapshot, success, type LoadedRun } from './durable-runtime-support.js';

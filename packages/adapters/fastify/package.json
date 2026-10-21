@@ -19,7 +19,7 @@
   "dependencies": {
     "@iar/contracts": "0.1.0",
     "@iar/plugins": "0.1.0",
-    "@iar/workflow": "0.1.0",
+    "@iar/runtime": "0.1.0",
     "fastify": "^5.6.0"
   }
 }

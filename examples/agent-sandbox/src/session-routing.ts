@@ -11,7 +11,7 @@ import { ModelGateway, SemanticExtractorAdapter, type HistoricalSemanticReferenc
 import { PluginFirstRouter, resolveFactRelationCandidates, type AsyncDecisionAdapter, type FactRelationCandidateReference, type RouteResult } from '@iar/runtime';
 import type { FunctionRule, PluginRule } from '@iar/runtime';
 import type { PluginDescriptor, PluginHost } from '@iar/plugins';
-import type { ActionExecutor, LocalWorkflow } from '@iar/workflow';
+import type { ActionExecutor, LocalWorkflow } from '@iar/runtime';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
 import { SESSION_RUN_ID, SESSION_CORRELATION_ID, TURN_DEFINITION } from './session-core.js';
 import type { CompactionContext } from './session-compaction.js';

@@ -5,6 +5,6 @@
   "references": [
     { "path": "../../contracts/tsconfig.build.json" },
     { "path": "../../plugins/tsconfig.build.json" },
-    { "path": "../../workflow/tsconfig.build.json" }
+    { "path": "../../runtime/tsconfig.build.json" }
   ]
 }

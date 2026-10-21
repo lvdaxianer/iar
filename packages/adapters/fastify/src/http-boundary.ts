@@ -7,7 +7,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { JsonValue } from '@iar/contracts';
 import type { PluginRecord } from '@iar/plugins';
-import type { WorkflowRun } from '@iar/workflow';
+import type { WorkflowRun } from '@iar/runtime';
 import { FASTIFY_API_VERSION, FASTIFY_RESPONSE_VERSION, type FastifyApiError, type FastifyApiResponse, type FastifyHostApp, type FastifyHostOptions, type PublicPlugin, type PublicWorkflowRun } from './types.js';
 
 /** 未知 HTTP body 的安全字段读取视图。 */

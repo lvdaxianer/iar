@@ -11,7 +11,7 @@ import { MockDecisionProvider } from '@iar/runtime';
 import { PluginHost } from '@iar/plugins';
 import { createServiceApi, type ServiceApiRequest } from '@iar/adapters-service';
 import { TwoStageRouter } from '@iar/runtime';
-import { LocalWorkflow } from '@iar/workflow';
+import { LocalWorkflow } from '@iar/runtime';
 import { facts, functionRule, pluginRule } from '../routing/rule-engine-fixtures.js';
 import { loadBusinessManifest, pluginPackage } from '../contract/fixtures/plugin-package.js';
 

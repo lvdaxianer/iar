@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { SCHEMA_VERSIONS, type SystemPluginManifest, type WorkflowDefinition } from '@iar/contracts';
 import { PluginHost } from '@iar/plugins';
-import { LocalWorkflow, confirmationScopeHash } from '@iar/workflow';
+import { LocalWorkflow, confirmationScopeHash } from '@iar/runtime';
 import { createFastifyApp, type FastifyHostOptions } from '@iar/adapters-fastify';
 import { loadBusinessManifest, pluginPackage } from '../../contract/fixtures/plugin-package.js';
 

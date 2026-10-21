@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import { validateContract, type ActionResult, type EventEnvelope } from '@iar/contracts';
-import { LocalWorkflow, confirmationScopeHash, type ExecuteRequest, type WorkflowRequest, type WorkflowResult, type WorkflowRun } from '@iar/workflow';
+import { LocalWorkflow, confirmationScopeHash, type ExecuteRequest, type WorkflowRequest, type WorkflowResult, type WorkflowRun } from '@iar/runtime';
 import type { DurableActionRecord, DurableExecuteRequest, DurableStepOperation, DurableWorkflowSnapshot } from './types.js';
 import { failedAction, redactPayload } from './durable-runtime-redaction.js';
 

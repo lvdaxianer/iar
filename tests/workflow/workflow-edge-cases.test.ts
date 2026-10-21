@@ -17,9 +17,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SCHEMA_VERSIONS, type ActionDefinition, type WorkflowDefinition } from '@iar/contracts';
-import { LocalWorkflow } from '@iar/workflow';
+import { LocalWorkflow } from '@iar/runtime';
 import type { ActionIdempotencyLedger } from '@iar/runtime';
-import type { WorkflowRequest } from '@iar/workflow';
+import type { WorkflowRequest } from '@iar/runtime';
 
 /**
  * 创建 edge case 使用的确定性 WorkflowDefinition。

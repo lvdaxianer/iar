@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import { validateContract, type ActionDefinition, type ActionResult } from '@iar/contracts';
-import { ActionIdempotencyLedger } from '@iar/runtime';
+import { ActionIdempotencyLedger } from '../action-idempotency.js';
 import { WorkflowEventLog } from './event-log.js';
 import { PolicyGate, confirmationScopeHash } from './policy-gate.js';
 import { type ExecuteRequest, type WorkflowResult, type WorkflowRun } from './types.js';

@@ -34,7 +34,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SCHEMA_VERSIONS, type ActionDefinition } from '@iar/contracts';
-import { LocalWorkflow, confirmationScopeHash, type WorkflowRequest } from '@iar/workflow';
+import { LocalWorkflow, confirmationScopeHash, type WorkflowRequest } from '@iar/runtime';
 import { DIP_SERVICES, routeStopService, createStopRouteScenario } from '../routing/phase-2-stop-service-fixture.js';
 
 /**

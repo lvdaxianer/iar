@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type WorkflowDefinition } from '@iar/contracts';
 import { InMemoryDurableWorkflowStore, DurableWorkflowRuntime, type DurableExecuteRequest, type DurableWorkflowSnapshot } from '@iar/adapters-temporal';
-import { confirmationScopeHash, type WorkflowRequest } from '@iar/workflow';
+import { confirmationScopeHash, type WorkflowRequest } from '@iar/runtime';
 
 /**
  * 创建 durable fixture 使用的 WorkflowDefinition。
