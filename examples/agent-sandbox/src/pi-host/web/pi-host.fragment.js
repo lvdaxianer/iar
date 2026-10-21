@@ -17,6 +17,7 @@
   let piHostBusy = false;
   let piHostBubble = null;
   let piHostPendingRoute = null;
+  let piHostPendingTiming = null;
   let piHostExpectingEntry = false;
   let piHostEventSource = null;
   let piHostEvents = [];
@@ -43,11 +44,12 @@
    * @param role - 用户或助手角色
    * @param text - 消息正文
    * @param meta - 可选状态文字
+   * @param traceId - 可选完整 traceId，用于悬停提示
    * @returns 新建的消息容器
    * @author lvdaxianer@yeah.net
    * @date 2026-10-21
    */
-  function appendMsg(role, text, meta) {
+  function appendMsg(role, text, meta, traceId) {
     var div = document.createElement('div');
     div.className = 'msg ' + (role === 'user' ? 'user' : 'bot');
     if (role === 'user') {
@@ -58,17 +60,26 @@
       body.innerHTML = renderMarkdown(text);
       div.appendChild(body);
     }
-    if (meta) appendMessageMeta(div, meta);
+    if (meta) appendMessageMeta(div, meta, traceId);
     piHostMessagesEl.appendChild(div);
     piHostMessagesEl.scrollTop = piHostMessagesEl.scrollHeight;
     return div;
   }
 
-  /** 在消息尾部显示动作或回复状态。 */
-  function appendMessageMeta(div, text) {
+  /**
+   * 在消息尾部显示动作或回复状态。
+   * @param div - 消息容器
+   * @param text - 用户可见状态
+   * @param traceId - 可选完整 traceId
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-22
+   */
+  function appendMessageMeta(div, text, traceId) {
     var span = document.createElement('span');
     span.className = 'meta';
     span.textContent = text;
+    if (traceId) span.title = '完整 traceId: ' + traceId;
     div.appendChild(span);
   }
 
@@ -171,6 +182,7 @@
   function updatePiHostTimingPanel(timing) {
     if (!timing || typeof timing !== 'object') return;
     document.getElementById('timingTotal').textContent = typeof timing.durationMs === 'number' ? timing.durationMs + 'ms' : '-';
+    renderTimingTrace(timing);
     var list = document.getElementById('timingList');
     list.innerHTML = '';
     (Array.isArray(timing.stages) ? timing.stages : []).forEach(function (stage) {
@@ -230,8 +242,9 @@
    * @author lvdaxianer@yeah.net
    * @date 2026-10-21
    */
-  function finalizePiHostBubble(reply) {
-    if (!piHostBubble) { if (reply) { appendMsg('bot', reply, 'Pi 兜底'); recordPiHostConversation('bot', reply, 'Pi 兜底'); } return; }
+  function finalizePiHostBubble(reply, timing) {
+    var meta = formatTimingMeta('Pi 兜底', timing);
+    if (!piHostBubble) { if (reply) { appendMsg('bot', reply, meta.text, meta.traceId); recordPiHostConversation('bot', reply, meta.text); } return; }
     var bubble = piHostBubble;
     piHostBubble = null;
     bubble.stageEl.remove();
@@ -239,8 +252,8 @@
     if (!bubble.gotDelta) bubble.textEl.textContent = reply;
     var rawText = bubble.textEl.textContent;
     bubble.textEl.innerHTML = renderMarkdown(rawText);
-    appendMessageMeta(bubble.div, 'Pi 兜底');
-    recordPiHostConversation('bot', rawText, 'Pi 兜底');
+    appendMessageMeta(bubble.div, meta.text, meta.traceId);
+    recordPiHostConversation('bot', rawText, meta.text);
     piHostMessagesEl.scrollTop = piHostMessagesEl.scrollHeight;
   }
 
@@ -282,8 +295,8 @@
   function finalizePiHostEntryText(bubble, rawText, meta) {
     if (piHostBubble === bubble) piHostBubble = null;
     bubble.textEl.innerHTML = renderMarkdown(rawText);
-    appendMessageMeta(bubble.div, meta);
-    recordPiHostConversation('bot', rawText, meta);
+    appendMessageMeta(bubble.div, meta.text, meta.traceId);
+    recordPiHostConversation('bot', rawText, meta.text);
     piHostMessagesEl.scrollTop = piHostMessagesEl.scrollHeight;
   }
 
@@ -298,9 +311,10 @@
   function renderPiHostEntry(entry) {
     var data = (entry && typeof entry === 'object' && 'data' in entry && entry.data && typeof entry.data === 'object') ? entry.data : null;
     if (!data || entry.customType !== 'iar-bridge' || typeof data.content !== 'string') return false;
-    var meta = piHostEntryMeta(data);
+    var meta = formatTimingMeta(piHostEntryMeta(data), piHostPendingTiming);
+    piHostPendingTiming = null;
     if (piHostBubble && piHostExpectingEntry) streamPiHostEntryText(data.content, meta);
-    else { appendMsg('bot', data.content, meta); recordPiHostConversation('bot', data.content, meta); }
+    else { appendMsg('bot', data.content, meta.text, meta.traceId); recordPiHostConversation('bot', data.content, meta.text); }
     if (data.disposition === 'handled' || data.disposition === 'context_answered') highlightPiHostFlow(['input', 'hook', 'iar', 'handled']);
     return true;
   }
@@ -433,6 +447,7 @@
     es.addEventListener('timing', function (event) {
       var timing;
       try { timing = JSON.parse(event.data); } catch (err) { return; }
+      piHostPendingTiming = timing;
       updatePiHostTimingPanel(timing);
       recordPiHostEvent('耗时', (timing.durationMs || 0) + 'ms');
     });
@@ -454,7 +469,8 @@
     });
     es.addEventListener('piDelta', function (event) { appendPiHostDelta(JSON.parse(event.data)); });
     es.addEventListener('piDone', function (event) {
-      finalizePiHostBubble(JSON.parse(event.data));
+      finalizePiHostBubble(JSON.parse(event.data), piHostPendingTiming);
+      piHostPendingTiming = null;
       updatePiHostClientTiming();
       highlightPiHostFlow(['input', 'hook', 'iar', 'continue']);
       setPiHostBusy(false);
@@ -469,11 +485,13 @@
    */
   function resetPiHostDebugPanel() {
     piHostPendingRoute = null;
+    piHostPendingTiming = null;
     piHostEvents = [];
     document.getElementById('eventList').innerHTML = '';
     document.getElementById('sessionJson').textContent = '{}';
     updatePiHostRoutePanel({});
     document.getElementById('timingTotal').textContent = '-';
+    document.getElementById('timingTraceId').textContent = '-';
     document.getElementById('timingClientTotal').textContent = '-';
     document.getElementById('timingList').innerHTML = '';
     highlightPiHostFlow([]);

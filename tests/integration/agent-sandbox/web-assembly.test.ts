@@ -108,7 +108,33 @@ test('流式气泡历史在 Markdown 渲染前快照原始文本', () => {
   const snapshot = finalize.indexOf('var rawText = state.textEl.textContent;');
   const render = finalize.indexOf('state.textEl.innerHTML = renderMarkdown(rawText);');
   assert.ok(snapshot >= 0 && render > snapshot, 'rawText 快照必须先于 renderMarkdown');
-  assert.match(finalize, /recordConversation\('bot', rawText, metaText\)/);
+  assert.match(finalize, /recordConversation\('bot', rawText, meta\.text\)/);
+});
+
+/* 回复卡片与 Timing 面板必须消费同一份服务端 timing 摘要；
+ * 先锁定用户可见契约，避免只更新右侧面板而遗漏消息底部。 */
+test('Sandbox 回复 meta 展示耗时与短 traceId，Timing 面板保留完整 traceId', () => {
+  const source = readFileSync('examples/agent-sandbox/web/stream.fragment.js', 'utf8');
+  const interaction = readFileSync('examples/agent-sandbox/web/interaction.fragment.js', 'utf8');
+  const page = readFileSync('examples/agent-sandbox/web/index.html', 'utf8');
+  assert.match(source, /result\.timing/);
+  assert.match(source, /durationMs/);
+  assert.match(source, /traceId/);
+  assert.match(interaction, /title/);
+  assert.match(page, /id="timingTraceId"/);
+});
+
+/* 直接执行真实 timing 片段，验证秒/毫秒边界与缺失数据降级，
+ * 防止仅通过源码关键字却在用户界面生成错误文字。 */
+test('timing meta 正确格式化耗时和 traceId，并安全降级', () => {
+  const source = readFileSync('examples/agent-sandbox/web/timing.fragment.js', 'utf8');
+  const format = runInNewContext(`${source}\nformatTimingMeta`) as (text: string, timing?: unknown) => { text: string; traceId: string };
+  assert.deepEqual(JSON.parse(JSON.stringify(format('已执行', { durationMs: 5551, traceId: '2b4f4bd0-30cb-3541-2a38-19c6c4e3db9b' }))), {
+    text: '已执行 · 耗时 5.55s · trace 2b4f4bd0…e3db9b',
+    traceId: '2b4f4bd0-30cb-3541-2a38-19c6c4e3db9b'
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(format('失败', { durationMs: 120 }))), { text: '失败 · 耗时 120ms', traceId: '' });
+  assert.deepEqual(JSON.parse(JSON.stringify(format('失败'))), { text: '失败', traceId: '' });
 });
 
 /** 使用临时端口启动真实沙箱，避免测试之间端口冲突。
@@ -158,7 +184,7 @@ function expectedPage(): string {
   const template = readFileSync(`${base}index.html`, 'utf8');
   assert.match(template, /IAR_SANDBOX_STYLES/); assert.match(template, /IAR_SANDBOX_SCRIPT/);
   const styles = readFileSync(`${base}styles.css`, 'utf8');
-  const names = ['session.fragment.js', 'markdown.fragment.js', 'markdown-lines.fragment.js', 'interaction.fragment.js', 'stream.fragment.js', 'sessions.fragment.js', 'controls.fragment.js'];
+  const names = ['session.fragment.js', 'markdown.fragment.js', 'markdown-lines.fragment.js', 'timing.fragment.js', 'interaction.fragment.js', 'stream.fragment.js', 'sessions.fragment.js', 'controls.fragment.js'];
   const script = names.map((name) => readFileSync(`${base}${name}`, 'utf8')).join('');
   return template.replace('<!-- IAR_SANDBOX_STYLES -->', () => `<style>${styles}</style>`)
     .replace('<!-- IAR_SANDBOX_SCRIPT -->', () => `<script>${script}</script>`);
