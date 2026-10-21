@@ -7,10 +7,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const root = process.cwd();
+const localDependencyRoot = join(root, 'node_modules');
+const dependencyRoot = existsSync(join(localDependencyRoot, 'ajv')) && existsSync(join(localDependencyRoot, '@sinclair', 'typebox'))
+  ? localDependencyRoot
+  : resolve(root, '..', '..', '..', '..', 'node_modules');
 const packageDirectories = [
   ...readdirSync(join(root, 'packages'), { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
@@ -94,10 +98,14 @@ try {
   const tarball = join(consumerDirectory, JSON.parse(packJson)[0].filename);
   // 仅将已经安装的第三方依赖预置到临时消费者，保证这个本地 tarball 冒烟不依赖网络。
   mkdirSync(join(consumerDirectory, 'node_modules', '@sinclair'), { recursive: true });
-  symlinkSync(join(root, 'node_modules', '@sinclair', 'typebox'), join(consumerDirectory, 'node_modules', '@sinclair', 'typebox'), 'junction');
-  symlinkSync(join(root, 'node_modules', 'ajv'), join(consumerDirectory, 'node_modules', 'ajv'), 'junction');
-  execFileSync('npm', ['install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock', '--no-save', tarball], {
-    cwd: consumerDirectory,
+  symlinkSync(join(dependencyRoot, '@sinclair', 'typebox'), join(consumerDirectory, 'node_modules', '@sinclair', 'typebox'), 'junction');
+  symlinkSync(join(dependencyRoot, 'ajv'), join(consumerDirectory, 'node_modules', 'ajv'), 'junction');
+  // npm install --offline 仍会尝试解析 package.json 中的 registry 元数据，
+  // 即使依赖已经通过 symlink 预置。直接解包到 node_modules 更准确地模拟
+  // “安装后的 tarball”，也使校验器不依赖 npm cache 或网络状态。
+  const installedPackageDirectory = join(consumerDirectory, 'node_modules', '@iar', 'contracts');
+  mkdirSync(installedPackageDirectory, { recursive: true });
+  execFileSync('tar', ['-xzf', tarball, '-C', installedPackageDirectory, '--strip-components=1'], {
     stdio: 'ignore',
   });
   execFileSync(process.execPath, ['--input-type=module', '-e', "await import('@iar/contracts')"], {
