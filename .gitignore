@@ -18,6 +18,7 @@ dist
 *.pem
 *.key
 .Codex/worktrees/
+.vscode/
 # <<< project-hygiene (managed) <<<
 
 # 本地 sandbox 默认 SQLite 数据目录。
