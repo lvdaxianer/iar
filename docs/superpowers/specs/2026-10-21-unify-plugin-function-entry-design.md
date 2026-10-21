@@ -2,7 +2,7 @@
 
 ## 目标
 
-IAR 采用 `Plugin > Function > Operation` 的公共模型：Plugin 是可独立分发和管理的能力包，Function 是包内的一项业务能力，Operation 是 Function 支持的具体动作。应用通过 `@iar/agent` 统一启动，插件作者通过 `@iar/plugin` 定义和注册能力。
+IAR 采用 `Plugin > Function > Operation` 的公共模型：Plugin 是可独立分发和管理的能力包，Function 是包内的一项业务能力，Operation 是 Function 支持的具体动作。应用通过 `@iar/runtime` 统一启动，插件作者通过 `@iar/plugin` 定义和注册能力。
 
 本次是未发布项目的破坏性切换，不保留旧的单 Function Manifest、旧注册对象 Handler 字段或宿主 Function 白名单参数。
 
@@ -13,14 +13,14 @@ IAR 采用 `Plugin > Function > Operation` 的公共模型：Plugin 是可独立
 @iar/plugin     definePlugin、defineFunction、插件作者类型
 @iar/plugins    PluginHost、FunctionRegistry、生命周期和运行时索引
 @iar/runtime    意图识别后的有限决策、动态路由、执行前重验证
-@iar/agent      统一入口，批量装配 Plugin 包和运行时依赖
+@iar/runtime    统一入口，批量装配 Plugin 包和运行时依赖
 @iar/pi-bridge  Pi 适配层，不管理 IAR 会话和业务注册
 ```
 
 应用侧使用：
 
 ```ts
-import { createIarAgent } from '@iar/agent';
+import { createIarRuntime } from '@iar/runtime';
 import { defineFunction, definePlugin } from '@iar/plugin';
 
 const ticketPlugin = definePlugin({
@@ -49,7 +49,15 @@ const ticketPlugin = definePlugin({
   ]
 });
 
-const agent = createIarAgent({ plugins: [ticketPlugin] });
+const runtime = createIarRuntime({
+  plugins: [ticketPlugin],
+  decisionProvider: { decide: async () => ({
+    ok: false,
+    error: { code: 'model.no_profile', message: '决策模型 backend 未配置', retryable: false, details: {} },
+    audit: [],
+    events: []
+  }) }
+});
 ```
 
 ## 运行时模型
@@ -96,6 +104,6 @@ IAR 是唯一会话状态源。Pi 通过 `@iar/pi-bridge` 把输入转给 IAR，
 
 1. contracts、Host、FunctionRegistry 和统一入口均有先失败后通过的测试。
 2. 既有意图识别、Function-first 两阶段路由、动态澄清、策略确认、会话恢复和 Pi Bridge 测试继续通过。
-3. `@iar/plugin` 与 `@iar/agent` 能从安装后的包根导入并解析 `.d.ts`，内部路径被拒绝。
+3. `@iar/plugin` 与 `@iar/runtime` 能从安装后的包根导入并解析 `.d.ts`，内部路径被拒绝。
 4. sandbox、示例、脚本和 `docs` 全部使用新注册模型，仓库中不存在旧注册 API 引用。
 5. `npm run lint`、`npm run build`、`npm test`、`npm run verify:packages`、OpenSpec strict validation 全部通过。

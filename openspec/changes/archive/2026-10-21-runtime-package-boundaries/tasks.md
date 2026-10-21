@@ -105,14 +105,14 @@
 
 ## 8. Integration verification
 
-- [ ] 8.1 Run `openspec validate runtime-package-boundaries --strict`,
+- [x] 8.1 Run `openspec validate runtime-package-boundaries --strict`,
   `git diff --check`, `npm run lint`, `npm run build`, `npm test`, and
   `npm run verify:packages`; record the results in the implementation audit.
-- [ ] 8.2 Run `npm run demo:fake-plugin`, `npm run demo:sandbox -- --brain
+- [x] 8.2 Run `npm run demo:fake-plugin`, `npm run demo:sandbox -- --brain
   scripted`, and `npm run demo:pi-host`; verify standalone runtime behavior,
   session behavior, and Pi pass-through/handled/confirmation behavior remain
   observable.
-- [ ] 8.3 Complete the final architecture review against the package tree,
+- [x] 8.3 Complete the final architecture review against the package tree,
   dependency direction, public exports, and non-goals in `design.md`; mark the
   OpenSpec change ready for archive only when all prior tasks and verification
   evidence are complete.
