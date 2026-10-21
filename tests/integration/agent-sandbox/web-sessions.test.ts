@@ -358,7 +358,7 @@ test('恢复会话时展示待确认操作并发送到当前会话', async () =>
  * 同时检查正文和元信息，让错误标记不只存在于不可见状态。
  */
 test('已执行动作的超限流显示回复不完整而非截断正文', async () => {
-  const stream = 'data: {"type":"delta","text":"partial-private"}\n\ndata: {"type":"done","result":{"status":"executed","reasonCode":"model_response_too_large","reply":"动作已执行，但回复不完整，请勿重复执行。"}}\n\ndata: {"type":"end"}\n\n';
+  const stream = 'data: {"type":"delta","text":"partial-private"}\n\ndata: {"type":"done","result":{"status":"executed","replySource":"response_model","reasonCode":"model_response_too_large","reply":"动作已执行，但回复不完整，请勿重复执行。"}}\n\ndata: {"type":"end"}\n\n';
   const server = makeServer(null, stream); const tab = page(server, new Storage());
   try {
     await pause(); tab.elements.get('messageInput')!.value = '列出任务';
@@ -366,6 +366,7 @@ test('已执行动作的超限流显示回复不完整而非截断正文', async
     const bubbles = tab.elements.get('messages')!.children;
     assert.ok(bubbles.some((bubble) => bubble.children.some((child) => child.innerHTML.includes('回复不完整'))));
     assert.ok(bubbles.some((bubble) => bubble.children.some((child) => child.textContent.includes('已执行') && child.textContent.includes('不完整'))));
+    assert.equal(tab.elements.get('routeReplySource')?.textContent, 'Response Model');
     assert.ok(bubbles.every((bubble) => bubble.children.every((child) => !child.innerHTML.includes('partial-private'))));
     assert.equal(server.calls.filter((call) => call.includes('/chat')).length, 1);
   } finally { tab.close(); }

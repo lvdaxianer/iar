@@ -45,7 +45,7 @@
   - 不在范围：提示词内容和模型行为。
   - 依赖：2.1、2.2。
 
-- [ ] 3.2 更新 Pi Host/Agent Sandbox 调试面板，显示实际 Plugin、Function、回复来源和 model/direct/none 模式；保留旧字段兼容并验证页面模板、SSE 事件和自我介绍端到端流程，运行 `npm test`、`npm run lint`、`npm run build`。
+- [x] 3.2 更新 Pi Host/Agent Sandbox 调试面板，显示实际 Plugin、Function、回复来源和 model/direct/none 模式；保留旧字段兼容并验证页面模板、SSE 事件和自我介绍端到端流程，运行 `npm test`、`npm run lint`、`npm run build`。
 
   - 任务边界：只负责调试信息渲染和回归测试，不新增独立配置页。
   - 允许文件：`examples/agent-sandbox/web/**`、`examples/agent-sandbox/src/pi-host/web/**`、页面集成测试。
