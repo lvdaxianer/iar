@@ -74,23 +74,25 @@ export class SandboxSessionStreamTurn {
     const traceId = this.context.nextTraceId();
     const timing = new TurnTimingTracker(traceId);
     try {
-      emit({ type: 'stage', stage: 'semantic' });
-      await this.context.cancelStalePending();
-      const behaviorContext = this.context.currentBehaviorContext();
-      const selection = this.context.resolveSelection(userText, behaviorContext);
-      if (selection.invalid) {
-        const result = withReplySource(await this.context.rejectSelection(userText, selection.reasonCode));
-        return this.finishStreamResult(result, timing, emit);
-      }
-      timing.start('semantic.extract');
-      const extracted = await this.context.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext, this.context.recentMessages, selection.descriptor);
-      timing.end('semantic.extract');
-      const result = withReplySource(await this.finishStreamExtraction({ userText, traceId, emit, behaviorContext, extracted, timing, ...(selection.descriptor === undefined ? {} : { selectedDescriptor: selection.descriptor }) }));
+      const result = await this.executeStreamTurn({ userText, traceId, emit, timing });
       return this.finishStreamResult(result, timing, emit);
     } catch (error) {
       this.finishStreamFailure(timing, emit);
       throw error;
     }
+  }
+
+  private async executeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; timing: TurnTimingTracker }): Promise<TurnResult> {
+    const { userText, traceId, emit, timing } = context;
+    emit({ type: 'stage', stage: 'semantic' });
+    await this.context.cancelStalePending();
+    const behaviorContext = this.context.currentBehaviorContext();
+    const selection = this.context.resolveSelection(userText, behaviorContext);
+    if (selection.invalid) return withReplySource(await this.context.rejectSelection(userText, selection.reasonCode));
+    timing.start('semantic.extract');
+    const extracted = await this.context.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext, this.context.recentMessages, selection.descriptor);
+    timing.end('semantic.extract');
+    return withReplySource(await this.finishStreamExtraction({ userText, traceId, emit, behaviorContext, extracted, timing, ...(selection.descriptor === undefined ? {} : { selectedDescriptor: selection.descriptor }) }));
   }
 
   /**

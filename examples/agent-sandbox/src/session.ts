@@ -7,6 +7,7 @@
 import { ModelResponseLimitError, trackModelResponseLimit } from './models/model-transport.js';
 import { resolveSandboxTraceId } from './safe-log.js';
 import { SandboxSessionStreamTurn } from './session-stream-turn.js';
+import { SandboxSessionTurn } from './session-turn.js';
 import { SandboxSessionReplies } from './session-replies.js';
 import { SandboxSessionRouting } from './session-routing.js';
 import { DEFAULT_UNRESOLVED_STREAK_THRESHOLD, MAX_UNRESOLVED_STREAK, type ActionDefinition, type BehaviorContext, type PendingReference, type VerifiedFactRecord } from '@iar/contracts';
@@ -15,9 +16,9 @@ import { confirmationScopeHash } from '@iar/runtime';
 import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, sandboxOperationKind, summarizeAction } from './session-helpers.js';
 import { createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
-import { finishConfirmedAction, pendingBridgeResult, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection } from './session-turn-helpers.js';
+import { finishConfirmedAction, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection } from './session-turn-helpers.js';
 import { withConfirmReplySource, withReplySource, type CompactResult, type ConfirmResult, type ExecuteTurnOutcome, type ExtractFrameOutcome, type RouteEvidence, type StreamEvent, type TurnResult } from './session-types.js';
-import { recordTurnTiming, TurnTimingTracker } from './turn-timing.js';
+import type { TurnTimingTracker } from './turn-timing.js';
 export type { CompactResult, ConfirmResult, PendingActionSummary, ReplySource, RouteEvidence, SandboxDecisionBackend, SandboxMode, SandboxState, StreamEvent, TurnResult, TurnStage } from './session-types.js';
 /** 公开会话对话和确认入口。
  * @author lvdaxianer@yeah.net
@@ -30,6 +31,8 @@ export class IarSandboxSession extends SandboxSessionCore {
   private readonly replies = this.createReplies();
   /** 流式组件只持有宿主能力，重置后仍访问当前状态。 */
   private readonly streaming = this.createStreaming();
+  /** 普通与 bridge 入口共用同一套计时和轮次编排。 */
+  private readonly turnRunner = this.createTurnRunner();
   /** 绑定路由依赖和可变状态，重置不会留下过期引用。
    * @returns 使用当前会话状态的路由组件
    * @author lvdaxianer@yeah.net
@@ -114,6 +117,24 @@ export class IarSandboxSession extends SandboxSessionCore {
       piAgent: this.piAgent
     });
   }
+  /** 创建普通单轮编排组件，仍通过访问器读取会话当前状态。 */
+  private createTurnRunner(): SandboxSessionTurn {
+    const session = this;
+    return new SandboxSessionTurn({
+      whenReady: () => session.whenReady(),
+      nextTurnId: () => { session.turnCount += 1; return session.turnCount; },
+      hasPending: () => session.pending !== null,
+      cancelStalePending: () => session.cancelStalePending(),
+      currentBehaviorContext: () => session.projector.current(),
+      resolveSelection: (text, context) => session.resolveSelection(text, context),
+      rejectSelection: (text, reasonCode) => session.rejectSelection(text, reasonCode),
+      extractFrame: (traceId, text, context, recentMessages, selectedDescriptor) => session.routing.extractFrame(traceId, SESSION_RUN_ID, text, context, recentMessages, selectedDescriptor),
+      recentMessages: () => session.recentMessages,
+      markUnresolved: (reasonCode, pendingReference) => session.markUnresolved(reasonCode, pendingReference),
+      pushMessage: (text, reply) => session.replies.pushMessages(text, reply),
+      routeNormalTurn: (context) => session.routeNormalTurn(context)
+    });
+  }
   /** 在当前会话中执行流式对话并发送阶段与终态。
    * @param text - 用户输入
    * @param emit - 流式事件接收器
@@ -133,7 +154,7 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @date 2026-10-18
    */
   public async turn(text: string): Promise<TurnResult> {
-    return recordAgentExchange(this.piAgent, text, withReplySource(await this.turnInternal(text, false)));
+    return recordAgentExchange(this.piAgent, text, withReplySource(await this.turnRunner.run(text, false)));
   }
 
   /**
@@ -145,61 +166,7 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @date 2026-10-20
    */
   public async bridgeTurn(text: string): Promise<TurnResult> {
-    return withReplySource(await this.turnInternal(text, true));
-  }
-
-  /**
-   * 编排普通或 bridge 模式的单轮输入。
-   * @param text - 用户输入文本
-   * @param bridgeMode - 是否使用 pass_through 语义
-   * @returns 单轮处理结果
-   * @author lvdaxianer@yeah.net
-   * @date 2026-10-20
-   */
-  private async turnInternal(text: string, bridgeMode: boolean): Promise<TurnResult> {
-    await this.whenReady();
-    const userText = text.trim();
-    this.turnCount += 1;
-    const traceId = resolveSandboxTraceId(`trace-sandbox-${String(this.turnCount)}`);
-    const timing = new TurnTimingTracker(traceId);
-    try {
-      // 新一轮输入会结束上一轮未处理的确认，避免旧动作占用当前语义上下文。
-      // 本方法只编排当前轮次，事件投影和回复组件负责各自的状态边界。
-      if (bridgeMode && this.pending) return this.withTiming(pendingBridgeResult(), timing);
-      if (!bridgeMode) await this.cancelStalePending();
-      const behaviorContext = this.projector.current();
-      const selection = this.resolveSelection(userText, behaviorContext);
-      if (selection.invalid) return this.withTiming(await this.rejectSelection(userText, selection.reasonCode), timing);
-      timing.start('semantic.extract');
-      const extracted = await this.routing.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext, this.recentMessages, selection.descriptor);
-      timing.end('semantic.extract');
-      // 语义失败仍写入历史，保持原有对话恢复行为。
-      if (!extracted.ok) {
-        await this.markUnresolved(extracted.reasonCode);
-        this.replies.pushMessages(userText, extracted.reply);
-        return this.withTiming({ status: 'failed', reply: extracted.reply, route: extracted.route, reasonCode: extracted.reasonCode }, timing);
-      }
-      return this.withTiming(await this.routeNormalTurn({ userText, traceId, behaviorContext, extracted, timing, passThroughOnNoMatch: bridgeMode, ...(selection.descriptor === undefined ? {} : { selectedDescriptor: selection.descriptor }) }), timing);
-    } catch (error) {
-      this.recordFailedTiming(timing);
-      throw error;
-    }
-  }
-
-  /**
-   * 为普通和 bridge 结果补齐单轮耗时摘要。
-   */
-  private withTiming(result: TurnResult, timing: TurnTimingTracker): TurnResult {
-    const summary = timing.finish();
-    recordTurnTiming(summary);
-    return { ...result, timing: summary };
-  }
-
-  /**
-   * 记录普通入口或 bridge 异常的阶段摘要，不吞掉原始业务错误。
-   */
-  private recordFailedTiming(timing: TurnTimingTracker): void {
-    recordTurnTiming(timing.finish());
+    return withReplySource(await this.turnRunner.run(text, true));
   }
   /**
    * 执行普通对话的路由并分派未命中或动作路径。
