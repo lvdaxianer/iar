@@ -18,6 +18,10 @@ export type StreamReplyRequest = {
   input: JsonValue;
   /** 增量直接透传到本次请求的流消费者。 */
   onDelta: (delta: string) => void;
+  /**
+   * DeepSeek thinking 增量独立透传，不混入最终正文。
+   */
+  onReasoningDelta?: (delta: string) => void;
   /** 结构化响应完成后更新 pending clarification。 */
   onClarification?: (clarification: ClarificationMetadata | undefined) => Promise<void>;
   /** 未获得有效结构化文本时的回退策略。 */
@@ -48,7 +52,7 @@ export async function streamModelReply(request: StreamReplyRequest): Promise<str
     const parsed = await request.provider.completeStreamed({ traceId: request.traceId, runId: request.runId, profile: request.profile, input: request.input, attempt: 1, signal: controller.signal }, (delta) => {
       streamed += delta;
       request.onDelta(delta);
-    });
+    }, (delta) => request.onReasoningDelta?.(delta));
     const text = readResponseText(parsed);
     if (text !== undefined) {
       if (request.onClarification) await request.onClarification(readClarification(parsed));

@@ -12,6 +12,7 @@
 import type { ActionDefinition, ActionResult, BehaviorContext, EventEnvelope, JsonValue, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { DecisionBackend, SemanticFrame } from '@iar/runtime';
 import type { PluginDescriptor } from '@iar/plugins';
+import type { TurnTimingSummary } from './turn-timing.js';
 
 /** sandbox 模式：brain 使用真实 LLM，scripted 使用离线假大脑。 */
 export type SandboxMode = 'brain' | 'scripted';
@@ -71,13 +72,18 @@ export type PendingActionSummary = {
 };
 
 /** 单轮对话结果联合。 */
-export type TurnResult =
+type TurnResultBody =
   | { status: 'pass_through'; route: RouteEvidence; capabilityContext: PassThroughCapabilityContext; replySource?: ReplySource }
   | { status: 'agent'; reply: string; route: RouteEvidence; replySource?: ReplySource }
   | { status: 'executed'; reply: string; route: RouteEvidence; actionResult: ActionResult; reasonCode?: string; replySource?: ReplySource }
   | { status: 'awaiting_confirmation'; reply: string; route: RouteEvidence; pending: PendingActionSummary; replySource?: ReplySource }
   | { status: 'clarification'; reply: string; route: RouteEvidence; reasonCode: string; disposition?: 'context_answered'; replySource?: ReplySource }
   | { status: 'failed'; reply: string; route: RouteEvidence; reasonCode: string; replySource?: ReplySource };
+
+/**
+ * 对外结果携带的单轮观测摘要，不包含正文或 thinking。
+ */
+export type TurnResult = TurnResultBody & { timing?: TurnTimingSummary };
 
 /** 流式输出的阶段标识。 */
 export type TurnStage = 'semantic' | 'route' | 'action' | 'response';
@@ -86,6 +92,8 @@ export type TurnStage = 'semantic' | 'route' | 'action' | 'response';
 export type StreamEvent =
   | { type: 'stage'; stage: TurnStage }
   | { type: 'delta'; text: string }
+  | { type: 'reasoningDelta'; text: string }
+  | { type: 'timing'; summary: TurnTimingSummary }
   | { type: 'done'; result: TurnResult }
   | { type: 'error'; reasonCode: string; message: string };
 

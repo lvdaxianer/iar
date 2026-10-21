@@ -8,6 +8,7 @@ import type { SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
 import type { PluginDescriptor } from '@iar/plugins';
 import { withReplySource, type ExecuteTurnOutcome, type ExtractFrameOutcome, type ReferenceResolution, type ResolvedFactReference, type RouteEvidence, type StreamEvent, type TurnResult } from './session-types.js';
+import { recordTurnTiming, TurnTimingTracker } from './turn-timing.js';
 
 /** 流式编排所需的会话能力，状态和资源仍由宿主唯一持有。 */
 export type StreamTurnContext = {
@@ -30,8 +31,8 @@ export type StreamTurnContext = {
   resolveReferences: (frame: SemanticFrame, behaviorContext: BehaviorContext) => ReferenceResolution;
   prepareAndExecute: (context: { runId: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext }) => Promise<ExecuteTurnOutcome>;
   /** 兜底与执行后回复分别保留增量回调和超限错误。 */
-  fallbackReplyStreamed: (context: { traceId: string; runId: string; userText: string; reasonCode: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[]; resolvedReferences?: ResolvedFactReference[] }, onDelta: (delta: string) => void) => Promise<string>;
-  generateReplyStreamed: (context: { traceId: string; runId: string; userText: string; action: ActionDefinition; actionResult: ActionResult; operationKind: 'read' | 'action'; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[] }, onDelta: (delta: string) => void) => Promise<string>;
+  fallbackReplyStreamed: (context: { traceId: string; runId: string; userText: string; reasonCode: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[]; resolvedReferences?: ResolvedFactReference[] }, onDelta: (delta: string) => void, onReasoningDelta?: (delta: string) => void) => Promise<string>;
+  generateReplyStreamed: (context: { traceId: string; runId: string; userText: string; action: ActionDefinition; actionResult: ActionResult; operationKind: 'read' | 'action'; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[] }, onDelta: (delta: string) => void, onReasoningDelta?: (delta: string) => void) => Promise<string>;
   currentBehaviorContext: () => BehaviorContext;
   /** 仅完整回复可写入宿主持有的历史。 */
   pushMessages: (userText: string, reply: string) => void;
@@ -70,20 +71,47 @@ export class SandboxSessionStreamTurn {
    */
   public async turnStreamed(text: string, emit: (event: StreamEvent) => void): Promise<TurnResult> {
     const userText = text.trim();
-    emit({ type: 'stage', stage: 'semantic' });
-    await this.context.cancelStalePending();
     const traceId = this.context.nextTraceId();
-    const behaviorContext = this.context.currentBehaviorContext();
-    const selection = this.context.resolveSelection(userText, behaviorContext);
-    if (selection.invalid) {
-      const result = withReplySource(await this.context.rejectSelection(userText, selection.reasonCode));
-      emit({ type: 'done', result });
-      return result;
+    const timing = new TurnTimingTracker(traceId);
+    try {
+      emit({ type: 'stage', stage: 'semantic' });
+      await this.context.cancelStalePending();
+      const behaviorContext = this.context.currentBehaviorContext();
+      const selection = this.context.resolveSelection(userText, behaviorContext);
+      if (selection.invalid) {
+        const result = withReplySource(await this.context.rejectSelection(userText, selection.reasonCode));
+        return this.finishStreamResult(result, timing, emit);
+      }
+      timing.start('semantic.extract');
+      const extracted = await this.context.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext, this.context.recentMessages, selection.descriptor);
+      timing.end('semantic.extract');
+      const result = withReplySource(await this.finishStreamExtraction({ userText, traceId, emit, behaviorContext, extracted, timing, ...(selection.descriptor === undefined ? {} : { selectedDescriptor: selection.descriptor }) }));
+      return this.finishStreamResult(result, timing, emit);
+    } catch (error) {
+      this.finishStreamFailure(timing, emit);
+      throw error;
     }
-    const extracted = await this.context.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext, this.context.recentMessages, selection.descriptor);
-    const result = withReplySource(await this.finishStreamExtraction({ userText, traceId, emit, behaviorContext, extracted, ...(selection.descriptor === undefined ? {} : { selectedDescriptor: selection.descriptor }) }));
-    emit({ type: 'done', result });
-    return result;
+  }
+
+  /**
+   * 发送最终 timing 后再发送 done，避免界面先结束而丢失总耗时。
+   */
+  private finishStreamResult(result: TurnResult, timing: TurnTimingTracker, emit: (event: StreamEvent) => void): TurnResult {
+    const summary = timing.finish();
+    recordTurnTiming(summary);
+    const timed = { ...result, timing: summary };
+    emit({ type: 'timing', summary: timed.timing });
+    emit({ type: 'done', result: timed });
+    return timed;
+  }
+
+  /**
+   * 记录流式异常的已完成阶段，并在错误事件前发送 timing。
+   */
+  private finishStreamFailure(timing: TurnTimingTracker, emit: (event: StreamEvent) => void): void {
+    const summary = timing.finish();
+    recordTurnTiming(summary);
+    emit({ type: 'timing', summary });
   }
 
   /** 处理抽取失败或继续流式路由。
@@ -92,7 +120,7 @@ export class SandboxSessionStreamTurn {
    * @returns 本轮结果，不发送终态事件
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  protected async finishStreamExtraction(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; extracted: ExtractFrameOutcome; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
+  protected async finishStreamExtraction(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; extracted: ExtractFrameOutcome; timing: TurnTimingTracker; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
     const { userText, extracted } = context;
     // 抽取失败仍与普通入口一样保存失败说明。
     if (!extracted.ok) {
@@ -109,25 +137,29 @@ export class SandboxSessionStreamTurn {
    * @returns 本轮结果
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  protected async routeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }>; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
-    const { userText, traceId, emit, behaviorContext, extracted, selectedDescriptor } = context;
+  protected async routeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }>; timing: TurnTimingTracker; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
+    const { userText, traceId, emit, behaviorContext, extracted, timing, selectedDescriptor } = context;
     emit({ type: 'stage', stage: 'route' });
     const frame = extracted.frame;
     const references = this.context.resolveReferences(frame, behaviorContext);
-    if (!references.ok) return this.finishStreamFallback({ userText, traceId, emit, behaviorContext, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: frame.intent, semanticConfidence: frame.confidence }, ...(references.pendingReference === undefined ? {} : { pendingReference: references.pendingReference }), ...(references.candidates === undefined ? {} : { referenceCandidates: references.candidates }) });
+    if (!references.ok) return this.finishStreamFallback({ userText, traceId, emit, behaviorContext, timing, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: frame.intent, semanticConfidence: frame.confidence }, ...(references.pendingReference === undefined ? {} : { pendingReference: references.pendingReference }), ...(references.candidates === undefined ? {} : { referenceCandidates: references.candidates }) });
     if (behaviorContext.pendingReference !== undefined) await this.context.resetClarification();
     const routeContext = this.context.currentBehaviorContext();
+    timing.start('route.select');
     const route = await this.context.routeFrame(traceId, SESSION_RUN_ID, frame, routeContext, userText, this.context.recentMessages, selectedDescriptor);
+    timing.end('route.select');
     const evidence = buildEvidence(route, frame);
     if (extracted.semanticFallback) evidence.semanticFallback = true;
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
-      const agentResult = await this.runStreamAgent({ userText, emit, evidence, behaviorContext, selectedDescriptor });
+      const agentResult = await this.runStreamAgent({ userText, emit, timing, evidence, behaviorContext, selectedDescriptor });
       if (agentResult !== undefined) return agentResult;
-      return this.finishStreamFallback({ userText, traceId, emit, behaviorContext: routeContext, evidence, resolvedReferences: references.references });
+      return this.finishStreamFallback({ userText, traceId, emit, behaviorContext: routeContext, timing, evidence, resolvedReferences: references.references });
     }
     emit({ type: 'stage', stage: 'action' });
+    timing.start('action.execute');
     const outcome = await this.context.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame, route, behaviorContext: routeContext });
-    return this.finishStreamOutcome({ userText, traceId, emit, evidence, outcome });
+    timing.end('action.execute');
+    return this.finishStreamOutcome({ userText, traceId, emit, timing, evidence, outcome });
   }
 
   /** 未命中业务路由时交给进程内 Pi Agent 流式处理；委托缺失、不适用或故障时返回 undefined。
@@ -137,12 +169,14 @@ export class SandboxSessionStreamTurn {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-21
    */
-  protected async runStreamAgent(context: { userText: string; emit: (event: StreamEvent) => void; evidence: RouteEvidence; behaviorContext: BehaviorContext; selectedDescriptor?: PluginDescriptor | undefined }): Promise<TurnResult | undefined> {
-    const { userText, emit, evidence, behaviorContext, selectedDescriptor } = context;
+  protected async runStreamAgent(context: { userText: string; emit: (event: StreamEvent) => void; timing: TurnTimingTracker; evidence: RouteEvidence; behaviorContext: BehaviorContext; selectedDescriptor?: PluginDescriptor | undefined }): Promise<TurnResult | undefined> {
+    const { userText, emit, timing, evidence, behaviorContext, selectedDescriptor } = context;
     const delegate = this.context.piAgent;
     if (!delegate || !canPassThrough(behaviorContext, evidence, selectedDescriptor)) return undefined;
     emit({ type: 'stage', stage: 'response' });
-    const reply = await runPiAgentDelegate(delegate, userText, (delta) => emit({ type: 'delta', text: delta }), this.context.functionDescriptors);
+    timing.start('response.generate');
+    const reply = await runPiAgentDelegate(delegate, userText, (delta) => { timing.firstToken('response.generate'); emit({ type: 'delta', text: delta }); }, this.context.functionDescriptors);
+    timing.end('response.generate');
     if (reply === undefined) return undefined;
     this.context.pushMessages(userText, reply);
     return { status: 'agent', reply, route: evidence };
@@ -154,14 +188,22 @@ export class SandboxSessionStreamTurn {
    * @returns 澄清或超限失败结果
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  protected async finishStreamFallback(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; evidence: RouteEvidence; resolvedReferences?: ResolvedFactReference[]; pendingReference?: PendingReference; referenceCandidates?: VerifiedFactRecord[] }): Promise<TurnResult> {
-    const { userText, traceId, emit, behaviorContext, evidence, resolvedReferences, pendingReference, referenceCandidates } = context;
+  protected async finishStreamFallback(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; timing: TurnTimingTracker; evidence: RouteEvidence; resolvedReferences?: ResolvedFactReference[]; pendingReference?: PendingReference; referenceCandidates?: VerifiedFactRecord[] }): Promise<TurnResult> {
+    const { userText, traceId, emit, behaviorContext, timing, evidence, resolvedReferences, pendingReference, referenceCandidates } = context;
     if (!(evidence.semanticIntent === 'unknown' && evidence.reasonCode !== 'reference_unresolved' && (behaviorContext.factHistory?.records.length ?? 0) > 0) && !(behaviorContext.pending.status === 'required' && behaviorContext.pending.options?.some((option) => option.key === userText.trim()) === true)) await this.context.markUnresolved(evidence.reasonCode, pendingReference);
     const currentBehaviorContext = this.context.currentBehaviorContext();
-    const reply = await trackModelResponseLimit(() => this.context.fallbackReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: currentBehaviorContext, recentMessages: this.context.recentMessages, functionDescriptors: this.context.functionDescriptors, reasonCode: evidence.reasonCode, ...(resolvedReferences === undefined ? {} : { resolvedReferences }), ...(referenceCandidates === undefined ? {} : { referenceCandidates }) }, (delta) => emit({ type: 'delta', text: delta }))).catch((error: unknown) => {
+    let reasoningStarted = false;
+    timing.start('response.generate');
+    const reply = await trackModelResponseLimit(() => this.context.fallbackReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: currentBehaviorContext, recentMessages: this.context.recentMessages, functionDescriptors: this.context.functionDescriptors, reasonCode: evidence.reasonCode, ...(resolvedReferences === undefined ? {} : { resolvedReferences }), ...(referenceCandidates === undefined ? {} : { referenceCandidates }) }, (delta) => { timing.firstToken('response.generate'); emit({ type: 'delta', text: delta }); }, (delta) => {
+      if (!reasoningStarted) { reasoningStarted = true; timing.start('response.reasoning'); }
+      timing.firstToken('response.reasoning');
+      emit({ type: 'reasoningDelta', text: delta });
+    })).catch((error: unknown) => {
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
     });
+    timing.end('response.reasoning', 'completed');
+    timing.end('response.generate', reply === undefined ? 'failed' : 'completed');
     if (reply === undefined) return { status: 'failed', reply: '模型回复超限，回复未完成。', route: evidence, reasonCode: 'model_response_too_large' };
     this.context.pushMessages(userText, reply);
     return { status: 'clarification', reply, route: evidence, reasonCode: evidence.reasonCode, ...(resolvedReferences && resolvedReferences.length > 0 ? { disposition: 'context_answered' as const } : {}) };
@@ -173,7 +215,7 @@ export class SandboxSessionStreamTurn {
    * @returns 本轮结果
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  protected async finishStreamOutcome(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; evidence: RouteEvidence; outcome: ExecuteTurnOutcome }): Promise<TurnResult> {
+  protected async finishStreamOutcome(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; timing: TurnTimingTracker; evidence: RouteEvidence; outcome: ExecuteTurnOutcome }): Promise<TurnResult> {
     const { userText, evidence, outcome } = context;
     if (outcome.status === 'awaiting_confirmation') {
       evidence.operationKind = outcome.operationKind;
@@ -196,15 +238,23 @@ export class SandboxSessionStreamTurn {
    * @returns 动作成功及回复状态
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  protected async finishStreamExecution(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; evidence: RouteEvidence; outcome: Extract<ExecuteTurnOutcome, { status: 'executed' }> }): Promise<TurnResult> {
-    const { userText, traceId, emit, evidence, outcome } = context;
+  protected async finishStreamExecution(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; timing: TurnTimingTracker; evidence: RouteEvidence; outcome: Extract<ExecuteTurnOutcome, { status: 'executed' }> }): Promise<TurnResult> {
+    const { userText, traceId, emit, timing, evidence, outcome } = context;
     evidence.operationKind = outcome.operationKind;
     await this.context.resetClarification();
     emit({ type: 'stage', stage: 'response' });
-    const reply = await trackModelResponseLimit(() => this.context.generateReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, action: outcome.action, actionResult: outcome.actionResult, operationKind: outcome.operationKind, behaviorContext: this.context.currentBehaviorContext(), recentMessages: this.context.recentMessages, functionDescriptors: this.context.functionDescriptors }, (delta) => emit({ type: 'delta', text: delta }))).catch((error: unknown) => {
+    let reasoningStarted = false;
+    timing.start('response.generate');
+    const reply = await trackModelResponseLimit(() => this.context.generateReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, action: outcome.action, actionResult: outcome.actionResult, operationKind: outcome.operationKind, behaviorContext: this.context.currentBehaviorContext(), recentMessages: this.context.recentMessages, functionDescriptors: this.context.functionDescriptors }, (delta) => { timing.firstToken('response.generate'); emit({ type: 'delta', text: delta }); }, (delta) => {
+      if (!reasoningStarted) { reasoningStarted = true; timing.start('response.reasoning'); }
+      timing.firstToken('response.reasoning');
+      emit({ type: 'reasoningDelta', text: delta });
+    })).catch((error: unknown) => {
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
     });
+    timing.end('response.reasoning', 'completed');
+    timing.end('response.generate', reply === undefined ? 'failed' : 'completed');
     if (reply === undefined) return { status: 'executed', reply: '动作已执行，但模型回复超限且不完整，请勿重复执行。', route: evidence, actionResult: outcome.actionResult, reasonCode: 'model_response_too_large' };
     if (reply.length > 0) this.context.pushMessages(userText, reply);
     return { status: 'executed', reply, route: evidence, actionResult: outcome.actionResult };

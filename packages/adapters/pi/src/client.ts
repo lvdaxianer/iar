@@ -5,7 +5,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-20
  */
-import { PI_BRIDGE_VERSION, isBridgeDisposition, isBridgeReplySource, type BridgeCapabilityContext, type BridgeConfirmRequest, type BridgeConfirmResponse, type BridgeInputRequest, type BridgeInputResponse, type BridgeOpenRequest, type BridgeOpenResponse, type BridgePendingAction, type BridgeRouteEvidence, type BridgeStateResponse, type IarSessionId } from './protocol.js';
+import { PI_BRIDGE_VERSION, isBridgeDisposition, isBridgeReplySource, type BridgeCapabilityContext, type BridgeConfirmRequest, type BridgeConfirmResponse, type BridgeInputRequest, type BridgeInputResponse, type BridgeOpenRequest, type BridgeOpenResponse, type BridgePendingAction, type BridgeRouteEvidence, type BridgeStateResponse, type BridgeTimingSummary, type IarSessionId } from './protocol.js';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_TIMEOUT_MS = 60_000;
@@ -175,7 +175,8 @@ function validateInputResponse(value: unknown): BridgeInputResponse {
   const capabilityContext = record.capabilityContext === undefined ? undefined : validateCapabilityContext(record.capabilityContext);
   const replySource = optionalReplySource(record);
   const route = record.route === undefined ? undefined : validateRoute(record.route);
-  return { version: PI_BRIDGE_VERSION, iarSessionId: record.iarSessionId, disposition: record.disposition, ...optionalString(record, 'reply'), ...optionalString(record, 'reasonCode'), ...(route === undefined ? {} : { route }), ...(record.pending === undefined ? {} : { pending: validatePending(record.pending) }), ...(capabilityContext === undefined ? {} : { capabilityContext }), ...(replySource === undefined ? {} : { replySource }) };
+  const timing = record.timing === undefined ? undefined : validateTiming(record.timing);
+  return { version: PI_BRIDGE_VERSION, iarSessionId: record.iarSessionId, disposition: record.disposition, ...optionalString(record, 'reply'), ...optionalString(record, 'reasonCode'), ...(route === undefined ? {} : { route }), ...(record.pending === undefined ? {} : { pending: validatePending(record.pending) }), ...(capabilityContext === undefined ? {} : { capabilityContext }), ...(replySource === undefined ? {} : { replySource }), ...(timing === undefined ? {} : { timing }) };
 }
 
 /** 校验公开路由证据，禁止 Bridge 携带原始模型上下文。 */
@@ -210,8 +211,29 @@ function validateConfirmResponse(value: unknown): BridgeConfirmResponse {
   const record = validateCommonResponse(value);
   if (!isString(record.reply)) throw new BridgeClientError('invalid_bridge_response', 'IAR 桥接响应无效。', false);
   const replySource = optionalReplySource(record);
-  return { version: PI_BRIDGE_VERSION, iarSessionId: record.iarSessionId, disposition: 'handled', reply: record.reply, ...optionalString(record, 'reasonCode'), ...(record.pending === undefined ? {} : { pending: validatePending(record.pending) }), ...(replySource === undefined ? {} : { replySource }) };
+  const timing = record.timing === undefined ? undefined : validateTiming(record.timing);
+  return { version: PI_BRIDGE_VERSION, iarSessionId: record.iarSessionId, disposition: 'handled', reply: record.reply, ...optionalString(record, 'reasonCode'), ...(record.pending === undefined ? {} : { pending: validatePending(record.pending) }), ...(replySource === undefined ? {} : { replySource }), ...(timing === undefined ? {} : { timing }) };
 }
+
+/**
+ * 校验耗时摘要，限制阶段数量和数值边界，拒绝正文型扩展字段。
+ */
+function validateTiming(value: unknown): BridgeTimingSummary {
+  const record = asRecord(value);
+  if (!isBoundedString(record.traceId, 256) || !isDuration(record.durationMs) || !Array.isArray(record.stages) || record.stages.length > 32) throw new BridgeClientError('invalid_bridge_response', 'IAR 耗时摘要无效。', false);
+  const stages = record.stages.map((item) => {
+    const stage = asRecord(item);
+    if (!['semantic.extract', 'route.select', 'action.execute', 'response.reasoning', 'response.generate'].includes(String(stage.stage)) || !['completed', 'failed', 'skipped'].includes(String(stage.status)) || !isDuration(stage.durationMs)) throw new BridgeClientError('invalid_bridge_response', 'IAR 耗时摘要无效。', false);
+    if (stage.firstTokenMs !== undefined && !isDuration(stage.firstTokenMs)) throw new BridgeClientError('invalid_bridge_response', 'IAR 耗时摘要无效。', false);
+    return { stage: stage.stage, status: stage.status, durationMs: stage.durationMs, ...(stage.firstTokenMs === undefined ? {} : { firstTokenMs: stage.firstTokenMs }) } as BridgeTimingSummary['stages'][number];
+  });
+  return { traceId: record.traceId, durationMs: record.durationMs, stages };
+}
+
+/**
+ * 只接受非负安全整数耗时。
+ */
+function isDuration(value: unknown): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0; }
 
 /** 校验状态响应。 */
 function validateStateResponse(value: unknown): BridgeStateResponse {

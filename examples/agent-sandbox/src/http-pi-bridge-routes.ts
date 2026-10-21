@@ -100,11 +100,12 @@ async function handleState(session: IarSandboxSession, sessionId: string): Promi
 
 /** 将 IAR TurnResult 转成公开输入 response。 */
 function toInputResponse(sessionId: string, result: TurnResult): BridgeInputResponse {
-  if (result.status === 'pass_through') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'pass_through', route: toRouteEvidence(result.route), capabilityContext: result.capabilityContext, replySource: result.replySource ?? 'pi_agent' };
-  if (result.status === 'awaiting_confirmation') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'awaiting_confirmation', reply: result.reply, pending: toPendingAction(result.pending), route: toRouteEvidence(result.route), replySource: result.replySource ?? 'none' };
-  if (result.status === 'clarification') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: result.disposition ?? 'clarification', reply: result.reply, reasonCode: result.reasonCode, route: toRouteEvidence(result.route), replySource: result.replySource ?? 'response_model' };
-  if (result.status === 'executed') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'handled', reply: result.reply, ...(result.reasonCode === undefined ? {} : { reasonCode: result.reasonCode }), route: toRouteEvidence(result.route), replySource: result.replySource ?? 'response_model' };
-  if (result.status === 'failed') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'handled', reply: result.reply, reasonCode: result.reasonCode, route: toRouteEvidence(result.route), replySource: result.replySource ?? 'none' };
+  const timing = result.timing === undefined ? {} : { timing: result.timing };
+  if (result.status === 'pass_through') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'pass_through', route: toRouteEvidence(result.route), capabilityContext: result.capabilityContext, replySource: result.replySource ?? 'pi_agent', ...timing };
+  if (result.status === 'awaiting_confirmation') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'awaiting_confirmation', reply: result.reply, pending: toPendingAction(result.pending), route: toRouteEvidence(result.route), replySource: result.replySource ?? 'none', ...timing };
+  if (result.status === 'clarification') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: result.disposition ?? 'clarification', reply: result.reply, reasonCode: result.reasonCode, route: toRouteEvidence(result.route), replySource: result.replySource ?? 'response_model', ...timing };
+  if (result.status === 'executed') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'handled', reply: result.reply, ...(result.reasonCode === undefined ? {} : { reasonCode: result.reasonCode }), route: toRouteEvidence(result.route), replySource: result.replySource ?? 'response_model', ...timing };
+  if (result.status === 'failed') return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, disposition: 'handled', reply: result.reply, reasonCode: result.reasonCode, route: toRouteEvidence(result.route), replySource: result.replySource ?? 'none', ...timing };
   // bridge 会话不挂载进程内 Pi 委托，agent 终态只出现在网页会话，属于协议不变量破坏。
   throw new BridgeRequestError(500, 'unexpected_agent_disposition', 'IAR 桥接结果异常。');
 }

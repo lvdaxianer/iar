@@ -5,7 +5,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-21
  */
-import { createIarExtension, IarBridgeClient, type BridgeCapabilityDescriptor, type BridgeConfirmResponse, type BridgeInputResponse, type BridgePendingAction, type BridgeReplySource, type IarBridgeClientLike, type PiExtensionAPI, type PiExtensionContext, type PiInputResult } from '@iar/pi-bridge';
+import { createIarExtension, IarBridgeClient, type BridgeCapabilityDescriptor, type BridgeConfirmResponse, type BridgeInputResponse, type BridgePendingAction, type BridgeReplySource, type BridgeTimingSummary, type IarBridgeClientLike, type PiExtensionAPI, type PiExtensionContext, type PiInputResult } from '@iar/pi-bridge';
 import { createPiAgentDelegate, type PiAgentDelegate } from '../models/pi-agent-delegate.js';
 import type { SandboxMode } from '../session-types.js';
 
@@ -20,6 +20,10 @@ export type PiHostSessionEvents = {
   onNotify?: (message: string, type: 'info' | 'warning' | 'error') => void;
   /** 每次 bridge input 后的路由证据，先于对应 entry 触发。 */
   onRoute?: (route: PiHostRouteInfo) => void;
+  /**
+   * 每轮输入结束时的总耗时和各阶段耗时。
+   */
+  onTiming?: (timing: BridgeTimingSummary) => void;
   /** 待确认动作变化；null 表示当前没有待确认。 */
   onConfirm?: (pending: BridgePendingAction | null) => void;
   /** Pi Agent 流式增量（仅未命中输入）。 */
@@ -78,7 +82,7 @@ export class PiHostSession {
     this.delegate = options.piAgent ?? createPiAgentDelegate({ mode: options.mode, sessionId: options.sessionId, ...(options.systemPrompt === undefined ? {} : { systemPrompt: options.systemPrompt }) });
     const baseClient = options.client ?? new IarBridgeClient({ baseUrl: options.bridgeUrl ?? process.env.IAR_PI_BRIDGE_URL ?? 'http://127.0.0.1:8787' });
     const client = observeClient(baseClient, {
-      input: (response) => { this.passThroughDescriptors = response.disposition === 'pass_through' ? response.capabilityContext?.functionDescriptors ?? [] : []; this.publishRoute(response); this.events.onConfirm?.(response.pending ?? null); },
+      input: (response) => { this.passThroughDescriptors = response.disposition === 'pass_through' ? response.capabilityContext?.functionDescriptors ?? [] : []; this.publishRoute(response); if (response.timing) this.events.onTiming?.(response.timing); this.events.onConfirm?.(response.pending ?? null); },
       confirm: (response) => { this.events.onConfirm?.(response.pending ?? null); }
     });
     const pi: PiExtensionAPI = {

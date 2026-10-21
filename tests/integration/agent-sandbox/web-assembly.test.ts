@@ -90,6 +90,16 @@ test('页面消息及流式气泡入口不超过 20 行', () => {
   }
 });
 
+/* thinking 与正文必须使用不同事件和不同安全出口；原始 thinking 只允许纯文本 pre 展示。 */
+test('流式页面独立展示原始 thinking，不混入最终 Markdown', () => {
+  const source = readFileSync('examples/agent-sandbox/web/stream.fragment.js', 'utf8');
+  assert.match(source, /event\.type === 'reasoningDelta'/);
+  assert.match(source, /function appendStreamReasoning\(/);
+  assert.match(source, /className = 'reasoning'/);
+  assert.match(source, /state\.reasoningEl\.textContent \+= text/);
+  assert.match(source, /state\.textEl\.innerHTML = renderMarkdown\(rawText\)/);
+});
+
 /* 历史回放依赖原始 Markdown：innerHTML 替换后的 textContent 会丢失换行与标记，
  * 快照必须发生在 renderMarkdown 之前，否则刷新后列表和段落结构全部塌缩。 */
 test('流式气泡历史在 Markdown 渲染前快照原始文本', () => {

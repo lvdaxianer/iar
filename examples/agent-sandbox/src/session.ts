@@ -17,6 +17,7 @@ import { buildEvidence, sandboxOperationKind, summarizeAction } from './session-
 import { createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
 import { finishConfirmedAction, pendingBridgeResult, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection } from './session-turn-helpers.js';
 import { withConfirmReplySource, withReplySource, type CompactResult, type ConfirmResult, type ExecuteTurnOutcome, type ExtractFrameOutcome, type RouteEvidence, type StreamEvent, type TurnResult } from './session-types.js';
+import { recordTurnTiming, TurnTimingTracker } from './turn-timing.js';
 export type { CompactResult, ConfirmResult, PendingActionSummary, ReplySource, RouteEvidence, SandboxDecisionBackend, SandboxMode, SandboxState, StreamEvent, TurnResult, TurnStage } from './session-types.js';
 /** 公开会话对话和确认入口。
  * @author lvdaxianer@yeah.net
@@ -106,8 +107,8 @@ export class IarSandboxSession extends SandboxSessionCore {
       routeFrame: (traceId, runId, frame, behaviorContext, currentMessage, recentMessages, selectedDescriptor) => this.routing.routeFrame(traceId, runId, frame, behaviorContext, currentMessage, recentMessages, selectedDescriptor),
       resolveReferences: (frame, behaviorContext) => this.routing.resolveReferences(frame, behaviorContext),
       prepareAndExecute: (context) => this.routing.prepareAndExecute(context),
-      fallbackReplyStreamed: (context, onDelta) => this.replies.fallbackReplyStreamed(context, onDelta),
-      generateReplyStreamed: (context, onDelta) => this.replies.generateReplyStreamed(context, onDelta),
+      fallbackReplyStreamed: (context, onDelta, onReasoningDelta) => this.replies.fallbackReplyStreamed(context, onDelta, onReasoningDelta),
+      generateReplyStreamed: (context, onDelta, onReasoningDelta) => this.replies.generateReplyStreamed(context, onDelta, onReasoningDelta),
       currentBehaviorContext: () => this.projector.current(),
       pushMessages: (text, reply) => this.replies.pushMessages(text, reply),
       piAgent: this.piAgent
@@ -158,23 +159,47 @@ export class IarSandboxSession extends SandboxSessionCore {
   private async turnInternal(text: string, bridgeMode: boolean): Promise<TurnResult> {
     await this.whenReady();
     const userText = text.trim();
-    // 新一轮输入会结束上一轮未处理的确认，避免旧动作占用当前语义上下文。
-    // 本方法只编排当前轮次，事件投影和回复组件负责各自的状态边界。
-    if (bridgeMode && this.pending) return pendingBridgeResult();
-    if (!bridgeMode) await this.cancelStalePending();
     this.turnCount += 1;
     const traceId = resolveSandboxTraceId(`trace-sandbox-${String(this.turnCount)}`);
-    const behaviorContext = this.projector.current();
-    const selection = this.resolveSelection(userText, behaviorContext);
-    if (selection.invalid) return this.rejectSelection(userText, selection.reasonCode);
-    const extracted = await this.routing.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext, this.recentMessages, selection.descriptor);
-    // 语义失败仍写入历史，保持原有对话恢复行为。
-    if (!extracted.ok) {
-      await this.markUnresolved(extracted.reasonCode);
-      this.replies.pushMessages(userText, extracted.reply);
-      return { status: 'failed', reply: extracted.reply, route: extracted.route, reasonCode: extracted.reasonCode };
+    const timing = new TurnTimingTracker(traceId);
+    try {
+      // 新一轮输入会结束上一轮未处理的确认，避免旧动作占用当前语义上下文。
+      // 本方法只编排当前轮次，事件投影和回复组件负责各自的状态边界。
+      if (bridgeMode && this.pending) return this.withTiming(pendingBridgeResult(), timing);
+      if (!bridgeMode) await this.cancelStalePending();
+      const behaviorContext = this.projector.current();
+      const selection = this.resolveSelection(userText, behaviorContext);
+      if (selection.invalid) return this.withTiming(await this.rejectSelection(userText, selection.reasonCode), timing);
+      timing.start('semantic.extract');
+      const extracted = await this.routing.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext, this.recentMessages, selection.descriptor);
+      timing.end('semantic.extract');
+      // 语义失败仍写入历史，保持原有对话恢复行为。
+      if (!extracted.ok) {
+        await this.markUnresolved(extracted.reasonCode);
+        this.replies.pushMessages(userText, extracted.reply);
+        return this.withTiming({ status: 'failed', reply: extracted.reply, route: extracted.route, reasonCode: extracted.reasonCode }, timing);
+      }
+      return this.withTiming(await this.routeNormalTurn({ userText, traceId, behaviorContext, extracted, timing, passThroughOnNoMatch: bridgeMode, ...(selection.descriptor === undefined ? {} : { selectedDescriptor: selection.descriptor }) }), timing);
+    } catch (error) {
+      this.recordFailedTiming(timing);
+      throw error;
     }
-    return this.routeNormalTurn({ userText, traceId, behaviorContext, extracted, passThroughOnNoMatch: bridgeMode, ...(selection.descriptor === undefined ? {} : { selectedDescriptor: selection.descriptor }) });
+  }
+
+  /**
+   * 为普通和 bridge 结果补齐单轮耗时摘要。
+   */
+  private withTiming(result: TurnResult, timing: TurnTimingTracker): TurnResult {
+    const summary = timing.finish();
+    recordTurnTiming(summary);
+    return { ...result, timing: summary };
+  }
+
+  /**
+   * 记录普通入口或 bridge 异常的阶段摘要，不吞掉原始业务错误。
+   */
+  private recordFailedTiming(timing: TurnTimingTracker): void {
+    recordTurnTiming(timing.finish());
   }
   /**
    * 执行普通对话的路由并分派未命中或动作路径。
@@ -183,22 +208,26 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected async routeNormalTurn(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }>; passThroughOnNoMatch: boolean; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
-    const { userText, traceId, behaviorContext, extracted, passThroughOnNoMatch, selectedDescriptor } = context;
+  protected async routeNormalTurn(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }>; timing: TurnTimingTracker; passThroughOnNoMatch: boolean; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
+    const { userText, traceId, behaviorContext, extracted, timing, passThroughOnNoMatch, selectedDescriptor } = context;
     const references = this.routing.resolveReferences(extracted.frame, behaviorContext);
-    if (!references.ok) return this.finishNormalFallback({ userText, traceId, behaviorContext, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: extracted.frame.intent, semanticConfidence: extracted.frame.confidence }, ...(references.pendingReference === undefined ? {} : { pendingReference: references.pendingReference }), ...(references.candidates === undefined ? {} : { referenceCandidates: references.candidates }) });
+    if (!references.ok) return this.finishNormalFallback({ userText, traceId, behaviorContext, timing, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: extracted.frame.intent, semanticConfidence: extracted.frame.confidence }, ...(references.pendingReference === undefined ? {} : { pendingReference: references.pendingReference }), ...(references.candidates === undefined ? {} : { referenceCandidates: references.candidates }) });
     if (behaviorContext.pendingReference !== undefined) await this.resetClarification();
     const routeContext = this.projector.current();
+    timing.start('route.select');
     const route = await this.routing.routeFrame(traceId, SESSION_RUN_ID, extracted.frame, routeContext, userText, this.recentMessages, selectedDescriptor);
+    timing.end('route.select');
     const evidence = buildEvidence(route, extracted.frame);
     // 抽取降级须保留在返回的路由证据中。
     if (extracted.semanticFallback) evidence.semanticFallback = true;
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
       const resolved = await resolveNoMatchTurn({ piAgent: this.piAgent, pushMessages: this.replies.pushMessages.bind(this.replies), passThroughOnNoMatch, userText, evidence, behaviorContext, selectedDescriptor, functionDescriptors: this.pluginHost.descriptors() });
-      return resolved ?? this.finishNormalFallback({ userText, traceId, behaviorContext: routeContext, evidence, resolvedReferences: references.references });
+      return resolved ?? this.finishNormalFallback({ userText, traceId, behaviorContext: routeContext, timing, evidence, resolvedReferences: references.references });
     }
+    timing.start('action.execute');
     const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame: extracted.frame, route, behaviorContext: routeContext });
-    return this.finishNormalOutcome({ userText, traceId, evidence, outcome });
+    timing.end('action.execute');
+    return this.finishNormalOutcome({ userText, traceId, timing, evidence, outcome });
   }
   /**
    * 生成路由未命中时的普通回复，超限内容不写入历史。
@@ -208,16 +237,18 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected async finishNormalFallback(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; evidence: RouteEvidence; resolvedReferences?: import('./session-types.js').ResolvedFactReference[]; pendingReference?: PendingReference; referenceCandidates?: VerifiedFactRecord[] }): Promise<TurnResult> {
-    const { userText, traceId, behaviorContext, evidence, resolvedReferences, pendingReference, referenceCandidates } = context;
+  protected async finishNormalFallback(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; timing: TurnTimingTracker; evidence: RouteEvidence; resolvedReferences?: import('./session-types.js').ResolvedFactReference[]; pendingReference?: PendingReference; referenceCandidates?: VerifiedFactRecord[] }): Promise<TurnResult> {
+    const { userText, traceId, behaviorContext, timing, evidence, resolvedReferences, pendingReference, referenceCandidates } = context;
     if (!hasVerifiedFactsForFollowUp(behaviorContext, evidence) && !matchesPendingOption(behaviorContext, userText)) await this.markUnresolved(evidence.reasonCode, pendingReference);
     const currentBehaviorContext = this.projector.current();
     // 未命中功能时只允许生成澄清回复，不能在兜底阶段隐式执行插件。
+    timing.start('response.generate');
     const reply = await trackModelResponseLimit(() => this.replies.fallbackReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: currentBehaviorContext, recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), reasonCode: evidence.reasonCode, ...(resolvedReferences === undefined ? {} : { resolvedReferences }), ...(referenceCandidates === undefined ? {} : { referenceCandidates }) })).catch((error: unknown) => {
       // 非超限错误必须继续向调用方传播。
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
     });
+    timing.end('response.generate', reply === undefined ? 'failed' : 'completed');
     if (reply === undefined) return { status: 'failed', reply: '模型回复超限，回复未完成。', route: evidence, reasonCode: 'model_response_too_large' };
     this.replies.pushMessages(userText, reply);
     return { status: 'clarification', reply, route: evidence, reasonCode: evidence.reasonCode, ...(resolvedReferences && resolvedReferences.length > 0 ? { disposition: 'context_answered' as const } : {}) };
@@ -229,8 +260,8 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected async finishNormalOutcome(context: { userText: string; traceId: string; evidence: RouteEvidence; outcome: ExecuteTurnOutcome }): Promise<TurnResult> {
-    const { userText, traceId, evidence, outcome } = context;
+  protected async finishNormalOutcome(context: { userText: string; traceId: string; timing: TurnTimingTracker; evidence: RouteEvidence; outcome: ExecuteTurnOutcome }): Promise<TurnResult> {
+    const { userText, traceId, timing, evidence, outcome } = context;
     // 尚未执行的终态先写入对话历史，不生成动作回复。
     if (outcome.status === 'awaiting_confirmation') {
       evidence.operationKind = outcome.operationKind;
@@ -243,7 +274,7 @@ export class IarSandboxSession extends SandboxSessionCore {
       this.replies.pushMessages(userText, outcome.reply);
       return { status: outcome.status, reply: outcome.reply, route: evidence, reasonCode: outcome.reasonCode };
     }
-    return this.finishNormalExecution({ userText, traceId, evidence, outcome });
+    return this.finishNormalExecution({ userText, traceId, timing, evidence, outcome });
   }
   /**
    * 为已执行动作生成普通回复，保留动作成功和回复超限的区别。
@@ -253,16 +284,18 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected async finishNormalExecution(context: { userText: string; traceId: string; evidence: RouteEvidence; outcome: Extract<ExecuteTurnOutcome, { status: 'executed' }> }): Promise<TurnResult> {
-    const { userText, traceId, evidence, outcome } = context;
+  protected async finishNormalExecution(context: { userText: string; traceId: string; timing: TurnTimingTracker; evidence: RouteEvidence; outcome: Extract<ExecuteTurnOutcome, { status: 'executed' }> }): Promise<TurnResult> {
+    const { userText, traceId, timing, evidence, outcome } = context;
     // 动作已经落地后，模型回复失败也必须保留 executed 事实，禁止重试动作。
     await this.resetClarification();
     evidence.operationKind = outcome.operationKind;
+    timing.start('response.generate');
     const reply = await trackModelResponseLimit(() => this.replies.generateReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: this.projector.current(), recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), action: outcome.action, actionResult: outcome.actionResult, operationKind: outcome.operationKind })).catch((error: unknown) => {
       // 非超限错误保持原有传播方式。
       if (!(error instanceof ModelResponseLimitError)) throw error;
       return undefined;
     });
+    timing.end('response.generate', reply === undefined ? 'failed' : 'completed');
     if (reply === undefined) return { status: 'executed', reply: '动作已执行，但模型回复超限且不完整，请勿重复执行。', route: evidence, actionResult: outcome.actionResult, reasonCode: 'model_response_too_large' };
     if (reply.length > 0) this.replies.pushMessages(userText, reply);
     return { status: 'executed', reply, route: evidence, actionResult: outcome.actionResult };

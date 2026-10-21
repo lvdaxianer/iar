@@ -32,6 +32,21 @@ test('IAR bridge client accepts optional pass-through capability context', async
   assert.deepEqual(result.capabilityContext, { functionDescriptors: [{ functionId: 'f', pluginId: 'p', description: '可查询', actionTypes: ['query'] }] });
 });
 
+test('IAR bridge client validates and preserves timing summary', async () => {
+  const client = new IarBridgeClient({
+    baseUrl: 'http://iar.test',
+    fetch: async () => Response.json({
+      version: PI_BRIDGE_VERSION,
+      iarSessionId: 'iar-1',
+      disposition: 'handled',
+      reply: '已查询',
+      timing: { traceId: 'trace-1', durationMs: 120, stages: [{ stage: 'semantic.extract', status: 'completed', durationMs: 40 }] }
+    })
+  });
+  const result = await client.input('iar-1', '查询状态');
+  assert.deepEqual(result.timing, { traceId: 'trace-1', durationMs: 120, stages: [{ stage: 'semantic.extract', status: 'completed', durationMs: 40 }] });
+});
+
 test('IAR bridge client rejects oversized pass-through capability context', async () => {
   const client = new IarBridgeClient({
     baseUrl: 'http://iar.test',

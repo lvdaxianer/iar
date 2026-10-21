@@ -15,6 +15,20 @@ export type BridgeDisposition = 'pass_through' | 'handled' | 'clarification' | '
 /** 公开回复来源，区分 IAR 直出、回复模型和 Pi Agent。 */
 export type BridgeReplySource = 'direct_function' | 'response_model' | 'pi_agent' | 'none';
 
+/**
+ * Bridge 对外传递的单轮耗时摘要。
+ */
+export type BridgeTimingSummary = {
+  traceId: string;
+  durationMs: number;
+  stages: Array<{
+    stage: 'semantic.extract' | 'route.select' | 'action.execute' | 'response.reasoning' | 'response.generate';
+    status: 'completed' | 'failed' | 'skipped';
+    durationMs: number;
+    firstTokenMs?: number;
+  }>;
+};
+
 /** Pi 会话标识的有界字符串类型。 */
 export type PiSessionId = string;
 
@@ -43,13 +57,13 @@ export type BridgePendingAction = { actionId: string; runId: string; functionId:
 export type BridgeInputRequest = { text: string; requestId?: string };
 
 /** 输入响应。 */
-export type BridgeInputResponse = { version: typeof PI_BRIDGE_VERSION; iarSessionId: IarSessionId; disposition: BridgeDisposition; reply?: string; reasonCode?: string; route?: BridgeRouteEvidence; pending?: BridgePendingAction; capabilityContext?: BridgeCapabilityContext; replySource?: BridgeReplySource };
+export type BridgeInputResponse = { version: typeof PI_BRIDGE_VERSION; iarSessionId: IarSessionId; disposition: BridgeDisposition; reply?: string; reasonCode?: string; route?: BridgeRouteEvidence; pending?: BridgePendingAction; capabilityContext?: BridgeCapabilityContext; replySource?: BridgeReplySource; timing?: BridgeTimingSummary };
 
 /** 确认或取消请求。 */
 export type BridgeConfirmRequest = { actionId: string; accepted: boolean; requestId?: string };
 
 /** 确认或取消响应。 */
-export type BridgeConfirmResponse = { version: typeof PI_BRIDGE_VERSION; iarSessionId: IarSessionId; disposition: 'handled'; reply: string; reasonCode?: string; pending?: BridgePendingAction; replySource?: BridgeReplySource };
+export type BridgeConfirmResponse = { version: typeof PI_BRIDGE_VERSION; iarSessionId: IarSessionId; disposition: 'handled'; reply: string; reasonCode?: string; pending?: BridgePendingAction; replySource?: BridgeReplySource; timing?: BridgeTimingSummary };
 
 /** 状态响应只返回扩展驱动下一步所需的最小字段。 */
 export type BridgeStateResponse = { version: typeof PI_BRIDGE_VERSION; iarSessionId: IarSessionId; pending?: BridgePendingAction };

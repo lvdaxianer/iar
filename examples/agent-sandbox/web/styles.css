@@ -119,6 +119,9 @@
   }
   .thinking-label { font-weight: 600; color: var(--accent); font-style: italic; }
   .thinking-stage { font-size: 11px; }
+  .reasoning { margin: 4px 0 8px; padding: 7px 10px; background: #faf8ff; border: 1px solid #ddd6fe; border-radius: 8px; color: var(--muted); font-size: 11px; }
+  .reasoning summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+  .reasoning pre { white-space: pre-wrap; word-break: break-word; margin: 6px 0 0; font: 11px/1.5 var(--mono); max-height: 240px; overflow: auto; }
   .thinking-dots { display: inline-flex; gap: 3px; align-items: center; }
   .thinking-dots i {
     width: 5px; height: 5px; border-radius: 50%;
