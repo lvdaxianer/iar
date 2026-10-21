@@ -15,6 +15,7 @@
   let piHostBusy = false;
   let piHostBubble = null;
   let piHostPendingRoute = null;
+  let piHostExpectingEntry = false;
   let piHostEvents = [];
 
   /** 读取本标签页的 Pi 会话标识；缺失、损坏或不合法时创建新标识。
@@ -157,7 +158,8 @@
     document.getElementById('routeScore').textContent = route.reasonCode || '-';
   }
 
-  /** 创建 Pi Agent 流式气泡，带 Thinking 指示器；增量期间纯文本追加。
+  /** 创建 Pi Agent 流式气泡，带 Thinking 指示器（三点动画）；
+   * 增量期间纯文本追加，只有终态才转换为安全 Markdown。
    * @returns 无返回值
    * @author lvdaxianer@yeah.net
    * @date 2026-10-21
@@ -169,7 +171,14 @@
     textEl.className = 'md-body';
     var stageEl = document.createElement('span');
     stageEl.className = 'thinking';
-    stageEl.textContent = 'Thinking';
+    var dots = document.createElement('span');
+    dots.className = 'thinking-dots';
+    for (var index = 0; index < 3; index += 1) dots.appendChild(document.createElement('i'));
+    var label = document.createElement('span');
+    label.className = 'thinking-label';
+    label.textContent = 'Thinking';
+    stageEl.appendChild(dots);
+    stageEl.appendChild(label);
     div.appendChild(textEl);
     div.appendChild(stageEl);
     piHostMessagesEl.appendChild(div);
@@ -206,9 +215,49 @@
     piHostMessagesEl.scrollTop = piHostMessagesEl.scrollHeight;
   }
 
+  /** 由 entry disposition 与本轮路由生成状态标签，handled 附 Function 标识。 */
+  function piHostEntryMeta(data) {
+    var meta = PI_HOST_DISPOSITION_META[data.disposition] || data.disposition || '已执行';
+    if (data.disposition === 'handled' && piHostPendingRoute && piHostPendingRoute.functionId) meta += ' · ' + piHostPendingRoute.functionId;
+    return meta;
+  }
+
+  /** 把 IAR 结果以打字机方式写入本轮气泡，与 Pi 增量同一渐进呈现。
+   * 历史记录的是完整原文，不受分片影响；期间用户可继续发起新轮次。
+   * @param text - entry 完整正文
+   * @param meta - 终态状态标签
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  function streamPiHostEntryText(text, meta) {
+    var bubble = piHostBubble;
+    bubble.gotDelta = true;
+    bubble.stageEl.remove();
+    var cursor = 0;
+    var timer = setInterval(function () {
+      cursor = Math.min(text.length, cursor + 12);
+      bubble.textEl.textContent = text.slice(0, cursor);
+      piHostMessagesEl.scrollTop = piHostMessagesEl.scrollHeight;
+      if (cursor < text.length) return;
+      clearInterval(timer);
+      finalizePiHostEntryText(bubble, text, meta);
+    }, 16);
+  }
+
+  /** IAR 结果流式收尾：终态统一 Markdown 渲染、加状态标签并记录历史。
+   * 只有气泡仍属于本轮时才解除引用，避免清掉新轮次的气泡。 */
+  function finalizePiHostEntryText(bubble, rawText, meta) {
+    if (piHostBubble === bubble) piHostBubble = null;
+    bubble.textEl.innerHTML = renderMarkdown(rawText);
+    appendMessageMeta(bubble.div, meta);
+    recordPiHostConversation('bot', rawText, meta);
+    piHostMessagesEl.scrollTop = piHostMessagesEl.scrollHeight;
+  }
+
   /** 校验并渲染 IAR entry，异常信封直接忽略，避免空卡片污染会话。
    * 仅接受 iar-bridge 自定义类型，content 以纯文本展示。
-   * handled 时把本轮路由的 Function 写进状态标签，与沙箱页同一展示词汇。
+   * 本轮气泡仍在时把结果流式写入气泡，否则直接渲染（确认结果等滞后事件）。
    * @param entry - SSE entry 事件负载
    * @returns 是否完成渲染
    * @author lvdaxianer@yeah.net
@@ -217,11 +266,9 @@
   function renderPiHostEntry(entry) {
     var data = (entry && typeof entry === 'object' && 'data' in entry && entry.data && typeof entry.data === 'object') ? entry.data : null;
     if (!data || entry.customType !== 'iar-bridge' || typeof data.content !== 'string') return false;
-    removePiHostBubble();
-    var meta = PI_HOST_DISPOSITION_META[data.disposition] || data.disposition || '已执行';
-    if (data.disposition === 'handled' && piHostPendingRoute && piHostPendingRoute.functionId) meta += ' · ' + piHostPendingRoute.functionId;
-    appendMsg('bot', data.content, meta);
-    recordPiHostConversation('bot', data.content, meta);
+    var meta = piHostEntryMeta(data);
+    if (piHostBubble && piHostExpectingEntry) streamPiHostEntryText(data.content, meta);
+    else { appendMsg('bot', data.content, meta); recordPiHostConversation('bot', data.content, meta); }
     if (data.disposition === 'handled') highlightPiHostFlow(['input', 'hook', 'iar', 'handled']);
     return true;
   }
@@ -307,9 +354,14 @@
     recordPiHostConversation('user', text);
     highlightPiHostFlow(['input']);
     createPiHostBubble();
+    piHostExpectingEntry = true;
     piHostPost('/api/pi-host/chat', { session: piHostSessionId, text: text })
-      .then(function (result) { if (result && result.action === 'handled') setPiHostBusy(false); })
+      .then(function (result) {
+        piHostExpectingEntry = false;
+        if (result && result.action === 'handled') setPiHostBusy(false);
+      })
       .catch(function () {
+        piHostExpectingEntry = false;
         removePiHostBubble();
         piHostInputEl.value = text;
         appendMsg('bot', '请求未完成，结果可能未知；请检查状态后再重试。', '失败');
