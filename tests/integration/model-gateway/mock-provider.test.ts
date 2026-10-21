@@ -8,8 +8,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
-import { ModelGateway, ModelProfileRegistry, loadModelProfiles, ModelProviderError, ResponseGeneratorAdapter } from '@iar/decision';
-import type { ModelProvider } from '@iar/decision';
+import { ModelGateway, ModelProfileRegistry, loadModelProfiles, ModelProviderError, ResponseGeneratorAdapter } from '@iar/runtime';
+import type { ModelProvider } from '@iar/runtime';
 
 /**
  * 创建本地 response profile registry，避免测试读取真实 provider 配置。

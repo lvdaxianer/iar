@@ -3,7 +3,7 @@ import test from 'node:test';
 import {
   ModelProviderError,
   type ModelProviderRequest
-} from '@iar/decision';
+} from '@iar/runtime';
 import {
   BrainModelProvider,
   IntentModelProvider

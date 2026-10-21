@@ -18,14 +18,24 @@ import { defineFunction, definePlugin } from '@iar/plugin';
 
 ## 应用统一入口
 
-应用从 `@iar/agent` 导入 `createIarAgent`：
+应用从 `@iar/runtime` 导入 `createIarRuntime`。旧的 `createIarAgent` 仅作为迁移期 deprecated alias 保留：
 
 ```ts
-import { createIarAgent } from '@iar/agent';
+import { createIarRuntime, type AsyncDecisionAdapter } from '@iar/runtime';
 import { ticketPlugin } from './ticket-plugin.js';
 
-const iar = createIarAgent({
-  plugins: [ticketPlugin]
+const decisionProvider = {
+  decide: async () => ({
+    ok: false,
+    error: { code: 'model.no_profile', message: '决策模型 backend 未配置', retryable: false, details: {} },
+    audit: [],
+    events: [],
+  }),
+} satisfies AsyncDecisionAdapter;
+
+const iar = createIarRuntime({
+  plugins: [ticketPlugin],
+  decisionProvider,
 });
 ```
 
@@ -38,7 +48,7 @@ PluginPackage[]
   → 原子安装
   → 按依赖启用
   → 派生 FunctionRegistry
-  → 返回 PluginHost + FunctionRegistry
+  → 返回 PluginHost + FunctionRegistry + DecisionProvider
 ```
 
 任一 Plugin、Function、依赖或启用步骤失败，初始化失败并清理本次安装，不返回部分可用的 Agent。
@@ -46,9 +56,10 @@ PluginPackage[]
 返回值：
 
 ```ts
-type IarAgent = {
+type IarRuntime = {
   pluginHost: PluginHost;
   functionRegistry: FunctionRegistry;
+  decisionProvider: AsyncDecisionAdapter;
 };
 ```
 
@@ -58,7 +69,7 @@ type IarAgent = {
 
 ```text
 插件项目  → @iar/plugin → 导出 PluginPackage
-应用项目  → @iar/agent  → createIarAgent({ plugins })
+应用项目  → @iar/runtime  → createIarRuntime({ plugins, decisionProvider })
 运行时    → @iar/plugins → PluginHost / FunctionRegistry
 ```
 
@@ -66,16 +77,16 @@ type IarAgent = {
 
 ```ts
 import { definePlugin } from '@iar/plugin';
-import { createIarAgent } from '@iar/agent';
+import { createIarRuntime } from '@iar/runtime';
 ```
 
-两个包都发布自身 `dist/index.js` 和 `dist/index.d.ts`，不依赖仓库根目录、其他包的 `src` 或未声明内部路径。
+两个包都发布自身 `dist/index.js` 和 `dist/index.d.ts`，不依赖仓库根目录、其他包的 `src` 或未声明内部路径。决策实现、规则、Workflow、观测和 Session 都属于 runtime 内部实现，不再作为独立发布包。
 
 ## HTTP 和 Pi 接入边界
 
 业务 Handler 是 JavaScript 函数，不能通过 JSON 传输。因此业务 Plugin 必须在应用进程内通过模块导入注册；HTTP/Service API 不能伪装成业务包安装入口。
 
-Pi 不需要导入 Plugin SDK，也不需要修改 Pi 源码。Pi 只调用 `@iar/pi-bridge` 暴露的 IAR 会话接口，IAR 负责会话、意图识别、有限候选、动态路由、确认和 Handler 执行。
+Pi 不需要导入 Plugin SDK，也不需要修改 Pi 源码。Pi 只调用 `@iar/pi-bridge` 暴露的 IAR 会话接口，IAR 负责会话、意图识别、有限候选、动态路由、确认和 Handler 执行；Bridge 不拥有 PluginHost、FunctionRegistry 或 Session。
 
 ## 失败和安全约束
 

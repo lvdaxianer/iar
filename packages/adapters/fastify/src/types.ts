@@ -6,7 +6,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import type { PluginHost, PluginRecord } from '@iar/plugins';
-import type { LocalWorkflow, WorkflowRun } from '@iar/workflow';
+import type { LocalWorkflow, WorkflowRun } from '@iar/runtime';
 
 /**
  * Fastify adapter 响应使用的稳定版本。

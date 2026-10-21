@@ -21,7 +21,7 @@ import {
   type ModelProfileEnvironment,
   type ModelProvider,
   type ModelProviderRequest
-} from '@iar/decision';
+} from '@iar/runtime';
 import { callModel } from './model-transport.js';
 import { runWithModelLogContext } from '../safe-log.js';
 import { callModelStream } from './model-stream-transport.js';

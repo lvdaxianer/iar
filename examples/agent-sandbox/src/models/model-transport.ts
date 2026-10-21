@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import { ModelProviderError } from '@iar/decision';
+import { ModelProviderError } from '@iar/runtime';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { logModelHttpFailure, logModelInvalidResponse, logModelNetworkFailure, logModelSuccess } from '../safe-log.js';
 

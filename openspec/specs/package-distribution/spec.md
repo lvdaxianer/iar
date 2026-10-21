@@ -2,21 +2,31 @@
 
 IAR 的 Node.js 包必须提供稳定、可安装、可类型检查且不暴露仓库内部目录的发布边界；消费者只依赖包声明的公共入口和随包发布的构建产物。
 
+## Purpose
+
+定义 IAR workspace 包的可发布入口、类型声明、构建产物和包间依赖边界，
+确保消费者只能通过稳定的包根入口使用公共 API。
+
 ## Requirements
 
 ### Requirement: Package exposes a stable compiled entrypoint
 
-每个可发布包 SHALL 从自身包目录的构建产物提供公共运行时入口；`@iar/plugin` SHALL 提供插件作者定义 Plugin/Function 的入口，`@iar/agent` SHALL 提供应用统一启动入口，消费者不得依赖仓库根目录、其他包的 `src` 目录或包外构建路径。
+每个可发布包 SHALL 从自身包目录的构建产物提供公共运行时入口；
+`@iar/plugin` SHALL 提供插件作者定义 Plugin/Function 的入口，
+`@iar/runtime` SHALL 提供独立 IAR 运行时入口，消费者不得依赖仓库根目录、
+其他包的 `src` 目录或包外构建路径。
 
 #### Scenario: Consumer imports the package root
 
-- **WHEN** 消费者从安装后的 `@iar/plugin` 或 `@iar/agent` 导入公共 API
-- **THEN** Node.js 能从该包自身声明的编译产物加载 JavaScript，而不需要 TypeScript loader 或仓库根目录
+- **WHEN** 消费者从安装后的 `@iar/plugin` 或 `@iar/runtime` 导入公共 API
+- **THEN** Node.js 能从该包自身声明的编译产物加载 JavaScript，而不需要
+  TypeScript loader 或仓库根目录
 
 #### Scenario: Consumer uses an undeclared internal path
 
-- **WHEN** 消费者导入 `@iar/plugin`、`@iar/agent` 或其他包未声明的内部路径
-- **THEN** 包边界拒绝该导入，不把 `src`、内部实现目录或未声明构建文件视为公共 API
+- **WHEN** 消费者导入 `@iar/plugin`、`@iar/runtime` 或其他包未声明的内部路径
+- **THEN** 包边界拒绝该导入，不把 `src`、内部实现目录或未声明构建文件视为
+  公共 API
 
 ### Requirement: Package publishes matching type declarations
 
@@ -34,7 +44,10 @@ IAR 的 Node.js 包必须提供稳定、可安装、可类型检查且不暴露�
 
 ### Requirement: Workspace packages use public package boundaries
 
-仓库内的包之间 SHALL 通过稳定的 `@iar/*` 包名或已声明的公共子路径交互；`@iar/agent` 可以组合 `@iar/contracts`、`@iar/plugins` 和 `@iar/runtime`，但消费者不得穿透到这些包的 `src` 或 `dist`。
+仓库内的包之间 SHALL 通过稳定的 `@iar/*` 包名或已声明的公共子路径交互；
+`@iar/runtime` 可以组合 `@iar/contracts`、`@iar/plugin`、
+`@iar/plugins`、`@iar/storage` 和显式注入的 adapter，但消费者不得穿透到
+这些包的 `src` 或 `dist`。
 
 #### Scenario: Package depends on another workspace package
 
@@ -48,25 +61,31 @@ IAR 的 Node.js 包必须提供稳定、可安装、可类型检查且不暴露�
 
 ### Requirement: Build output is reproducible and validated
 
-仓库 SHALL 能从干净检出重新生成 `@iar/plugin` 和 `@iar/agent` 的 JavaScript、声明文件和必要 source map，并在发布前验证两个公共入口的导入和包内容边界。
+仓库 SHALL 能从干净检出重新生成 `@iar/plugin` 和 `@iar/runtime` 的
+JavaScript、声明文件和必要 source map，并在发布前验证两个公共入口的导入
+和包内容边界。
 
 #### Scenario: Clean checkout builds packages
 
 - **WHEN** 在没有已提交构建产物的干净检出中执行仓库构建
-- **THEN** 所有目标包生成自身的 JavaScript、声明文件和必要 source map，且不依赖上一次构建遗留文件
+- **THEN** 所有目标包生成自身的 JavaScript、声明文件和必要 source map，
+  且不依赖上一次构建遗留文件
 
 #### Scenario: Package smoke check runs
 
 - **WHEN** 执行发布包冒烟检查
-- **THEN** 检查能够从打包内容导入 `@iar/plugin` 与 `@iar/agent`，解析类型声明，并发现缺失或越界的发布文件
+- **THEN** 检查能够从打包内容导入 `@iar/plugin` 与 `@iar/runtime`，解析类型
+  声明，并发现缺失或越界的发布文件
 
 ### Requirement: Unified package entries are publishable
 
-`@iar/plugin` SHALL expose Plugin/Function authoring APIs and `@iar/agent` SHALL expose the application startup API from their own package roots with matching runtime and declaration files.
+`@iar/plugin` SHALL expose Plugin/Function authoring APIs and `@iar/runtime`
+SHALL expose the standalone runtime initialization API from their own package
+roots with matching runtime and declaration files。
 
 #### Scenario: Application imports the unified entry
 
-- **WHEN** 应用从安装后的 `@iar/agent` 导入统一入口并传入已构建的 Plugin 包
+- **WHEN** 应用从安装后的 `@iar/runtime` 导入统一入口并传入已构建的 Plugin 包
 - **THEN** Node.js 和 TypeScript 都能解析该包声明的入口并创建 IAR Runtime
 
 #### Scenario: Plugin author imports the SDK

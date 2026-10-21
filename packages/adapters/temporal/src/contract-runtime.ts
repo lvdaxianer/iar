@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import { validateContract } from '@iar/contracts';
-import type { WorkflowRequest, WorkflowResult, WorkflowRun } from '@iar/workflow';
+import type { WorkflowRequest, WorkflowResult, WorkflowRun } from '@iar/runtime';
 import type { WorkflowRuntimeContract, WorkflowRuntimeOptions } from './types.js';
 
 /**

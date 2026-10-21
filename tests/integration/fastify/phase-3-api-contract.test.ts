@@ -9,7 +9,7 @@ import test from 'node:test';
 import { SCHEMA_VERSIONS, type WorkflowDefinition } from '@iar/contracts';
 import { PluginHost } from '@iar/plugins';
 import { createFastifyApp } from '@iar/adapters-fastify';
-import { LocalWorkflow } from '@iar/workflow';
+import { LocalWorkflow } from '@iar/runtime';
 
 /**
  * 创建 API contract 使用的最小 WorkflowDefinition。

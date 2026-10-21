@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import type { ActionResult, EventEnvelope } from '@iar/contracts';
-import type { ConfirmationRequest, ExecuteRequest, FailureRequest, WorkflowRequest, WorkflowResult, WorkflowRun } from '@iar/workflow';
+import type { ConfirmationRequest, ExecuteRequest, FailureRequest, WorkflowRequest, WorkflowResult, WorkflowRun } from '@iar/runtime';
 
 /** 触发 durable execution 的受支持长期运行原因。 */
 export type DurableRequirementReason = 'timer' | 'cross_service' | 'compensation';

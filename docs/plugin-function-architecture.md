@@ -24,10 +24,15 @@ Plugin Manifest 只声明包级信息。业务 Function 必须嵌套在 `PluginP
 @iar/contracts  可序列化契约、Schema、版本和错误码
 @iar/plugin     插件作者入口：definePlugin / defineFunction
 @iar/plugins    PluginHost、生命周期和 Function provider 索引
-@iar/runtime    意图决策、有限候选和动态路由
-@iar/agent      应用统一入口：安装、启用和运行时装配
+@iar/runtime    独立意图/动作运行时：bootstrap、intent、execution、observability、session
+@iar/subscriptions  Hook/StateEvent 共享订阅边界
+@iar/storage    持久化 SPI、SQLite runtime 和可替换存储入口
+@iar/control-plane  租户控制面和插件分发
+@iar/cli        CLI 产品入口
 @iar/pi-bridge  Pi 与 IAR 会话服务之间的适配边界
 ```
+
+HTTP、Service、Sidecar、PostgreSQL、Temporal 和隔离执行器均位于 `packages/adapters/`，不进入 runtime core。
 
 插件作者只需要从 `@iar/plugin` 构造完整包：
 
@@ -73,7 +78,7 @@ export const ticketPlugin = definePlugin({
 
 `PluginHost` 是 Plugin 生命周期的唯一权威。安装时先完整校验包，再按依赖排序并原子写入 Plugin 记录；启用、禁用和卸载会同时影响包内全部 Function。
 
-`FunctionRegistry` 只从 Host 当前记录派生 `functionId -> Plugin providers`，不拥有第二份授权状态。统一 Agent 返回的 Registry 绑定当前 Host，因此后续生命周期变化不会留下过期的 Function 候选。
+`FunctionRegistry` 只从 Host 当前记录派生 `functionId -> Plugin providers`，不拥有第二份授权状态。统一 Runtime 返回的 Registry 绑定当前 Host，因此后续生命周期变化不会留下过期的 Function 候选。
 
 系统 Plugin 可以参与显式 Hook/订阅生命周期，但不能注册业务 Function，也不会出现在意图识别候选中。
 

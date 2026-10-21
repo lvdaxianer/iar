@@ -68,17 +68,27 @@ IAR_SANDBOX_PORT=8788 npm run demo:sandbox
 ```text
 packages/
 ├── contracts/            # 公共契约、Manifest 与 Schema
-├── plugins/              # Plugin SDK、Host、注册与生命周期
-├── decision/             # 类型化决策与 Decision Provider
-├── rule-engine/          # 复合规则与候选集约束
-├── runtime/              # 行为运行时、重放与路由
+├── plugin/               # 插件作者 SDK：definePlugin / defineFunction
+├── plugins/              # PluginHost、注册与生命周期
+├── runtime/              # 独立 IAR 运行时
+│   └── src/
+│       ├── bootstrap/    # createIarRuntime 和迁移 alias
+│       ├── intent/       # decision + rule engine
+│       ├── execution/    # Policy Gate、Workflow、Action 执行
+│       ├── observability/# 脱敏记录和 system logging plugin
+│       └── session/      # Context、Replay、Compaction、幂等
 ├── storage/              # EventStore、持久化 SPI/Runtime 与 SQLite Provider
-├── control-plane/        # Tenant control-plane 与插件分发
-├── observability/        # 观测记录、脱敏与 system plugin
 ├── subscriptions/        # Hook、StateEvent 与订阅分发
-├── workflow/             # Policy Gate 与本地 Workflow
+├── control-plane/         # Tenant control-plane 与插件分发
 ├── cli/                  # install、enable、disable、inspect、replay
-└── adapters/             # Fastify、Service、Sidecar、PostgreSQL、Temporal 等适配器
+└── adapters/
+    ├── pi/                # @iar/pi-bridge
+    ├── fastify/           # HTTP adapter
+    ├── service/           # Service API
+    ├── sidecar/           # Sidecar transport
+    ├── postgres/          # PostgreSQL storage adapter
+    ├── temporal/          # Durable workflow adapter
+    └── executors/         # worker/sidecar/container executor
 examples/
 ├── agent-sandbox/        # 根级组合根与可交互演示
 └── plugins/              # fake-plugin、knowledge-query、ticket-create、human-transfer
@@ -86,7 +96,7 @@ tests/                    # 契约、重放、路由、安全、服务化与故�
 docs/                     # 完整架构说明与实现审计
 ```
 
-`examples/` 不参与 workspace package 发布；只有可复用的核心运行时能力进入 `packages/`。插件示例集中放在 `examples/plugins/`，`agent-sandbox` 保持根级位置作为组合根。`plugins/sdk` 与 `plugins/host` 当前仍属于同一内部生命周期边界；只有出现独立发布、独立版本兼容承诺或外部插件作者需要单独安装时，才拆回独立 SDK 包。
+`examples/` 不参与 workspace package 发布；只有可复用的核心运行时能力进入 `packages/`。插件示例集中放在 `examples/plugins/`，`agent-sandbox` 保持根级位置作为组合根。`plugins/sdk` 与 `plugins/host` 当前仍属于同一内部生命周期边界；只有出现独立发布、独立版本兼容承诺或外部插件作者需要单独安装时，才拆回独立 SDK 包。`@iar/runtime` 可独立安装，但不会自动携带 Pi、HTTP、数据库或 Temporal adapter。
 
 ## 设计边界
 

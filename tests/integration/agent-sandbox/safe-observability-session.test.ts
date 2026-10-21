@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
 import test from 'node:test';
-import type { ModelProfileRegistry } from '@iar/decision';
+import type { ModelProfileRegistry } from '@iar/runtime';
 import { MAX_MODEL_RESPONSE_BYTES } from '../../../examples/agent-sandbox/src/models/model-transport.js';
 import type { PiAgentDelegate } from '../../../examples/agent-sandbox/src/models/pi-agent-delegate.js';
 import { safeModelTraceId } from '../../../examples/agent-sandbox/src/safe-log.js';

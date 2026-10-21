@@ -1,7 +1,6 @@
 {
   "name": "@iar/runtime",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
@@ -14,8 +13,7 @@
   "files": ["dist"],
   "dependencies": {
     "@iar/contracts": "0.1.0",
-    "@iar/decision": "0.1.0",
     "@iar/plugins": "0.1.0",
-    "@iar/rule-engine": "0.1.0"
+    "@iar/subscriptions": "0.1.0"
   }
 }

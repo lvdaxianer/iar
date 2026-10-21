@@ -5,7 +5,7 @@ import { checkAbiCompatibility, validateControlPlaneRequest } from '@iar/contrac
 import { PluginHost } from '@iar/plugins';
 import { PersistenceProviderLoader, PersistenceProviderRegistry, sqlitePersistenceProviderModule, SqlitePersistenceProvider } from '@iar/storage';
 import { RemotePluginDistributor, signArtifact } from '@iar/control-plane';
-import { ObservabilityRecorder, createSystemLoggingPlugin } from '@iar/observability';
+import { ObservabilityRecorder, createSystemLoggingPlugin } from '@iar/runtime';
 
 test('consolidated package entries expose former public boundaries', () => {
   assert.equal(typeof checkAbiCompatibility, 'function');

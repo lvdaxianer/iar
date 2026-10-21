@@ -9,14 +9,14 @@
  */
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_RECENT_MESSAGE_LIMIT, MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGE_LIMIT, SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type ClarificationState, type EventName, type JsonValue, type PendingInput, type PendingReference, type WorkflowDefinition } from '@iar/contracts';
-import { ModelGateway, ModelProfileRegistry } from '@iar/decision';
+import { ModelGateway, ModelProfileRegistry } from '@iar/runtime';
 import { PersistenceSubscriptionBridge } from '@iar/storage';
 import type { SessionMessage, SessionPersistenceProvider } from '@iar/storage';
 import { PluginHost } from '@iar/plugins';
 import { BehaviorContextProjector, type AsyncDecisionAdapter } from '@iar/runtime';
 import { SubscriptionDispatcher, SubscriptionRegistry, type DispatchEvent } from '@iar/subscriptions';
 import { InMemoryEventStore, type SnapshotStore } from '@iar/storage';
-import { LocalWorkflow, WorkflowEventLog, type ActionExecutor } from '@iar/workflow';
+import { LocalWorkflow, WorkflowEventLog, type ActionExecutor } from '@iar/runtime';
 import { SyncPluginBridge } from './execution/sync-plugin-bridge.js';
 import { BrainModelProvider } from './models/llm-provider.js';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
@@ -149,8 +149,8 @@ export class SandboxSessionCore {
       this.recentMessageLimit = normalizeRecentMessageLimit(options.recentMessageLimit);
       this.snapshotStore = options.snapshotStore; this.persistenceProvider = options.persistenceProvider;
       this.persistenceDispatcher = this.createPersistenceDispatcher(options.persistenceProvider);
-      this.pluginHost = createSandboxPluginHost();
       const models = createSandboxModels(options);
+      this.pluginHost = createSandboxPluginHost(models.functionAdapter);
       this.brainProvider = models.brain; this.registry = models.registry; this.gateway = models.gateway;
       this.functionDecisionAdapter = models.functionAdapter; this.pluginDecisionAdapter = models.pluginAdapter;
       this.workflow = this.createWorkflow();

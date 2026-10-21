@@ -10,7 +10,7 @@
  * @date 2026-10-18
  */
 import type { ActionDefinition, ActionResult, BehaviorContext, EventEnvelope, JsonValue, PendingReference, VerifiedFactRecord } from '@iar/contracts';
-import type { DecisionBackend, SemanticFrame } from '@iar/decision';
+import type { DecisionBackend, SemanticFrame } from '@iar/runtime';
 
 /** sandbox 模式：brain 使用真实 LLM，scripted 使用离线假大脑。 */
 export type SandboxMode = 'brain' | 'scripted';

@@ -3,7 +3,7 @@
  * @date 2026-10-18
  */
 import { SCHEMA_VERSIONS, type BehaviorContext, type CompactionResult, type EventEnvelope } from '@iar/contracts';
-import { ContextCompactorAdapter, type ModelGateway } from '@iar/decision';
+import { ContextCompactorAdapter, type ModelGateway } from '@iar/runtime';
 import { BehaviorContextProjector, ContextCompactionService, type CompactionRequest } from '@iar/runtime';
 import { InMemoryEventStore } from '@iar/storage';
 import { resolveSandboxTraceId } from './safe-log.js';

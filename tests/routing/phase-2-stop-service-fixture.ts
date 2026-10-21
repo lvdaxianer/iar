@@ -9,7 +9,7 @@
  * @date 2026-10-17
  */
 import { SCHEMA_VERSIONS } from '@iar/contracts';
-import { MockDecisionProvider, type DecisionRequest } from '@iar/decision';
+import { MockDecisionProvider, type DecisionRequest } from '@iar/runtime';
 import { PluginHost } from '@iar/plugins';
 import { TwoStageRouter, type RouteRequest, type RouteResult } from '@iar/runtime';
 import { facts, functionRule, pluginRule } from './rule-engine-fixtures.js';

@@ -11,11 +11,11 @@ import { PluginHost } from '@iar/plugins';
 import { createWorkerExecutor, type ExecutorRequest } from '@iar/adapters-executors';
 import { createServiceApi, type ServiceApiRequest } from '@iar/adapters-service';
 import { createSidecarTransport } from '@iar/adapters-sidecar';
-import { LocalWorkflow } from '@iar/workflow';
+import { LocalWorkflow } from '@iar/runtime';
 
 /**
  * Service API 传输 JSON，只管理可序列化的系统 Plugin 生命周期；业务 Plugin
- * 的 Handler 通过 @iar/plugin 和 @iar/agent 在本地进程注册。
+ * 的 Handler 通过 @iar/plugin 和 @iar/runtime 在本地进程注册。
  *
  * @returns 固定系统 Plugin Manifest
  * @author lvdaxianer@yeah.net

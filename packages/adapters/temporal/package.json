@@ -13,6 +13,6 @@
   },
   "files": ["dist"],
   "dependencies": {
-    "@iar/workflow": "0.1.0"
+    "@iar/runtime": "0.1.0"
   }
 }

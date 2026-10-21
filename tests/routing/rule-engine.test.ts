@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { RuleExpression } from '@iar/contracts';
-import { RuleEngine } from '@iar/rule-engine';
+import { RuleEngine } from '@iar/runtime';
 import { facts, functionRule } from './rule-engine-fixtures.js';
 
 /*

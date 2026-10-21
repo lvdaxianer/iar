@@ -11,9 +11,9 @@
  * @date 2026-10-17
  */
 import { ACTION_TYPES, ERROR_CODES, MAX_ROUTING_SCOPE_PLUGINS, type ActionType, type BehaviorContext, type DecisionResult, type RoutingScope } from '@iar/contracts';
-import { providerFailureResult, type DecisionCandidate, type DecisionProvider, type DecisionRequest, type ModelGatewayResult } from '@iar/decision';
-import type { FunctionRule, PluginCandidate, PluginRule, RuleEvaluationFacts, RuleEvaluationResult } from '@iar/rule-engine';
-import { RuleEngine } from '@iar/rule-engine';
+import { providerFailureResult, type DecisionCandidate, type DecisionProvider, type DecisionRequest, type ModelGatewayResult } from './intent/decision/index.js';
+import type { FunctionRule, PluginCandidate, PluginRule, RuleEvaluationFacts, RuleEvaluationResult } from './intent/rules/index.js';
+import { RuleEngine } from './intent/rules/index.js';
 import type { PluginHost, PluginRecord } from '@iar/plugins';
 
 const DECISION_VERSION = 'runtime.v1';

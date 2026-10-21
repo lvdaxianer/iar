@@ -14,7 +14,7 @@
 import type { JsonValue } from '@iar/contracts';
 import type { PluginDescriptor } from '@iar/plugins';
 import { REQUIRED_PRESERVED_FACTS } from '@iar/contracts';
-import type { ModelProvider, ModelProviderRequest } from '@iar/decision';
+import type { ModelProvider, ModelProviderRequest } from '@iar/runtime';
 
 /** 压缩 state 片段允许保留的白名单字段。 */
 const STATE_FIELD_WHITELIST = ['subject', 'intent', 'action', 'route', 'slots', 'workflow', 'pending', 'confirmation', 'clarification', 'pendingReference'] as const;

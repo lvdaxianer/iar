@@ -10,7 +10,7 @@ import { SCHEMA_VERSIONS, type WorkflowDefinition } from '@iar/contracts';
 import { PluginHost } from '@iar/plugins';
 import { createFastifyApp } from '@iar/adapters-fastify';
 import { createServiceApi, type ServiceApiRequest } from '@iar/adapters-service';
-import { LocalWorkflow } from '@iar/workflow';
+import { LocalWorkflow } from '@iar/runtime';
 
 /*
  * 本文件比较 Embedded Fastify 和 ServiceApi 的同一 run fixture。

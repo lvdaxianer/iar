@@ -41,7 +41,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type EventEnvelope, type WorkflowDefinition } from '@iar/contracts';
 import { replayEvents } from '@iar/runtime';
-import { LocalWorkflow, WorkflowEventLog, confirmationScopeHash, type WorkflowRequest } from '@iar/workflow';
+import { LocalWorkflow, WorkflowEventLog, confirmationScopeHash, type WorkflowRequest } from '@iar/runtime';
 
 /**
  * 创建最小 WorkflowDefinition，覆盖 running、waiting 和终态事件。

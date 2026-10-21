@@ -11,7 +11,7 @@ import type { JsonValue } from '@iar/contracts';
 import type { PluginPackage } from '@iar/plugin';
 import { createFastifyApp } from '@iar/adapters-fastify';
 import { PluginHost } from '@iar/plugins';
-import { LocalWorkflow } from '@iar/workflow';
+import { LocalWorkflow } from '@iar/runtime';
 import { knowledgeQueryPlugin } from '../../../examples/plugins/knowledge-query/src/index.js';
 import { ticketCreatePlugin } from '../../../examples/plugins/ticket-create/src/index.js';
 import { humanTransferPlugin } from '../../../examples/plugins/human-transfer/src/index.js';

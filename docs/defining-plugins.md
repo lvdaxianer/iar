@@ -93,13 +93,22 @@ export const ticketPlugin = definePlugin({
 
 ## 4. 统一入口注册
 
-应用只需要把 Plugin 包传给 `@iar/agent`：
+应用只需要把 Plugin 包传给 `@iar/runtime`：
 
 ```ts
-import { createIarAgent } from '@iar/agent';
+import { createIarRuntime, type AsyncDecisionAdapter } from '@iar/runtime';
 import { ticketPlugin } from './ticket-plugin.js';
 
-export const iar = createIarAgent({ plugins: [ticketPlugin] });
+const decisionProvider = {
+  decide: async () => ({
+    ok: false,
+    error: { code: 'model.no_profile', message: '决策模型 backend 未配置', retryable: false, details: {} },
+    audit: [],
+    events: [],
+  }),
+} satisfies AsyncDecisionAdapter;
+
+export const iar = createIarRuntime({ plugins: [ticketPlugin], decisionProvider });
 ```
 
 统一入口一次完成校验、原子安装、依赖排序、启用和 FunctionRegistry 构建。任何一个 Plugin 或 Function 失败，整个 Agent 初始化失败，不留下部分生命周期记录或路由索引。
@@ -126,7 +135,7 @@ Pi 只通过 `@iar/pi-bridge` 调用 IAR 会话服务。Pi 不需要知道 Plugi
 
 ## 6. HTTP/Service 边界的限制
 
-本地业务 Plugin 的 Handler 是不可 JSON 序列化的函数，因此业务包必须通过模块导入和 `@iar/agent` 注册。Fastify/Service API 可以接收可序列化的系统 Plugin Manifest 做生命周期管理；将业务 Manifest 当作远程可执行包提交会被拒绝，这是 fail-closed 行为。
+本地业务 Plugin 的 Handler 是不可 JSON 序列化的函数，因此业务包必须通过模块导入和 `@iar/runtime` 注册。Fastify/Service API 可以接收可序列化的系统 Plugin Manifest 做生命周期管理；将业务 Manifest 当作远程可执行包提交会被拒绝，这是 fail-closed 行为。
 
 ## 7. 红线
 

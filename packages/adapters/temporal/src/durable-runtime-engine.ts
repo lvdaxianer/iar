@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import { type ActionResult, type EventEnvelope } from '@iar/contracts';
-import { PolicyGate, type ActionExecutor, type ConfirmationRequest, type FailureRequest, type WorkflowRequest, type WorkflowResult, type WorkflowRun } from '@iar/workflow';
+import { PolicyGate, type ActionExecutor, type ConfirmationRequest, type FailureRequest, type WorkflowRequest, type WorkflowResult, type WorkflowRun } from '@iar/runtime';
 import { assertWorkflowRuntimeOptions } from './contract-runtime.js';
 import { evaluateDurableAdmission } from './admission.js';
 import { InMemoryDurableWorkflowStore } from './durable-store.js';

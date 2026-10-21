@@ -127,7 +127,7 @@ import {
   loadModelProfiles,
   ModelProfileRegistry,
   type ModelProvider
-} from '@iar/decision';
+} from '@iar/runtime';
 import type { CompactionResult, DecisionResult, JsonValue } from '@iar/contracts';
 import { createInitialContext } from '@iar/runtime';
 

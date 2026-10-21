@@ -11,7 +11,7 @@ import { SandboxSessionReplies } from './session-replies.js';
 import { SandboxSessionRouting } from './session-routing.js';
 import { DEFAULT_UNRESOLVED_STREAK_THRESHOLD, MAX_UNRESOLVED_STREAK, type ActionDefinition, type BehaviorContext, type PendingReference, type VerifiedFactRecord } from '@iar/contracts';
 import type { PluginDescriptor } from '@iar/plugins';
-import { confirmationScopeHash } from '@iar/workflow';
+import { confirmationScopeHash } from '@iar/runtime';
 import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
 import { createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';

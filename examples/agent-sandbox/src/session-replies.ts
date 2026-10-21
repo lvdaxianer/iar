@@ -4,7 +4,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { ActionDefinition, ActionResult, BehaviorContext, JsonValue, PendingInput, VerifiedFactRecord } from '@iar/contracts';
-import { ResponseGeneratorAdapter, type ClarificationMetadata, type ModelGateway, type ModelProfileRegistry } from '@iar/decision';
+import { ResponseGeneratorAdapter, type ClarificationMetadata, type ModelGateway, type ModelProfileRegistry } from '@iar/runtime';
 import type { SessionMessage } from '@iar/storage';
 import type { PluginDescriptor } from '@iar/plugins';
 import { OpenAICompatibleModelProvider, type BrainModelProvider } from './models/llm-provider.js';

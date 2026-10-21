@@ -97,7 +97,7 @@ Operation 是 Function 内的动作目录：
 - [ ] Function capability 是 Plugin capability 的子集。
 - [ ] 所有有副作用的 Operation 都标记为 `action`。
 - [ ] Handler 只接收 JSON 输入和只读执行上下文。
-- [ ] 将 Function 放入 Plugin 的 `functions` 数组，再通过 `createIarAgent` 注册。
+- [ ] 将 Function 放入 Plugin 的 `functions` 数组，再通过 `createIarRuntime` 注册。
 - [ ] 为正常路由、动态候选、确认、恢复和 Handler ownership 增加测试。
 - [ ] 确认模型输入中只出现当前有限候选，不把注册表或原始消息直接交给模型。
 

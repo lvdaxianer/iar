@@ -138,7 +138,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SCHEMA_VERSIONS } from '@iar/contracts';
-import { MockDecisionProvider, validateDecisionOutput, type DecisionCandidate, type DecisionRequest } from '@iar/decision';
+import { MockDecisionProvider, validateDecisionOutput, type DecisionCandidate, type DecisionRequest } from '@iar/runtime';
 
 const candidates: readonly DecisionCandidate[] = [
   { candidateId: 'dip.service.stop', priority: 100, specificity: 2 },
