@@ -17,6 +17,7 @@ test('Pi host 页面模板占位符独立且唯一', () => {
   const template = readFileSync(join(PAGE_DIR, 'index.html'), 'utf8');
   assert.match(template, /<!-- IAR_PI_HOST_STYLES -->/);
   assert.match(template, /<!-- IAR_PI_HOST_SCRIPT -->/);
+  assert.match(template, /id="clearSessionBtn"/);
   assert.doesNotMatch(template, /IAR_SANDBOX_(?:STYLES|SCRIPT)/);
 });
 
@@ -70,9 +71,10 @@ test('Pi host 气泡历史在 Markdown 渲染前快照原始文本', () => {
 /* 与沙箱页同一展示契约：消息追加、条目渲染、确认卡片与流式气泡都要有界。 */
 test('Pi host 页面交互入口按职责拆分且有界', () => {
   const adapter = readFileSync(join(PAGE_DIR, 'pi-host.fragment.js'), 'utf8');
-  for (const name of ['appendMsg', 'renderPiHostEntry', 'showPiHostConfirmBox', 'finalizePiHostBubble']) {
+  for (const name of ['appendMsg', 'renderPiHostEntry', 'showPiHostConfirmBox', 'finalizePiHostBubble', 'clearPiHostSession']) {
     const method = new RegExp(`  function ${name}\\([\\s\\S]*?\\n  \\}`).exec(adapter);
     assert.ok(method, `${name} 应存在`);
     assert.ok(method[0].split('\n').length <= 20, `${name} 为 ${method[0].split('\n').length} 行`);
   }
+  assert.match(adapter, /clearSessionBtn'\)\.onclick = clearPiHostSession/);
 });

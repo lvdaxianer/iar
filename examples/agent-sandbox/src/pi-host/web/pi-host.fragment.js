@@ -8,6 +8,7 @@
   const PI_HOST_EVENT_LIMIT = 8;
   const PI_HOST_SESSION_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
   const PI_HOST_DISPOSITION_META = { handled: '已执行', awaiting_confirmation: '等待确认', clarification: '需要澄清', cancelled: '已取消', pass_through: '已通过' };
+  const PI_HOST_WELCOME = '你好，这里是 Pi × IAR 前置意图路由演示。本页与 8787 IAR Agent Sandbox 共用同一套界面与渲染资源，仅底层协议不同：每轮输入先经 Pi input hook 交给 IAR 意图识别与 Plugin/Function 动态路由，命中即展示 IAR 结果并阻断 Pi Agent；未命中才由进程内 Pi Agent 流式回答。右侧可查看调用链、路由证据与会话信息。';
   let piHostMessagesEl = document.getElementById('messages');
   let piHostInputEl = document.getElementById('messageInput');
   let piHostSendBtn = document.getElementById('sendBtn');
@@ -16,6 +17,7 @@
   let piHostBubble = null;
   let piHostPendingRoute = null;
   let piHostExpectingEntry = false;
+  let piHostEventSource = null;
   let piHostEvents = [];
 
   /** 读取本标签页的 Pi 会话标识；缺失、损坏或不合法时创建新标识。
@@ -104,6 +106,7 @@
     piHostBusy = value;
     piHostSendBtn.disabled = value;
     piHostInputEl.disabled = value;
+    document.getElementById('clearSessionBtn').disabled = value;
     document.querySelectorAll('.confirm-box button').forEach(function (button) { button.disabled = value; });
   }
 
@@ -241,8 +244,10 @@
       piHostMessagesEl.scrollTop = piHostMessagesEl.scrollHeight;
       if (cursor < text.length) return;
       clearInterval(timer);
+      bubble.entryTimer = null;
       finalizePiHostEntryText(bubble, text, meta);
     }, 16);
+    bubble.entryTimer = timer;
   }
 
   /** IAR 结果流式收尾：终态统一 Markdown 渲染、加状态标签并记录历史。
@@ -377,6 +382,7 @@
    */
   function connectPiHostEvents() {
     var es = new EventSource('/api/pi-host/events?session=' + encodeURIComponent(piHostSessionId));
+    piHostEventSource = es;
     var connBadge = document.getElementById('connBadge');
     es.addEventListener('ready', function (event) {
       var info = JSON.parse(event.data);
@@ -421,6 +427,47 @@
     });
   }
 
+  /** 重置右侧调试面板与事件列表到初始状态，供清空会话后复用。
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  function resetPiHostDebugPanel() {
+    piHostPendingRoute = null;
+    piHostEvents = [];
+    document.getElementById('eventList').innerHTML = '';
+    document.getElementById('sessionJson').textContent = '{}';
+    updatePiHostRoutePanel({});
+    highlightPiHostFlow([]);
+  }
+
+  /** 清空会话：删除本页历史、换新会话标识并重连事件源。
+   * bridge 没有 reset 端点，旧服务端会话随旧连接关闭由服务端释放。
+   * 忙碌期间禁止清空，避免切断进行中的轮次；流式计时器一并停止。
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-21
+   */
+  function clearPiHostSession() {
+    if (piHostBusy) return;
+    if (!confirm('清空会话将删除本页聊天记录并建立全新会话，确定继续吗？')) return;
+    if (piHostBubble && piHostBubble.entryTimer) clearInterval(piHostBubble.entryTimer);
+    try {
+      localStorage.removeItem(PI_HOST_HISTORY_PREFIX + piHostSessionId);
+      sessionStorage.removeItem(PI_HOST_SESSION_KEY);
+    } catch (err) { /* 尽力清理，失败时新会话仍会建立。 */ }
+    if (piHostEventSource) piHostEventSource.close();
+    piHostSessionId = readPiHostSessionId();
+    piHostExpectingEntry = false;
+    removePiHostBubble();
+    clearPiHostConfirmBoxes();
+    resetPiHostDebugPanel();
+    piHostMessagesEl.innerHTML = '';
+    appendMsg('bot', PI_HOST_WELCOME);
+    connectPiHostEvents();
+    recordPiHostEvent('会话', '已清空');
+  }
+
   // 表单提交由脚本拦截；欢迎消息只在无本地历史时展示一次。
   // 与沙箱页一致，服务端终态以 SSE 事件为准，页面忙碌状态随事件收尾。
   document.getElementById('inputBar').onsubmit = function (event) {
@@ -431,8 +478,9 @@
     piHostInputEl.value = '';
     submitPiHostTurn(text);
   };
+  document.getElementById('clearSessionBtn').onclick = clearPiHostSession;
   if (readPiHostHistory().length === 0) {
-    appendMsg('bot', '你好，这里是 Pi × IAR 前置意图路由演示。本页与 8787 IAR Agent Sandbox 共用同一套界面与渲染资源，仅底层协议不同：每轮输入先经 Pi input hook 交给 IAR 意图识别与 Plugin/Function 动态路由，命中即展示 IAR 结果并阻断 Pi Agent；未命中才由进程内 Pi Agent 流式回答。右侧可查看调用链、路由证据与会话信息。');
+    appendMsg('bot', PI_HOST_WELCOME);
   } else {
     renderPiHostHistory();
   }

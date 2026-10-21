@@ -60,6 +60,14 @@
       <!-- 事件列表由脚本写入文本，不应将事件内容作为可信 HTML。 -->
       <ul id="eventList" class="events" style="margin-top:8px"></ul>
     </div>
+    <div>
+      <h2>会话操作</h2>
+      <!-- 清空建立全新会话：删除本页历史并换新会话标识，服务端旧会话随连接关闭释放。 -->
+      <div class="toolbar" style="margin-top:8px">
+        <button id="clearSessionBtn" class="ghost" type="button">清空会话</button>
+      </div>
+      <p class="hint" style="margin-top:8px">清空后建立全新会话，本页聊天记录一并删除。</p>
+    </div>
     <!-- 原生折叠控件保留键盘操作；长 JSON 在内部滚动。 -->
     <details>
       <summary>Pi 会话（点击查看 JSON）</summary>
