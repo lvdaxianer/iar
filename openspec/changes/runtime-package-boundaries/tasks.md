@@ -46,17 +46,17 @@
 
 ## 4. Consolidate workflow and observability implementations
 
-- [ ] 4.1 Move `packages/workflow/src/*` into
+- [x] 4.1 Move `packages/workflow/src/*` into
   `packages/runtime/src/execution/`, update internal imports to the new runtime
   layout, and expose the existing workflow types and local execution APIs from
   the runtime root or declared runtime subpath; verify workflow and replay tests
   pass without changing event or confirmation formats.
-- [ ] 4.2 Move `packages/observability/src/core/*` and
+- [x] 4.2 Move `packages/observability/src/core/*` and
   `packages/observability/src/system-plugin/*` into
   `packages/runtime/src/observability/`, keep `@iar/subscriptions` as the shared
   event boundary, and preserve redaction and fail-open behavior; verify
   `tests/security/observability.test.ts` passes.
-- [ ] 4.3 Update `packages/adapters/temporal/package.json`, executor imports,
+- [x] 4.3 Update `packages/adapters/temporal/package.json`, executor imports,
   workflow tests, and observability tests to consume runtime public exports;
   remove the old workflow and observability package manifests only after their
   focused tests and `npm run build` pass.
