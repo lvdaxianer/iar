@@ -183,6 +183,8 @@ flowchart TB
   -> 事件日志 + BehaviorContext 投影
 ```
 
+未命中且无 pending 澄清/事实追问的轮次不进入上述链路，整轮委托给进程内 Pi Agent 兜底；Pi 故障时回退运行时既有兜底回复（见 5.5）。
+
 ## 4. 核心领域模型
 
 ### 4.1 Function：业务功能边界
@@ -358,6 +360,31 @@ Function 确定后，Registry 只加载该 Function 的已启用、版本固定�
 | 转人工 | `human.transfer` | 选择 IM、电话或人工队列插件，校验营业时间和权限 |
 
 这三类只是验证 IAR 共通路由模型的示例，不属于 IAR 内置业务系统。
+
+### 5.5 未命中路由：与 Pi Agent 的协作兜底
+
+IAR 只负责它擅长的部分：意图识别、候选生成、受限决策和受控执行。对规则与候选集覆盖不了的开放式输入，运行时不在 IAR 内部拼凑“万能回复模型”，而是整轮委托给进程内 [Pi Agent](https://github.com/earendil-works/pi)（`@earendil-works/pi-agent-core` 的通用 Agent 循环 + `@earendil-works/pi-ai` 的模型目录）兜底：
+
+```text
+命中路由的轮次 -> IAR 两阶段路由 -> 策略/确认 -> Workflow -> 插件结果回复
+未命中的轮次 -> Pi Agent 自由对话 -> 回复标注“Pi 兜底”
+                 若 Pi 故障 -> 回退 IAR 既有分层兜底
+```
+
+职责与边界：
+
+- **IAR 侧**：命中 Function/Plugin 的轮次、澄清收敛、事实追问、确认/取消等，仍全部走第 5、7、8 节的既有链路，Pi 不参与决策与执行。
+- **触发条件**：仅当本轮意图未命中（无候选 Function）且不存在 pending 澄清、pending 引用或事实追问时，才整轮委托给 Pi；带 pending 状态的轮次由 IAR 兜底继续处理，不分流，也不重复路由。
+- **Pi 侧**：按通用 Agent 循环生成自然回复。它通过会话备注看到 IAR 已处理轮次的摘要，但拿不到任何插件句柄，不能触发路由、执行副作用或绕过授权与确认边界。
+- **上下文互通**：每个 IAR 会话挂一个独立 Pi Agent 实例。IAR 处理成功的轮次以「【已由业务系统处理】」备注进入 Pi 上下文，Pi 自己回答的轮次不重复记录，两侧对话都连续；同一会话内两类轮次可任意来回切换。会话 reset 时 IAR 状态与 Pi 上下文一起清空。
+
+模型与降级：
+
+- brain 模式用 pi-ai `moonshotai-cn` 目录的真实模型，模型标识依次取 `IAR_PI_MODEL_ID`、`IAR_LLM_MODEL_ID`、目录默认 `kimi-k2.6`；`MOONSHOT_API_KEY` 未配置时自动复用 `IAR_LLM_API_KEY`。
+- scripted 模式（无真实模型）Pi 用离线模板 streamFn：身份/能力问题复刻沙箱话术，其余回退固定话术，保证无网环境链路仍可测。
+- Pi 单轮调用有超时（`IAR_PI_TIMEOUT_MS`，默认 120s），超时、中止或空回复视为失败，自动降级到 IAR 既有兜底，不阻塞会话。
+
+参考实现：`examples/agent-sandbox/src/models/pi-agent-delegate.ts`（配对、模型解析与故障包装）、`examples/agent-sandbox/src/session-turn-helpers.ts`（未命中分流 `resolveNoMatchTurn`、备注记录 `recordAgentExchange`）。
 
 ## 6. 插件模型与生命周期
 
