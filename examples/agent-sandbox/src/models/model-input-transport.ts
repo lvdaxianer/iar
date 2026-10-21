@@ -97,6 +97,53 @@ export const RESPONSE_STREAM_SYSTEM_PROMPT = `你是 IAR（Intent Action Runtime
 普通直接回答时只输出回复正文，不要输出 Markdown 或解释性文字；如果需要用户补充信息或从有限选项中选择，必须输出一个完整的 iar.response/v1 JSON 对象：{"schemaVersion":"iar.response/v1","text":string,"clarification":{"kind":"slot"|"selection"|"input","status":"required","options"?:[{"key":string,"label":string}]}}。options 最多 12 个且 key 不重复。
 clarification 只描述等待输入，不代表授权或执行动作；结构化 pending 状态由宿主根据校验后的响应管理，不能在正文中伪造执行授权。使用简洁友好的中文。`;
 
+/** 模型提示词层的边界输入。 */
+export type PromptLayers = {
+  /** Runtime 固定安全规则。 */
+  basePrompt: string;
+  /** Agent 创建时配置的总体提示词。 */
+  agentPrompt?: string;
+  /** 当前 Plugin 或场景的附加提示词。 */
+  supplementaryPrompt?: string;
+  /** 当前模型角色的固定输出协议。 */
+  roleContract: string;
+};
+
+const AGENT_PROMPT_OPEN = '<agent_prompt>';
+const AGENT_PROMPT_CLOSE = '</agent_prompt>';
+const PLUGIN_PROMPT_OPEN = '<plugin_prompt>';
+const PLUGIN_PROMPT_CLOSE = '</plugin_prompt>';
+
+/** 按固定优先级组合模型提示词层，空的用户层不会生成空标签。
+ *
+ * @param layers - Runtime、Agent、Plugin 和角色协议提示词
+ * @returns 组合后的系统提示词
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-21
+ */
+export function composePromptLayers(layers: PromptLayers): string {
+  const parts = [layers.basePrompt];
+  appendPromptLayer(parts, AGENT_PROMPT_OPEN, AGENT_PROMPT_CLOSE, layers.agentPrompt);
+  appendPromptLayer(parts, PLUGIN_PROMPT_OPEN, PLUGIN_PROMPT_CLOSE, layers.supplementaryPrompt);
+  parts.push(layers.roleContract);
+  return parts.join('\n');
+}
+
+/** 将非空的用户配置提示词以有界标签加入系统提示词。
+ *
+ * @param parts - 待组合的提示词片段
+ * @param openingTag - 开始标签
+ * @param closingTag - 结束标签
+ * @param prompt - 可选提示词
+ * @returns 无返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-21
+ */
+function appendPromptLayer(parts: string[], openingTag: string, closingTag: string, prompt: string | undefined): void {
+  if (prompt === undefined || prompt.length === 0) return;
+  parts.push(openingTag, prompt, closingTag);
+}
+
 /**
  * 压缩提示词中的 compression_policy 片段。
  *

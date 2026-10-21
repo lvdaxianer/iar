@@ -2,6 +2,9 @@
 import type { FunctionRegistry, PluginHost, PluginPackage } from '@iar/plugins';
 import type { AsyncDecisionAdapter } from '../routing.js';
 
+/** Agent 总体提示词最大长度，避免无界配置进入模型上下文。 */
+export const AGENT_SYSTEM_PROMPT_MAX_LENGTH = 4000;
+
 /** Agent 创建时可覆盖的自我介绍行为配置。 */
 export type SelfIntroductionOptions = {
   /** 仅在自我介绍回复生成阶段追加的用户提示词。 */
@@ -12,6 +15,8 @@ export type SelfIntroductionOptions = {
 export type IarRuntimeConfiguration = {
   /** 创建时被显式关闭的 Plugin 标识。 */
   disabledPluginIds: readonly string[];
+  /** 创建时保存的 Agent 总体提示词。 */
+  systemPrompt?: string;
   /** 自我介绍能力的额外提示词配置。 */
   selfIntroduction: Readonly<SelfIntroductionOptions>;
 };
@@ -24,6 +29,8 @@ export type IarRuntimeOptions = {
   decisionProvider: AsyncDecisionAdapter;
   /** 本次 Agent 创建时固化的 Plugin 开关与提示词配置。 */
   disabledPluginIds?: readonly string[];
+  /** Agent 级总体提示词，作用于适用的回复模型。 */
+  systemPrompt?: string;
   /** 自我介绍 Function 的额外提示词配置。 */
   selfIntroduction?: SelfIntroductionOptions;
 };

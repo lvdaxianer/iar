@@ -1,7 +1,7 @@
 /** 提供独立 IAR Runtime 的原子初始化入口。 */
 import { ContractValidationError, type PluginManifest } from '@iar/contracts';
 import { FunctionRegistry, PluginHost, SELF_INTRODUCTION_PLUGIN_ID, SELF_INTRODUCTION_MAX_PROMPT_LENGTH, selfIntroductionPlugin, type PluginPackage, type PluginRecord } from '@iar/plugins';
-import type { IarRuntime, IarRuntimeConfiguration, IarRuntimeOptions } from './types.js';
+import { AGENT_SYSTEM_PROMPT_MAX_LENGTH, type IarRuntime, type IarRuntimeConfiguration, type IarRuntimeOptions } from './types.js';
 
 /**
  * 原子安装并启用一组 Plugin 包，返回共享的 PluginHost 和 FunctionRegistry。
@@ -85,9 +85,25 @@ function normalizeConfiguration(options: IarRuntimeOptions, availablePlugins: re
   const availableIds = new Set(availablePlugins.map((plugin) => plugin.manifest.pluginId));
   if (new Set(disabledPluginIds).size !== disabledPluginIds.length || disabledPluginIds.some((id) => typeof id !== 'string' || id.length === 0)) throw new ContractValidationError('disabledPluginIds 必须是唯一的非空 Plugin 标识');
   if (disabledPluginIds.some((id) => !availableIds.has(id))) throw new ContractValidationError('disabledPluginIds 包含未注册 Plugin');
+  const systemPrompt = normalizeSystemPrompt(options.systemPrompt);
   const extraPrompt = options.selfIntroduction?.extraPrompt;
   if (extraPrompt !== undefined && (typeof extraPrompt !== 'string' || extraPrompt.length > SELF_INTRODUCTION_MAX_PROMPT_LENGTH)) throw new ContractValidationError('自我介绍额外提示词超过长度限制');
-  return { disabledPluginIds: Object.freeze(disabledPluginIds), selfIntroduction: Object.freeze(extraPrompt === undefined ? {} : { extraPrompt }) };
+  return { disabledPluginIds: Object.freeze(disabledPluginIds), ...(systemPrompt === undefined ? {} : { systemPrompt }), selfIntroduction: Object.freeze(extraPrompt === undefined ? {} : { extraPrompt }) };
+}
+
+/** 校验并规范 Agent 总体提示词，空值表示不追加用户层提示词。
+ *
+ * @param value - Agent 创建时传入的总体提示词
+ * @returns 有界提示词或 undefined
+ * @throws {ContractValidationError} 提示词类型或长度不合法
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-21
+ */
+function normalizeSystemPrompt(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') throw new ContractValidationError('Agent 总体提示词必须是字符串');
+  if (value.length > AGENT_SYSTEM_PROMPT_MAX_LENGTH) throw new ContractValidationError('Agent 总体提示词超过长度限制');
+  return value.length === 0 ? undefined : value;
 }
 
 /** 追加内置自我介绍 Plugin，并过滤创建时明确关闭的外部 Plugin。

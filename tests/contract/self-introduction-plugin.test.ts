@@ -49,14 +49,26 @@ test('新建 Agent 默认安装自我介绍 Plugin，并持久化关闭项与提
     plugins: [ticketPlugin],
     decisionProvider,
     disabledPluginIds: [ticketPlugin.manifest.pluginId],
+    systemPrompt: '所有回复使用 Markdown',
     selfIntroduction: { extraPrompt: '先说结论' }
   });
 
   assert.deepEqual(agent.configuration, {
     disabledPluginIds: [ticketPlugin.manifest.pluginId],
+    systemPrompt: '所有回复使用 Markdown',
     selfIntroduction: { extraPrompt: '先说结论' }
   });
   assert.deepEqual(agent.functionRegistry.list().map((definition) => definition.functionId), [SELF_INTRODUCTION_FUNCTION_ID]);
+});
+
+test('Agent 总体提示词必须是有界且不可变的配置', () => {
+  const ticketPlugin = pluginPackage(loadBusinessManifest(), 'ticket.query');
+  const prompt = '请使用 Markdown 回复';
+  const agent = createIarAgent({ plugins: [ticketPlugin], decisionProvider, systemPrompt: prompt });
+
+  assert.equal(agent.configuration.systemPrompt, prompt);
+  assert.throws(() => createIarAgent({ plugins: [ticketPlugin], decisionProvider, systemPrompt: 'x'.repeat(4001) }), /提示词|长度/i);
+  assert.throws(() => createIarAgent({ plugins: [ticketPlugin], decisionProvider, systemPrompt: 42 as unknown as string }), /提示词|字符串|类型/i);
 });
 
 test('自我介绍 Plugin 默认开启且允许显式关闭，未知关闭项仍被拒绝', () => {
