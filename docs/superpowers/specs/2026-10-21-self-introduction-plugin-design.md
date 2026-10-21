@@ -6,7 +6,7 @@
 
 ## Agent 创建配置
 
-创建 IAR Agent 时配置 Plugin 集合和介绍偏好：默认所有业务 Plugin 都启用；通过 `disabledPluginIds` 明确关闭指定 Plugin；通过 `selfIntroduction.extraPrompt` 增加只影响自我介绍内容和语气的补充提示词。内置 self-introduction Plugin 默认加入且不可被禁用。新 Plugin 在没有禁用规则时自动加入。
+创建 IAR Agent 时配置 Plugin 集合和介绍偏好：默认所有业务 Plugin 都启用；通过 `disabledPluginIds` 明确关闭指定 Plugin；通过 `selfIntroduction.extraPrompt` 增加只影响自我介绍内容和语气的补充提示词。内置 self-introduction Plugin 默认加入，也允许通过 `disabledPluginIds` 显式关闭。新 Plugin 在没有禁用规则时自动加入。
 
 ## 运行时链路
 
