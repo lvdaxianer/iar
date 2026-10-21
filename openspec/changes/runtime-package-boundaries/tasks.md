@@ -2,12 +2,12 @@
 
 ## 1. Baseline and contract guard
 
-- [ ] 1.1 Record the current 20-package inventory, dependency graph, public
+- [x] 1.1 Record the current 20-package inventory, dependency graph, public
   entrypoints, project references, and baseline results in
   `docs/implementation-audits/runtime-package-boundaries-baseline.md`; verify
   `npm run lint`, `npm run build`, `npm test`, and `npm run verify:packages` all
   pass before source moves begin.
-- [ ] 1.2 Add
+- [x] 1.2 Add
   `tests/contract/standalone-runtime-entry.test.ts` that imports
   `createIarRuntime` from `@iar/runtime`, initializes one valid Plugin package,
   rejects an invalid Plugin package without partial state, and verifies the
@@ -16,15 +16,15 @@
 
 ## 2. Publishable standalone runtime entry
 
-- [ ] 2.1 Add `createIarRuntime` and its option/result types under
+- [x] 2.1 Add `createIarRuntime` and its option/result types under
   `packages/runtime/src/bootstrap/`, reusing the current atomic PluginHost and
   FunctionRegistry initialization semantics; verify the focused standalone
   runtime test passes and no Pi/HTTP/database module is imported by bootstrap.
-- [ ] 2.2 Update `packages/runtime/package.json` to remove `private: true`,
+- [x] 2.2 Update `packages/runtime/package.json` to remove `private: true`,
   expose the compiled root entry, and export the bootstrap API from
   `packages/runtime/src/index.ts`; verify `npm run lint` and `npm run build`
   resolve JavaScript and declaration files from `@iar/runtime`.
-- [ ] 2.3 Add the runtime package distribution assertion to
+- [x] 2.3 Add the runtime package distribution assertion to
   `scripts/verify-package-distribution.mjs` and update the focused package
   smoke test to inspect the packed `@iar/runtime` contents; verify the check
   rejects source-path leakage and accepts the compiled root entry.
