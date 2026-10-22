@@ -478,7 +478,7 @@ function nestedParametersOf(candidates: NestedPluginFunctionCandidate[]): Record
     properties: {
       functionId: { type: 'string', enum: functionIds },
       operation: { type: 'string', enum: operationNames },
-      arguments: { type: 'object', additionalProperties: true, description: '必须符合所选 Function 的 inputSchema' }
+      arguments: { type: 'object', additionalProperties: true, description: '只填写所选 Function 的业务参数，必须符合 inputSchema；禁止重复填写 operation' }
     },
     required: ['functionId', 'operation', 'arguments'],
     additionalProperties: false
