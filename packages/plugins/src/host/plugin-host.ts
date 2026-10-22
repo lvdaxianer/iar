@@ -16,7 +16,7 @@ import type { PluginPackage } from '../sdk/index.js';
 import { compareStableIds } from './compare-ids.js';
 import { sortPluginManifests } from './dependency-order.js';
 import { PluginEventLog } from './plugin-events.js';
-import { createRecord, pluginIdOf, prepareInstall, validateInstallSet, type InstallPreparation } from './plugin-installation.js';
+import { createRecord, pluginIdOf, prepareInstall, validateInstallSet, validatePluginToolNames, type InstallPreparation } from './plugin-installation.js';
 import { canTransition, findActiveDependent, findDependent, findUnavailableDependency } from './plugin-lifecycle.js';
 import { cloneManifest, cloneRecord, hostError } from './plugin-host-support.js';
 import type { PluginDescriptor, PluginDescriptorOptions, PluginFunctionToolDescriptor, PluginHostResult, PluginRecord, PluginScopeDescriptor } from './types.js';
@@ -114,6 +114,12 @@ export class PluginHost {
     const validation = validateInstallSet(order.value, new Set(this.records.keys()));
     // 已存在插件必须在写注册表前拒绝。
     if (!validation.ok) return this.reject(pluginIdOf(validation.error.details?.pluginId), validation.error);
+    const businessPluginIds = [...this.records.values()]
+      .filter((record) => record.manifest.pluginKind === 'business')
+      .map((record) => record.manifest.pluginId);
+    const toolNames = validatePluginToolNames(preparation.packages, businessPluginIds);
+    // 工具名冲突必须在写注册表前拒绝，避免模型看到不稳定映射。
+    if (!toolNames.ok) return this.reject(pluginIdOf(toolNames.error.details?.pluginId), toolNames.error);
     const packages = new Map(preparation.packages.map((plugin) => [plugin.manifest.pluginId, plugin]));
     return this.commitRecords(order.value, packages);
   }

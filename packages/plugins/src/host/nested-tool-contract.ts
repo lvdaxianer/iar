@@ -81,7 +81,10 @@ export type NestedContractResult<T> =
  * @date 2026-10-22
  */
 export function normalizePluginToolName(pluginId: string): string {
-  const normalized = pluginId.replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
+  const normalized = [...pluginId]
+    .map((character) => /^[a-zA-Z0-9_-]$/.test(character) ? character : `_u${character.codePointAt(0)?.toString(16) ?? '0'}_`)
+    .join('')
+    .replace(/^_+|_+$/g, '');
   const base = normalized.length > 0 ? normalized : 'unnamed';
   return `plugin_${base}`.slice(0, MAX_OPENAI_TOOL_NAME_LENGTH);
 }
