@@ -12,7 +12,7 @@
  * @date 2026-10-18
  */
 import type { JsonValue } from '@iar/contracts';
-import type { PluginDescriptor } from '@iar/plugins';
+import type { PluginDescriptor, PluginScopeDescriptor } from '@iar/plugins';
 import { SELF_INTRODUCTION_FUNCTION_ID } from '@iar/plugins';
 import { REQUIRED_PRESERVED_FACTS } from '@iar/contracts';
 import type { ModelProvider, ModelProviderRequest } from '@iar/runtime';
@@ -37,7 +37,7 @@ export class ScriptedModelProvider implements ModelProvider {
    */
   public async complete(request: ModelProviderRequest): Promise<unknown> {
     const input = asRecord(request.input);
-    if (request.profile.role === 'semantic.extract') return this.extract(readString(input, 'text') ?? '', asRecord(input.behaviorContext));
+    if (request.profile.role === 'semantic.extract') return this.extract(readString(input, 'text') ?? '', asRecord(input.behaviorContext), readPluginDescriptors(input.pluginDescriptors));
     if (request.profile.role === 'context.compact') return this.compact(input);
     return this.generate(input);
   }
@@ -54,7 +54,12 @@ export class ScriptedModelProvider implements ModelProvider {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  private extract(text: string, behaviorContext: Record<string, unknown>): unknown {
+  private extract(text: string, behaviorContext: Record<string, unknown>, pluginDescriptors: PluginScopeDescriptor[]): unknown {
+    return addPluginId(this.extractFrame(text, behaviorContext), pluginDescriptors);
+  }
+
+  /** 关键词抽取主体，外层只负责把候选 Plugin 标识绑定到受限描述。 */
+  private extractFrame(text: string, behaviorContext: Record<string, unknown>): unknown {
     const trimmed = text.trim();
     if (trimmed.length === 0) return frame('unknown', {}, 0.1, 'unknown');
     // 已有可信事实的追问优先交给通用回复模型，不能因业务名词重复触发默认动作。
@@ -232,6 +237,35 @@ type ScriptedAction = 'query' | 'create' | 'update' | 'delete' | 'transfer' | 'e
 
 function frame(intent: string, slots: Record<string, JsonValue>, confidence: number, action?: ScriptedAction, references: Array<Record<string, JsonValue>> = []): unknown {
   return { schemaVersion: references.length > 0 ? 'iar.semantic-frame/v2' : 'iar.semantic-frame/v1', intent, action: action ?? inferAction(intent, slots), slots, references, confidence };
+}
+
+/** 离线 provider 只复制当前候选范围中的固定 Plugin 标识。 */
+function addPluginId(raw: unknown, descriptors: PluginScopeDescriptor[]): unknown {
+  if (!isRecord(raw) || typeof raw.intent !== 'string') return raw;
+  const pluginId = OFFLINE_PLUGIN_IDS[raw.intent];
+  if (!pluginId || !descriptors.some((descriptor) => descriptor.pluginId === pluginId)) return raw;
+  return { ...raw, pluginId };
+}
+
+/** 沙箱固定 Function 到 Plugin 的映射，仅用于离线测试 provider。 */
+const OFFLINE_PLUGIN_IDS: Readonly<Record<string, string>> = {
+  [SELF_INTRODUCTION_FUNCTION_ID]: 'iar.self-introduction',
+  'knowledge.query': 'knowledge-query-v1',
+  'dip.manage': 'dip-manage-v1',
+  'job.monitor': 'job-monitor-v1',
+  'api.gateway': 'api-gateway-v1',
+  'dataset.query': 'dataset-query-v1',
+  'report.center': 'report-center-v1',
+  'system.status': 'system-status-v1',
+  'account.privilege': 'account-privilege-v1',
+  'ticket.create': 'ticket-create-v1',
+  'human.transfer': 'human-transfer-v1'
+};
+
+/** 读取 semantic.extract 输入中的 Plugin 描述快照。 */
+function readPluginDescriptors(value: unknown): PluginScopeDescriptor[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord).filter((item) => typeof item.pluginId === 'string' && typeof item.description === 'string' && Array.isArray(item.actionTypes)) as unknown as PluginScopeDescriptor[];
 }
 
 /** 将自然语言顺序词归一化为不透明事实链关系。 */

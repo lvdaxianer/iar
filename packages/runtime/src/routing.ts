@@ -286,7 +286,8 @@ export class PluginFirstRouter {
     const functionCall = await safeFunctionCall(request.functionCallAdapter, request.traceId, request.runId, {
       currentMessage: request.currentMessage ?? '',
       behaviorContext: request.behaviorContext ?? null,
-      recentMessages: request.recentMessages ?? []
+      recentMessages: request.recentMessages ?? [],
+      semantic: isRecord(request.facts.semantic) ? structuredClone(request.facts.semantic) as JsonValue : {}
     }, tools);
     if (!functionCall) return rejectedResult({ functionId: '', functionEvaluation: emptyFunctionEvaluation(), functionDecision: emptyFunctionDecision(''), pluginEvaluation, pluginDecision: emptyPluginDecision(selected.manifest.pluginId), reasonCode: 'function_call_failed' });
     if (functionCall.pluginId !== selected.manifest.pluginId || !tools.some((tool) => tool.functionId === functionCall.functionId && (tool.operation === undefined || tool.operation === functionCall.operation))) {

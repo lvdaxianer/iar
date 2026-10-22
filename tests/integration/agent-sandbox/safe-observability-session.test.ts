@@ -53,12 +53,20 @@ function oversizedStream(state: { isCancelled: boolean }): Response {
  */
 function installOversizedModel(state: { isCancelled: boolean }): void {
   globalThis.fetch = async (_url, options) => {
-    const payload = JSON.parse(String(options?.body)) as { stream?: boolean; messages?: Array<{ content: string }> };
+    const payload = JSON.parse(String(options?.body)) as { stream?: boolean; messages?: Array<{ content: string }>; tools?: Array<{ function?: { name?: string } }> };
+    if (payload.messages?.[0]?.content.includes('Function Caller')) return scriptedFunctionCallResponse(payload.tools);
     if (payload.stream) return oversizedStream(state);
     // 语义模型按已有方式回退，回复模型返回超限响应。
     if (payload.messages?.[0]?.content.includes('iar.semantic-frame')) return new Response('', { status: 503 });
     return new Response(new Uint8Array(MAX_MODEL_RESPONSE_BYTES + 1));
   };
+}
+
+/** 为新的 Plugin → Function Calling 主路径提供确定性工具调用，避免响应超限夹具误伤执行阶段。 */
+function scriptedFunctionCallResponse(tools: Array<{ function?: { name?: string } }> | undefined): Response {
+  const name = tools?.[0]?.function?.name ?? 'unknown.read';
+  const operation = name.split('.').at(-1) ?? 'read';
+  return new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ type: 'function', function: { name, arguments: JSON.stringify({ operation, query: '列出今天的集成任务' }) } }] } }] }), { status: 200 });
 }
 
 /** 未执行动作时，超限必须返回失败且 done 事件不能伪装为完整回复。
@@ -138,7 +146,8 @@ test('模型响应超限时普通和流式会话明确失败，不保存截断�
  * @date 2026-10-18
  */
 async function timeoutFetch(_url: string | URL | Request, options?: RequestInit): Promise<Response> {
-  const payload = JSON.parse(String(options?.body)) as { stream?: boolean };
+  const payload = JSON.parse(String(options?.body)) as { stream?: boolean; messages?: Array<{ content: string }>; tools?: Array<{ function?: { name?: string } }> };
+  if (payload.messages?.[0]?.content.includes('Function Caller')) return scriptedFunctionCallResponse(payload.tools);
   // 非流式失败让会话继续进入流式兜底。
   if (!payload.stream) return new Response('response-private', { status: 503 });
   return await new Promise((_resolve, reject) => {

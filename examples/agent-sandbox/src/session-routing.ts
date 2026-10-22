@@ -6,7 +6,7 @@
  * @date 2026-10-18
  */
 import { randomUUID } from 'node:crypto';
-import { SCHEMA_VERSIONS, type ActionDefinition, type ActionType, type BehaviorContext, type EventEnvelope, type JsonValue, type PendingReference, type PluginOperation, type PluginPolicyMetadata, type RuleExpression, type VerifiedFactRecord } from '@iar/contracts';
+import { SCHEMA_VERSIONS, validateJsonSchemaValue, type ActionDefinition, type ActionType, type BehaviorContext, type EventEnvelope, type JsonValue, type PendingReference, type PluginOperation, type PluginPolicyMetadata, type RuleExpression, type VerifiedFactRecord } from '@iar/contracts';
 import { SELF_INTRODUCTION_FUNCTION_ID, type PluginDescriptor, type PluginHost, type PluginScopeDescriptor } from '@iar/plugins';
 import { ModelGateway, SemanticExtractorAdapter, type HistoricalSemanticReference, type ModelGatewayResult, type ModelProfileRegistry, type SemanticFrame } from '@iar/runtime';
 import { PluginFirstRouter, resolveFactRelationCandidates, type AsyncDecisionAdapter, type AsyncFunctionCallAdapter, type FactRelationCandidateReference, type RouteResult } from '@iar/runtime';
@@ -15,7 +15,7 @@ import type { ActionExecutor, LocalWorkflow } from '@iar/runtime';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
 import { SESSION_RUN_ID, SESSION_CORRELATION_ID, TURN_DEFINITION } from './session-core.js';
 import type { CompactionContext } from './session-compaction.js';
-import { buildActionInput, buildFacts, buildSelfIntroductionInput, describeAction, sandboxOperationKind, toSlotMap } from './session-helpers.js';
+import { buildActionInput, buildFacts, buildFunctionCallInput, buildSelfIntroductionInput, describeAction, sandboxOperationKind, toSlotMap } from './session-helpers.js';
 import type { ExecuteTurnOutcome, ExtractFrameOutcome, ReferenceResolution, ResolvedFactReference, RouteEvidence, SandboxMode } from './session-types.js';
 
 /** 路由读取和更新当前会话的状态，不拥有独立生命周期。 */
@@ -175,10 +175,9 @@ export class SandboxSessionRouting {
     const manifest = resolved.value.manifest;
     const functionRecord = resolved.value.functions.get(route.functionId);
     if (!functionRecord) return { status: 'failed', reply: '路由选中的 Plugin 不包含目标 Function。', reasonCode: 'function_unavailable' };
-    const built = route.functionId === SELF_INTRODUCTION_FUNCTION_ID
-      ? { input: buildSelfIntroductionInput(this.context.pluginHost.allDescriptors(), this.context.configuration.selfIntroduction.extraPrompt) }
-      : buildActionInput(route.functionId, frame.slots, userText, frame.action, behaviorContext, functionRecord.operations);
+    const built = route.functionId === SELF_INTRODUCTION_FUNCTION_ID ? { input: buildSelfIntroductionInput(this.context.pluginHost.allDescriptors(), this.context.configuration.selfIntroduction.extraPrompt) } : route.functionCallProposal ? buildFunctionCallInput(route.functionCallProposal) : buildActionInput(route.functionId, frame.slots, userText, frame.action, behaviorContext, functionRecord.operations);
     if ('missing' in built) return { status: 'clarification', reply: `还缺少必要信息（${built.missing.join('、')}），请补充完整后再试。`, reasonCode: 'slots_missing' };
+    if (!validateJsonSchemaValue(functionRecord.definition.inputSchema, built.input).ok) return { status: 'clarification', reply: '模型提出的 Function 参数不完整或不符合输入契约，请补充必要信息后再试。', reasonCode: 'function_arguments_invalid' };
     const operationKind = sandboxOperationKind(route.functionId, built.input, functionRecord.operations);
     const action = this.createAction({ runId, functionId: route.functionId, pluginId: route.pluginId, input: built.input, policy: manifest.policy, operations: functionRecord.operations });
     await this.appendDecisionEvent({ runId, frame, route, input: built.input });

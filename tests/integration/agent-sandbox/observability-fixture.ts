@@ -32,6 +32,8 @@ export class ObservabilityFixture {
   private readonly originalFetch = globalThis.fetch;
   private readonly originalKey = process.env.IAR_LLM_API_KEY;
   private readonly originalUrl = process.env.IAR_LLM_BASE_URL;
+  private readonly originalIntentKey = process.env.IAR_INTENT_MODEL_API_KEY;
+  private readonly originalIntentUrl = process.env.IAR_INTENT_MODEL_ENDPOINT;
 
   /**
    * 安装只保存在内存中的日志接收器。
@@ -58,6 +60,8 @@ export class ObservabilityFixture {
     if (options.mode === 'brain') {
       process.env.IAR_LLM_API_KEY = TEST_CONNECTION.apiKey;
       process.env.IAR_LLM_BASE_URL = TEST_CONNECTION.baseUrl;
+      process.env.IAR_INTENT_MODEL_API_KEY = TEST_CONNECTION.apiKey;
+      process.env.IAR_INTENT_MODEL_ENDPOINT = TEST_CONNECTION.baseUrl;
     }
     this.server = await startSandboxServer(options);
     return this.server;
@@ -90,6 +94,8 @@ export class ObservabilityFixture {
       this.restoreWriter();
       restoreEnvironment('IAR_LLM_API_KEY', this.originalKey);
       restoreEnvironment('IAR_LLM_BASE_URL', this.originalUrl);
+      restoreEnvironment('IAR_INTENT_MODEL_API_KEY', this.originalIntentKey);
+      restoreEnvironment('IAR_INTENT_MODEL_ENDPOINT', this.originalIntentUrl);
     }
   }
 }

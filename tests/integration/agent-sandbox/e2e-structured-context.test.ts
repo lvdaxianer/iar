@@ -10,7 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { startSandboxServer } from '../../../examples/agent-sandbox/src/server.js';
-import { buildActionInput } from '../../../examples/agent-sandbox/src/session-helpers.js';
+import { buildActionInput, buildFunctionCallInput } from '../../../examples/agent-sandbox/src/session-helpers.js';
+import type { FunctionCallProposal } from '@iar/runtime';
 
 /** 获取可用本地端口，避免端到端测试争抢固定监听端口。 */
 async function availablePort(): Promise<number> {
@@ -32,6 +33,15 @@ async function requestJson<T>(url: string, init: RequestInit): Promise<{ respons
 
 test('缺少明确 operation 时动作型语义不会默认生成副作用输入', () => {
   assert.deepEqual(buildActionInput('ticket.create', {}, '', 'create'), { missing: ['operation'] });
+});
+
+test('Function Calling arguments 是 Action 的唯一参数来源，并由 Runtime 补齐 operation', () => {
+  const proposal: FunctionCallProposal = {
+    schemaVersion: 'iar.function-call/v1', pluginId: 'knowledge-query-v1', functionId: 'knowledge.query', operation: 'search',
+    arguments: { query: '模型提取的查询', params: { source: 'model' } }, confidence: 0.99
+  };
+  assert.deepEqual(buildFunctionCallInput(proposal), { input: { operation: 'search', query: '模型提取的查询', params: { source: 'model' } } });
+  assert.deepEqual(buildFunctionCallInput({ ...proposal, arguments: { operation: 'list', query: '冲突操作' } }), { missing: ['operation'] });
 });
 
 test('自由追问可从结构化事实回答并在压缩重启后继续，同时隔离其他会话', async () => {
