@@ -21,8 +21,10 @@ import {
   type FunctionToolDefinition,
   type ModelProfileEnvironment,
   type ModelProvider,
-  type ModelProviderRequest
+  type ModelProviderRequest,
+  type NestedFunctionToolDefinition
 } from '@iar/runtime';
+import type { JsonValue } from '@iar/contracts';
 import { callModel, type ModelTransportTool } from './model-transport.js';
 import { runWithModelLogContext } from '../safe-log.js';
 import { callModelStream } from './model-stream-transport.js';
@@ -97,7 +99,11 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     if (!connection.apiKey || !connection.baseUrl) throw new ModelProviderError('provider_unavailable');
     const prompt = this.buildPrompt(request);
     const raw = await runWithModelLogContext(request.traceId, () => callModel({ connection, ...prompt, signal: request.signal }));
-    return request.profile.role === 'function.call' ? normalizeFunctionCallResult(raw, readFunctionTools(asRecord(request.input).tools)) : raw;
+    if (request.profile.role !== 'function.call') return raw;
+    const input = asRecord(request.input);
+    return Array.isArray(input.nestedTools)
+      ? normalizeNestedFunctionCallResult(raw, readNestedTools(input.nestedTools))
+      : normalizeFunctionCallResult(raw, readFunctionTools(input.tools));
   }
 
   /**
@@ -148,7 +154,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
    */
   protected buildPrompt(request: ModelProviderRequest): FunctionPrompt {
     const input = asRecord(request.input);
-    if (request.profile.role === 'function.call') return buildFunctionPrompt(input);
+    if (request.profile.role === 'function.call') return Array.isArray(input.nestedTools) ? buildNestedFunctionPrompt(input) : buildFunctionPrompt(input);
     if (request.profile.role === 'semantic.extract') {
       return { system: SEMANTIC_SYSTEM_PROMPT, user: buildSemanticUserPrompt(input) };
     }
@@ -241,7 +247,7 @@ export class IntentModelProvider extends OpenAICompatibleModelProvider {
 }
 
 /** 普通模型提示词以及可选的原生工具参数。 */
-type FunctionPrompt = { system: string; user: string; tools?: readonly ModelTransportTool[]; toolChoice?: { type: 'function'; function: { name: string } } | 'auto'; allowToolCalls?: boolean };
+type FunctionPrompt = { system: string; user: string; tools?: readonly ModelTransportTool[]; toolChoice?: { type: 'function'; function: { name: string } } | 'auto'; allowToolCalls?: boolean; thinking?: { type: 'disabled' } };
 
 /** 构造 Function-call 的有界工具请求。 */
 function buildFunctionPrompt(input: Record<string, unknown>): FunctionPrompt {
@@ -253,8 +259,23 @@ function buildFunctionPrompt(input: Record<string, unknown>): FunctionPrompt {
   };
 }
 
+/** 构造 nested Plugin tool 的一次 Function Calling 请求。 */
+function buildNestedFunctionPrompt(input: Record<string, unknown>): FunctionPrompt {
+  const tools = readNestedTools(input.nestedTools).map(toNestedTransportTool);
+  return {
+    system: FUNCTION_CALL_SYSTEM_PROMPT,
+    user: JSON.stringify({ currentMessage: input.currentMessage ?? '', semantic: input.semantic ?? {}, behaviorContext: input.behaviorContext ?? {}, recentMessages: input.recentMessages ?? [] }),
+    ...(tools.length > 0 ? { tools, toolChoice: 'auto' as const, allowToolCalls: true, thinking: { type: 'disabled' as const } } : {})
+  };
+}
+
 /** 把安装工具定义转换为 OpenAI-compatible 工具形状。 */
 function toTransportTool(tool: FunctionToolDefinition): ModelTransportTool {
+  return { type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } };
+}
+
+/** 将 nested tool 的模型侧外壳转换为严格 OpenAI tools 形状。 */
+function toNestedTransportTool(tool: NestedFunctionToolDefinition): ModelTransportTool {
   return { type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } };
 }
 
@@ -262,6 +283,12 @@ function toTransportTool(tool: FunctionToolDefinition): ModelTransportTool {
 function readFunctionTools(value: unknown): FunctionToolDefinition[] {
   if (!Array.isArray(value)) return [];
   return value.filter(isFunctionTool).map((tool) => structuredClone(tool));
+}
+
+/** 读取宿主注入的 nested Plugin tools，不接受模型返回的工具定义。 */
+function readNestedTools(value: unknown): NestedFunctionToolDefinition[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isNestedFunctionTool).map((tool) => structuredClone(tool));
 }
 
 /** 将原生 tool call 归一化为公共 Function-call 提案。 */
@@ -279,9 +306,50 @@ function normalizeFunctionCallResult(raw: unknown, tools: readonly FunctionToolD
   return { schemaVersion: 'iar.function-call/v1', pluginId: tool.pluginId, functionId: tool.functionId, operation: tool.operation ?? 'read', arguments: args, confidence: 1 };
 }
 
+/** 将 OpenAI 原生 nested tool call 归一化为版本化 Plugin/Function/Operation 提案。 */
+function normalizeNestedFunctionCallResult(raw: unknown, tools: readonly NestedFunctionToolDefinition[]): unknown {
+  if (!isRecord(raw) || !Array.isArray(raw.toolCalls)) return raw;
+  const call = raw.toolCalls[0];
+  if (!isRecord(call) || !isRecord(call.function)) throw new ModelProviderError('provider_failed');
+  const callFunction = call.function;
+  if (typeof callFunction.name !== 'string' || typeof callFunction.arguments !== 'string') throw new ModelProviderError('provider_failed');
+  const tool = tools.find((item) => item.name === callFunction.name);
+  if (!tool) throw new ModelProviderError('provider_failed');
+  let rawArguments: unknown;
+  try { rawArguments = JSON.parse(callFunction.arguments) as unknown; } catch { throw new ModelProviderError('provider_failed'); }
+  if (!isRecord(rawArguments) || !hasOnlyKeys(rawArguments, ['functionId', 'operation', 'arguments']) || typeof rawArguments.functionId !== 'string' || typeof rawArguments.operation !== 'string' || !isJsonObject(rawArguments.arguments)) throw new ModelProviderError('provider_failed');
+  const candidate = tool.candidates.find((item) => item.pluginId === tool.pluginId && item.functionId === rawArguments.functionId);
+  if (!candidate || !candidate.operations.some((operation) => operation.name === rawArguments.operation)) throw new ModelProviderError('provider_failed');
+  return { schemaVersion: 'iar.nested-function-call/v1', pluginId: tool.pluginId, toolName: tool.name, functionId: rawArguments.functionId, operation: rawArguments.operation, arguments: rawArguments.arguments, confidence: 1 };
+}
+
 /** 检查工具是否满足 Runtime 交给 provider 的最小快照。 */
 function isFunctionTool(value: unknown): value is FunctionToolDefinition {
   return isRecord(value) && typeof value.name === 'string' && typeof value.pluginId === 'string' && typeof value.functionId === 'string' && typeof value.description === 'string' && Object.hasOwn(value, 'parameters');
+}
+
+/** 检查 nested tool 是否满足模型传输和宿主归属边界。 */
+function isNestedFunctionTool(value: unknown): value is NestedFunctionToolDefinition {
+  return isRecord(value) && typeof value.name === 'string' && typeof value.pluginId === 'string' && typeof value.description === 'string' && isJsonValue(value.parameters) && Array.isArray(value.candidates) && value.candidates.every((candidate) => isRecord(candidate) && typeof candidate.pluginId === 'string' && typeof candidate.functionId === 'string' && Array.isArray(candidate.operations) && candidate.operations.every((operation) => isRecord(operation) && typeof operation.name === 'string'));
+}
+
+/** 判断嵌套参数是否是 JSON-safe 普通对象。 */
+function isJsonObject(value: unknown): value is Record<string, JsonValue> {
+  return isRecord(value) && Object.values(value).every(isJsonValue);
+}
+
+/** 判断值是否为可安全传输的有限 JSON 值。 */
+function isJsonValue(value: unknown): value is JsonValue {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  return isRecord(value) && Object.values(value).every(isJsonValue);
+}
+
+/** 判断对象只包含 nested tool call 的固定字段。 */
+function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const allowed = new Set(keys);
+  return Object.keys(value).every((key) => allowed.has(key));
 }
 
 /** 判断未知值是否为普通对象。 */

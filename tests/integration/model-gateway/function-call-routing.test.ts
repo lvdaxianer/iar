@@ -5,8 +5,11 @@ import {
   FunctionCallAdapter,
   ModelProfileRegistry,
   ModelGateway,
+  NestedFunctionCallAdapter,
   UnifiedFunctionCallAdapter,
   validateFunctionCallProposal,
+  validateNestedFunctionCallProposal,
+  type NestedFunctionToolDefinition,
   type FunctionToolDefinition
 } from '@iar/runtime';
 import type { JsonValue } from '@iar/contracts';
@@ -21,7 +24,24 @@ const tool: FunctionToolDefinition = {
   parameters: { type: 'object', properties: { ticketId: { type: 'string' } }, required: ['ticketId'], additionalProperties: false }
 };
 
-function profile(role: 'function.call', backend?: 'jev' | 'intent-model') {
+const nestedTool: NestedFunctionToolDefinition = {
+  name: 'plugin_ticket',
+  pluginId: 'ticket-plugin',
+  description: '工单 Plugin，支持查询工单',
+  parameters: {
+    type: 'object',
+    properties: {
+      functionId: { type: 'string', enum: ['ticket.query'] },
+      operation: { type: 'string', enum: ['query'] },
+      arguments: { type: 'object', additionalProperties: true }
+    },
+    required: ['functionId', 'operation', 'arguments'],
+    additionalProperties: false
+  },
+  candidates: [{ pluginId: 'ticket-plugin', functionId: 'ticket.query', operations: [{ name: 'query' }] }]
+};
+
+function profile(role: 'function.call', backend?: 'jev' | 'intent-model', timeoutMs = 1_000) {
   return {
     schemaVersion: 'iar.model-profile/v1' as const,
     profileId: `${backend ?? 'brain'}-function-call`,
@@ -31,7 +51,7 @@ function profile(role: 'function.call', backend?: 'jev' | 'intent-model') {
     provider: backend === 'intent-model' ? 'intent-provider' : backend === 'jev' ? 'jev-provider' : 'brain',
     modelId: 'function-call-model',
     modelVersion: 'test',
-    timeoutMs: 1_000,
+    timeoutMs,
     retryPolicy: { maxAttempts: 1, backoffMs: 0, retryOn: ['provider_failed'] },
     structuredOutput: { enabled: true, schemaId: 'iar.function-call/v1' },
     environment: { endpoint: 'IAR_TEST_ENDPOINT', apiKey: 'IAR_TEST_API_KEY', modelId: 'IAR_TEST_MODEL' }
@@ -83,6 +103,25 @@ test('function-call proposal rejects unknown tools and model-owned contract fiel
     parameters: { type: 'object' }
   }, [tool]);
   assert.equal(customSchema.ok, false);
+});
+
+test('nested Function-call proposal preserves Plugin ownership and named arguments', () => {
+  const result = validateNestedFunctionCallProposal({
+    schemaVersion: 'iar.nested-function-call/v1',
+    pluginId: 'ticket-plugin',
+    toolName: 'plugin_ticket',
+    functionId: 'ticket.query',
+    operation: 'query',
+    arguments: { ticketId: 'ticket-1' },
+    confidence: 0.97
+  }, [nestedTool]);
+  assert.equal(result.ok, true);
+  if (result.ok) assert.deepEqual(result.value.arguments, { ticketId: 'ticket-1' });
+
+  const unknownOperation = validateNestedFunctionCallProposal({
+    schemaVersion: 'iar.nested-function-call/v1', pluginId: 'ticket-plugin', toolName: 'plugin_ticket', functionId: 'ticket.query', operation: 'create', arguments: {}, confidence: 0.9
+  }, [nestedTool]);
+  assert.equal(unknownOperation.ok, false);
 });
 
 test('function.call model profile uses JEV first and Intent Model only when JEV is absent', () => {
@@ -151,6 +190,80 @@ test('function.call transport sends bounded tools and parses a native tool call'
     restoreEnvironment('IAR_TEST_API_KEY', previousApiKey);
     restoreEnvironment('IAR_TEST_MODEL', previousModel);
   }
+});
+
+test('nested Function-call transport sends OpenAI tools with thinking disabled', async () => {
+  const previousFetch = globalThis.fetch;
+  const previousEndpoint = process.env.IAR_TEST_ENDPOINT;
+  const previousApiKey = process.env.IAR_TEST_API_KEY;
+  const previousModel = process.env.IAR_TEST_MODEL;
+  process.env.IAR_TEST_ENDPOINT = 'https://model.example/v1';
+  process.env.IAR_TEST_API_KEY = 'test-secret';
+  process.env.IAR_TEST_MODEL = 'test-nested-model';
+  let body: Record<string, unknown> | undefined;
+  globalThis.fetch = async (_input, init) => {
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ type: 'function', function: { name: 'plugin_ticket', arguments: '{"functionId":"ticket.query","operation":"query","arguments":{"ticketId":"ticket-1"}}' } }] } }] }), { status: 200 });
+  };
+  try {
+    const result = await new BrainModelProvider().complete(providerRequest({ currentMessage: '查 ticket-1', nestedTools: [nestedTool] } as unknown as JsonValue));
+    assert.deepEqual(result, {
+      schemaVersion: 'iar.nested-function-call/v1',
+      pluginId: 'ticket-plugin',
+      toolName: 'plugin_ticket',
+      functionId: 'ticket.query',
+      operation: 'query',
+      arguments: { ticketId: 'ticket-1' },
+      confidence: 1
+    });
+    assert.deepEqual(body?.thinking, { type: 'disabled' });
+    assert.deepEqual(body?.tools, [{ type: 'function', function: { name: 'plugin_ticket', description: '工单 Plugin，支持查询工单', parameters: nestedTool.parameters } }]);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnvironment('IAR_TEST_ENDPOINT', previousEndpoint);
+    restoreEnvironment('IAR_TEST_API_KEY', previousApiKey);
+    restoreEnvironment('IAR_TEST_MODEL', previousModel);
+  }
+});
+
+test('nested Function-call transport rejects unknown tool and malformed JSON arguments', async () => {
+  const previousFetch = globalThis.fetch;
+  const previousEndpoint = process.env.IAR_TEST_ENDPOINT;
+  const previousApiKey = process.env.IAR_TEST_API_KEY;
+  const previousModel = process.env.IAR_TEST_MODEL;
+  process.env.IAR_TEST_ENDPOINT = 'https://model.example/v1';
+  process.env.IAR_TEST_API_KEY = 'test-secret';
+  process.env.IAR_TEST_MODEL = 'test-nested-model';
+  let responseBody: unknown = { choices: [{ message: { tool_calls: [{ type: 'function', function: { name: 'plugin_unknown', arguments: '{}' } }] } }] };
+  globalThis.fetch = async () => new Response(JSON.stringify(responseBody), { status: 200 });
+  try {
+    await assert.rejects(() => new BrainModelProvider().complete(providerRequest({ nestedTools: [nestedTool] } as unknown as JsonValue)));
+    responseBody = { choices: [{ message: { tool_calls: [{ type: 'function', function: { name: 'plugin_ticket', arguments: '{bad-json' } }] } }] };
+    await assert.rejects(() => new BrainModelProvider().complete(providerRequest({ nestedTools: [nestedTool] } as unknown as JsonValue)));
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnvironment('IAR_TEST_ENDPOINT', previousEndpoint);
+    restoreEnvironment('IAR_TEST_API_KEY', previousApiKey);
+    restoreEnvironment('IAR_TEST_MODEL', previousModel);
+  }
+});
+
+test('nested Function-call adapter classifies no tool call and timeout without executing anything', async () => {
+  const noToolGateway = new ModelGateway({
+    registry: new ModelProfileRegistry([profile('function.call')]),
+    providers: { brain: { complete: async () => ({}) } }
+  });
+  const noToolResult = await new NestedFunctionCallAdapter(noToolGateway).call({ traceId: 'trace-no-tool', runId: 'run-no-tool', input: { currentMessage: '查工单' }, tools: [nestedTool] });
+  assert.equal(noToolResult.ok, false);
+  if (!noToolResult.ok) assert.equal(noToolResult.error.code, 'model.schema_invalid');
+
+  const timeoutGateway = new ModelGateway({
+    registry: new ModelProfileRegistry([profile('function.call', undefined, 10)]),
+    providers: { brain: { complete: async () => await new Promise(() => undefined) } }
+  });
+  const timeoutResult = await new NestedFunctionCallAdapter(timeoutGateway).call({ traceId: 'trace-timeout', runId: 'run-timeout', input: { currentMessage: '查工单' }, tools: [nestedTool] });
+  assert.equal(timeoutResult.ok, false);
+  if (!timeoutResult.ok) assert.equal(timeoutResult.error.code, 'model.timeout');
 });
 
 function restoreEnvironment(key: string, value: string | undefined): void {

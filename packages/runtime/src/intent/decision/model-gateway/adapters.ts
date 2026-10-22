@@ -11,7 +11,7 @@ import { MODEL_NO_PROFILE_MESSAGE, type ModelGatewayInvocationOptions, type Mode
 import { ModelGateway } from './gateway.js';
 import { DecisionBackendResolver } from './decision-backend.js';
 import { buildIntentDecisionInput, canonicalizeDecisionRequest } from './intent-prompt.js';
-import { validateFunctionCallProposal, type FunctionCallProposal, type FunctionToolDefinition } from './function-call.js';
+import { validateFunctionCallProposal, validateNestedFunctionCallProposal, type FunctionCallProposal, type FunctionToolDefinition, type NestedFunctionCallProposal, type NestedFunctionCandidateDefinition, type NestedFunctionToolDefinition } from './function-call.js';
 
 /** Semantic Extractor 的最小结构化返回。 */
 export type SemanticFrame = {
@@ -77,6 +77,9 @@ export type ResponseGenerateInvocation = ModelInvocation;
 /** Function-call 的调用输入，工具列表必须来自已选 Plugin 的安装记录。 */
 export type FunctionCallInvocation = Omit<ModelInvocation, 'input'> & { input: JsonValue; tools: readonly FunctionToolDefinition[] };
 
+/** Nested Plugin tool 的调用输入，工具列表必须来自当前 PluginHost 投影。 */
+export type NestedFunctionCallInvocation = Omit<ModelInvocation, 'input'> & { input: JsonValue; tools: readonly NestedFunctionToolDefinition[] };
+
 /** 使用 ModelGateway 运行 Semantic Extractor。 @author lvdaxianer@yeah.net @date 2026-10-17 */
 export class SemanticExtractorAdapter {
   /** 创建 Semantic Extractor adapter。 @param gateway - 统一模型调用边界 @author lvdaxianer@yeah.net @date 2026-10-17 */
@@ -117,6 +120,21 @@ export class FunctionCallAdapter {
   }
 }
 
+/** 使用一个 OpenAI nested Plugin tool 提出完整 Function/Operation 调用。 */
+export class NestedFunctionCallAdapter {
+  /** 创建绑定 backend 的 nested Function-call adapter。 */
+  public constructor(private readonly gateway: ModelGateway, private readonly backend?: 'jev' | 'intent-model') {}
+
+  /** 发送当前 Plugin tools 并校验完整的 nested proposal。 */
+  public call(invocation: NestedFunctionCallInvocation, profileId?: string, options?: Pick<ModelGatewayInvocationOptions, 'crossBackendFallback'>): Promise<ModelGatewayResult<NestedFunctionCallProposal>> {
+    const snapshot = snapshotNestedFunctionCallInvocation(invocation);
+    if (!snapshot) return Promise.resolve(invalidNestedFunctionCallResult('Nested Function-call 输入无效'));
+    const input = withNestedFunctionTools(snapshot.input, snapshot.tools);
+    const gatewayOptions = this.backend ? decisionOptions(this.backend, profileId, options) : undefined;
+    return this.gateway.invoke('function.call', { traceId: snapshot.traceId, runId: snapshot.runId, input }, (raw) => validateNestedFunctionCallProposal(raw, snapshot.tools), gatewayOptions);
+  }
+}
+
 /** 按 JEV 优先、Intent Model 其次执行 Function-call。 */
 export class UnifiedFunctionCallAdapter {
   /** 创建统一 Function-call 入口。 */
@@ -124,6 +142,23 @@ export class UnifiedFunctionCallAdapter {
 
   /** 解析 backend 后只调用一个 Function-call provider。 */
   public call(invocation: FunctionCallInvocation): Promise<ModelGatewayResult<FunctionCallProposal>> {
+    try {
+      const resolution = this.resolver.resolve('function.call');
+      const adapter = resolution.backend === 'jev' ? this.jevAdapter : this.intentModelAdapter;
+      return adapter.call(invocation, resolution.profileId);
+    } catch {
+      return Promise.resolve(noProfileResult());
+    }
+  }
+}
+
+/** 按 JEV 优先、Intent Model 其次执行 nested Function-call。 */
+export class UnifiedNestedFunctionCallAdapter {
+  /** 创建统一 nested Function-call 入口。 */
+  public constructor(private readonly resolver: DecisionBackendResolver, private readonly jevAdapter: NestedFunctionCallAdapter, private readonly intentModelAdapter: NestedFunctionCallAdapter) {}
+
+  /** 解析 backend 后只调用一个 nested Function-call provider。 */
+  public call(invocation: NestedFunctionCallInvocation): Promise<ModelGatewayResult<NestedFunctionCallProposal>> {
     try {
       const resolution = this.resolver.resolve('function.call');
       const adapter = resolution.backend === 'jev' ? this.jevAdapter : this.intentModelAdapter;
@@ -511,10 +546,29 @@ function snapshotFunctionCallInvocation(invocation: unknown): FunctionCallInvoca
   }
 }
 
+/** 创建 nested Function-call 的不可变调用快照。 */
+function snapshotNestedFunctionCallInvocation(invocation: unknown): NestedFunctionCallInvocation | undefined {
+  try {
+    if (!isRecord(invocation) || !isNonEmptyString(invocation.traceId) || !isNonEmptyString(invocation.runId) || !Array.isArray(invocation.tools) || invocation.tools.length === 0) return undefined;
+    const input = structuredClone(invocation.input) as JsonValue;
+    const tools = structuredClone(invocation.tools) as NestedFunctionToolDefinition[];
+    if (!isJsonValue(input) || !tools.every(isNestedFunctionTool)) return undefined;
+    return { traceId: invocation.traceId, runId: invocation.runId, input, tools };
+  } catch {
+    return undefined;
+  }
+}
+
 /** 将已安装工具加入 provider 输入，不能从模型输出反向扩展。 */
 function withFunctionTools(input: JsonValue, tools: readonly FunctionToolDefinition[]): JsonValue {
   if (!isRecord(input)) return { input, tools: tools as unknown as JsonValue };
   return { ...input, tools: tools as unknown as JsonValue };
+}
+
+/** 将 nested Plugin tools 放入 provider 输入，不能由模型反向扩展。 */
+function withNestedFunctionTools(input: JsonValue, tools: readonly NestedFunctionToolDefinition[]): JsonValue {
+  if (!isRecord(input)) return { input, nestedTools: tools as unknown as JsonValue };
+  return { ...input, nestedTools: tools as unknown as JsonValue };
 }
 
 /** 判断 Function 工具快照是否具备最小固定字段。 */
@@ -522,7 +576,22 @@ function isFunctionTool(value: unknown): value is FunctionToolDefinition {
   return isRecord(value) && isNonEmptyString(value.name) && isNonEmptyString(value.pluginId) && isNonEmptyString(value.functionId) && isNonEmptyString(value.description) && isJsonValue(value.parameters);
 }
 
+/** 判断 nested Plugin tool 快照是否具备固定字段。 */
+function isNestedFunctionTool(value: unknown): value is NestedFunctionToolDefinition {
+  return isRecord(value) && isNonEmptyString(value.name) && isNonEmptyString(value.pluginId) && isNonEmptyString(value.description) && isJsonValue(value.parameters) && Array.isArray(value.candidates) && value.candidates.every(isNestedFunctionCandidate);
+}
+
+/** 判断 nested Function 候选是否保留 Plugin、Function 和 Operation 归属。 */
+function isNestedFunctionCandidate(value: unknown): value is NestedFunctionCandidateDefinition {
+  return isRecord(value) && isNonEmptyString(value.pluginId) && isNonEmptyString(value.functionId) && Array.isArray(value.operations) && value.operations.length > 0 && value.operations.every((operation) => isRecord(operation) && isNonEmptyString(operation.name));
+}
+
 /** 创建稳定的 Function-call 输入错误。 */
 function invalidFunctionCallResult<T>(message: string): ModelGatewayResult<T> {
+  return { ok: false, error: { code: 'model.invalid_request', message, retryable: false, details: {} }, audit: [], events: [] };
+}
+
+/** 创建 nested Function-call 的稳定输入错误。 */
+function invalidNestedFunctionCallResult<T>(message: string): ModelGatewayResult<T> {
   return { ok: false, error: { code: 'model.invalid_request', message, retryable: false, details: {} }, audit: [], events: [] };
 }

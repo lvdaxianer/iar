@@ -39,6 +39,33 @@ export type FunctionCallProposal = {
   confidence: number;
 };
 
+/** Nested Plugin tool 的 Function/Operation 运行时候选摘要。 */
+export type NestedFunctionCandidateDefinition = {
+  pluginId: string;
+  functionId: string;
+  operations: readonly { name: string }[];
+};
+
+/** 一个 Plugin 一个 OpenAI tool 的传输定义，candidates 仅用于运行时归属校验。 */
+export type NestedFunctionToolDefinition = {
+  name: string;
+  pluginId: string;
+  description: string;
+  parameters: JsonValue;
+  candidates: readonly NestedFunctionCandidateDefinition[];
+};
+
+/** Nested tool call 的版本化模型提案。 */
+export type NestedFunctionCallProposal = {
+  schemaVersion: 'iar.nested-function-call/v1';
+  pluginId: string;
+  toolName: string;
+  functionId: string;
+  operation: string;
+  arguments: Record<string, JsonValue>;
+  confidence: number;
+};
+
 /**
  * 校验模型 Function-call 提案，并将工具身份限制在已安装快照内。
  * @param raw - provider 原始输出
@@ -57,8 +84,24 @@ export function validateFunctionCallProposal(raw: unknown, tools: readonly Funct
   return { ok: true, value: structuredClone(raw) as FunctionCallProposal };
 }
 
+/** 校验 nested Plugin tool call，并限制 Function/Operation 归属。 */
+export function validateNestedFunctionCallProposal(raw: unknown, tools: readonly NestedFunctionToolDefinition[] = []): ModelOutputValidation<NestedFunctionCallProposal> {
+  if (!isRecord(raw) || !hasOnlyKeys(raw, ['schemaVersion', 'pluginId', 'toolName', 'functionId', 'operation', 'arguments', 'confidence'])) return invalidNested('Nested Function-call Schema 无效');
+  if (raw.schemaVersion !== 'iar.nested-function-call/v1' || !isNonEmptyString(raw.pluginId) || !isNonEmptyString(raw.toolName) || !isNonEmptyString(raw.functionId) || !isNonEmptyString(raw.operation) || !isArguments(raw.arguments) || !isConfidence(raw.confidence)) return invalidNested('Nested Function-call Schema 无效');
+  const tool = tools.find((item) => item.name === raw.toolName);
+  if (!tool || tool.pluginId !== raw.pluginId) return invalidNested('Nested tool 不在当前 Plugin 范围内');
+  const candidate = tool.candidates.find((item) => item.pluginId === raw.pluginId && item.functionId === raw.functionId);
+  if (!candidate || !candidate.operations.some((operation) => operation.name === raw.operation)) return invalidNested('Nested Function/Operation 不属于当前 Plugin tool');
+  return { ok: true, value: structuredClone(raw) as NestedFunctionCallProposal };
+}
+
 /** 创建统一的边界失败结果。 */
 function invalid(message: string): ModelOutputValidation<FunctionCallProposal> {
+  return { ok: false, message };
+}
+
+/** 创建 nested Function-call 的稳定失败结果。 */
+function invalidNested(message: string): ModelOutputValidation<NestedFunctionCallProposal> {
   return { ok: false, message };
 }
 
