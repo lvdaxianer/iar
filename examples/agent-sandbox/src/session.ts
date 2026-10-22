@@ -182,7 +182,16 @@ export class IarSandboxSession extends SandboxSessionCore {
     if (behaviorContext.pendingReference !== undefined) await this.resetClarification();
     const routeContext = this.projector.current();
     timing.start('route.select');
-    const route = await this.routing.routeFrame(traceId, SESSION_RUN_ID, extracted.frame, routeContext, userText, this.recentMessages, selectedDescriptor);
+    const usesNestedRoute = extracted.frame.action !== 'unknown' && extracted.frame.intent !== 'unknown';
+    if (usesNestedRoute) timing.start('route.propose');
+    let route: Awaited<ReturnType<SandboxSessionRouting['routeFrame']>>;
+    let routeCompleted = false;
+    try {
+      route = await this.routing.routeFrame(traceId, SESSION_RUN_ID, extracted.frame, routeContext, userText, this.recentMessages, selectedDescriptor);
+      routeCompleted = true;
+    } finally {
+      if (usesNestedRoute) timing.end('route.propose', routeCompleted ? 'completed' : 'failed');
+    }
     timing.end('route.select');
     const evidence = buildEvidence(route, extracted.frame);
     // 抽取降级须保留在返回的路由证据中。

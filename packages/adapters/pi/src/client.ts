@@ -277,7 +277,7 @@ function validateTiming(value: unknown): BridgeTimingSummary {
   if (!isBoundedString(record.traceId, 256) || !isDuration(record.durationMs) || !Array.isArray(record.stages) || record.stages.length > 32) throw new BridgeClientError('invalid_bridge_response', 'IAR 耗时摘要无效。', false);
   const stages = record.stages.map((item) => {
     const stage = asRecord(item);
-    if (!['semantic.extract', 'route.select', 'action.execute', 'response.reasoning', 'response.generate'].includes(String(stage.stage)) || !['completed', 'failed', 'skipped'].includes(String(stage.status)) || !isDuration(stage.durationMs)) throw new BridgeClientError('invalid_bridge_response', 'IAR 耗时摘要无效。', false);
+    if (!['semantic.extract', 'route.propose', 'route.select', 'action.execute', 'response.reasoning', 'response.generate'].includes(String(stage.stage)) || !['completed', 'failed', 'skipped'].includes(String(stage.status)) || !isDuration(stage.durationMs)) throw new BridgeClientError('invalid_bridge_response', 'IAR 耗时摘要无效。', false);
     if (stage.firstTokenMs !== undefined && !isDuration(stage.firstTokenMs)) throw new BridgeClientError('invalid_bridge_response', 'IAR 耗时摘要无效。', false);
     return { stage: stage.stage, status: stage.status, durationMs: stage.durationMs, ...(stage.firstTokenMs === undefined ? {} : { firstTokenMs: stage.firstTokenMs }) } as BridgeTimingSummary['stages'][number];
   });

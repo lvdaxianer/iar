@@ -23,6 +23,8 @@ export type ModelTransportRequest = {
   allowToolCalls?: boolean;
   /** Nested tool route explicitly disables provider reasoning mode. */
   thinking?: { type: 'disabled' };
+  /** 当前 OpenAI-compatible 调用对应的 IAR 模型角色，仅用于安全耗时日志。 */
+  modelRole?: string;
 };
 /** 响应内容的最小形状。 */
 type CompletionResponse = { choices?: Array<{ message?: { content?: unknown; tool_calls?: unknown } }> };
@@ -88,12 +90,12 @@ export async function fetchModelResponse(request: ModelTransportRequest, isStrea
     response = await fetch(`${request.connection.baseUrl}/chat/completions`, createFetchOptions(request, isStream));
   } catch {
     // 网络或取消错误不输出异常原文。
-    logModelNetworkFailure(startTime, request.signal);
+    logModelNetworkFailure(startTime, request.signal, request.modelRole);
     throw new ModelProviderError('provider_unavailable');
   }
   // 上游返回非成功状态时不读取或记录正文。
   if (!response.ok) {
-    logModelHttpFailure(startTime, response.status);
+    logModelHttpFailure(startTime, response.status, request.modelRole);
     // 不读取错误正文，也不等待可能永不结束的底层取消。
     const body = response.body;
     // 无正文时没有需要取消的资源。
@@ -149,22 +151,22 @@ function createFetchOptions(request: ModelTransportRequest, isStream: boolean): 
 export async function callModel(request: ModelTransportRequest): Promise<unknown> {
   const startTime = Date.now();
   const response = await fetchModelResponse(request, false, startTime);
-  const body = await readModelBody(response, { startTime, signal: request.signal });
+  const body = await readModelBody(response, { startTime, signal: request.signal, modelRole: request.modelRole });
   try {
     const payload = JSON.parse(body) as CompletionResponse;
     const toolCalls = payload.choices?.[0]?.message?.tool_calls;
     if (request.allowToolCalls && Array.isArray(toolCalls) && toolCalls.length > 0) {
-      logModelSuccess(startTime, response.status);
+      logModelSuccess(startTime, response.status, request.modelRole);
       return { toolCalls };
     }
     const content = payload.choices?.[0]?.message?.content;
     if (typeof content !== 'string' || content.length === 0) throw new ModelProviderError('provider_failed');
     const result = JSON.parse(content) as unknown;
-    logModelSuccess(startTime, response.status);
+    logModelSuccess(startTime, response.status, request.modelRole);
     return result;
   } catch {
     // 响应正文格式无效时不记录其内容。
-    logModelInvalidResponse(startTime, response.status);
+    logModelInvalidResponse(startTime, response.status, request.modelRole);
     throw new ModelProviderError('provider_failed');
   }
 }
@@ -178,17 +180,17 @@ export async function callModel(request: ModelTransportRequest): Promise<unknown
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-async function readModelBody(response: Response, timing: { startTime: number; signal: AbortSignal }): Promise<string> {
+async function readModelBody(response: Response, timing: { startTime: number; signal: AbortSignal; modelRole?: ModelTransportRequest['modelRole'] }): Promise<string> {
   try {
     return await readBoundedBody(response);
   } catch (error) {
     // 超限视为无效响应，错误和日志均不包含原文。
     if (error instanceof ModelResponseLimitError) {
-      logModelInvalidResponse(timing.startTime, response.status);
+      logModelInvalidResponse(timing.startTime, response.status, timing.modelRole);
       throw error;
     }
     // 正文读取失败是网络或取消问题，不混同格式错误。
-    logModelNetworkFailure(timing.startTime, timing.signal);
+    logModelNetworkFailure(timing.startTime, timing.signal, timing.modelRole);
     throw new ModelProviderError('provider_failed');
   }
 }

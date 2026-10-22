@@ -26,6 +26,7 @@ test('self-introduction intent executes the built-in Plugin and uses scoped conf
   assert.equal(result.route.functionId, SELF_INTRODUCTION_FUNCTION_ID);
   assert.equal(result.route.operationKind, 'read');
   assert.equal(result.replySource, 'response_model');
+  assert.ok(result.timing?.stages.some((stage) => stage.stage === 'route.propose' && stage.status === 'completed'));
   assert.match(result.reply, /先说结论，再列能力/);
   assert.match(result.reply, /数据集成管理/);
   assert.doesNotMatch(result.reply, /平台使用 FAQ/);

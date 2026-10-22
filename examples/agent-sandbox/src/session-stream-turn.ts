@@ -148,7 +148,16 @@ export class SandboxSessionStreamTurn {
     if (behaviorContext.pendingReference !== undefined) await this.context.resetClarification();
     const routeContext = this.context.currentBehaviorContext();
     timing.start('route.select');
-    const route = await this.context.routeFrame(traceId, SESSION_RUN_ID, frame, routeContext, userText, this.context.recentMessages, selectedDescriptor);
+    const usesNestedRoute = frame.action !== 'unknown' && frame.intent !== 'unknown';
+    if (usesNestedRoute) timing.start('route.propose');
+    let route: RouteResult;
+    let routeCompleted = false;
+    try {
+      route = await this.context.routeFrame(traceId, SESSION_RUN_ID, frame, routeContext, userText, this.context.recentMessages, selectedDescriptor);
+      routeCompleted = true;
+    } finally {
+      if (usesNestedRoute) timing.end('route.propose', routeCompleted ? 'completed' : 'failed');
+    }
     timing.end('route.select');
     const evidence = buildEvidence(route, frame);
     if (extracted.semanticFallback) evidence.semanticFallback = true;

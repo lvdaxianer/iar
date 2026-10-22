@@ -98,7 +98,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     const connection = this.resolveConnection(request.profile);
     if (!connection.apiKey || !connection.baseUrl) throw new ModelProviderError('provider_unavailable');
     const prompt = this.buildPrompt(request);
-    const raw = await runWithModelLogContext(request.traceId, () => callModel({ connection, ...prompt, signal: request.signal }));
+    const raw = await runWithModelLogContext(request.traceId, () => callModel({ connection, ...prompt, signal: request.signal, modelRole: request.profile.role }));
     if (request.profile.role !== 'function.call' && request.profile.role !== 'route.propose') return raw;
     const input = asRecord(request.input);
     return Array.isArray(input.nestedTools)
@@ -125,7 +125,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     if (!connection.apiKey || !connection.baseUrl) throw new ModelProviderError('provider_unavailable');
     // 流式场景直接输出正文（非 JSON 契约），accumulate 全文原样返回，由调用方兜底解析。
     const prompt = this.buildStreamPrompt(request);
-    return await runWithModelLogContext(request.traceId, () => callModelStream({ connection, ...prompt, signal: request.signal }, onDelta, onReasoningDelta));
+    return await runWithModelLogContext(request.traceId, () => callModelStream({ connection, ...prompt, signal: request.signal, modelRole: request.profile.role }, onDelta, onReasoningDelta));
   }
 
   /**

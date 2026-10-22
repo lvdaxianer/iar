@@ -32,21 +32,21 @@ export async function callModelStream(request: ModelTransportRequest, onDelta: (
   const response = await fetchModelResponse(request, true, startTime);
   // 无响应流属于无效响应。
   if (response.body === null) {
-    logModelInvalidResponse(startTime, response.status);
+    logModelInvalidResponse(startTime, response.status, request.modelRole);
     throw new ModelProviderError('provider_failed');
   }
-  const content = await readModelStream(response.body, onDelta, onReasoningDelta, { startTime, signal: request.signal, status: response.status });
+  const content = await readModelStream(response.body, onDelta, onReasoningDelta, { startTime, signal: request.signal, status: response.status, modelRole: request.modelRole });
   // 空流无法生成回复。
   if (content.length === 0) {
-    logModelInvalidResponse(startTime, response.status);
+    logModelInvalidResponse(startTime, response.status, request.modelRole);
     throw new ModelProviderError('provider_failed');
   }
   const structured = parseStructuredResponse(content);
   if (content.trimStart().startsWith('{') && !structured) {
-    logModelInvalidResponse(startTime, response.status);
+    logModelInvalidResponse(startTime, response.status, request.modelRole);
     throw new ModelProviderError('provider_failed');
   }
-  logModelSuccess(startTime, response.status);
+  logModelSuccess(startTime, response.status, request.modelRole);
   return structured ?? content;
 }
 
@@ -61,7 +61,7 @@ export async function callModelStream(request: ModelTransportRequest, onDelta: (
  * @date 2026-10-18
  */
 async function readModelStream(body: ReadableStream<Uint8Array>, onDelta: (delta: string) => void, onReasoningDelta: (delta: string) => void,
-  timing: { startTime: number; signal: AbortSignal; status: number }): Promise<string> {
+  timing: { startTime: number; signal: AbortSignal; status: number; modelRole: string | undefined }): Promise<string> {
   const reader = body.getReader();
   const state: StreamState = { pending: '', chunks: [], onDelta, onReasoningDelta, mode: 'unknown', probe: '' };
   try {
@@ -117,13 +117,13 @@ function isNonEmptyString(value: unknown): value is string {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-19
  */
-function classifyStreamFailure(error: unknown, timing: { startTime: number; signal: AbortSignal; status: number }): Error {
+function classifyStreamFailure(error: unknown, timing: { startTime: number; signal: AbortSignal; status: number; modelRole: string | undefined }): Error {
   // 超限必须继续向上抛出，不能把已有增量当作完整答复。
   if (error instanceof ModelResponseLimitError) {
-    logModelInvalidResponse(timing.startTime, timing.status);
+    logModelInvalidResponse(timing.startTime, timing.status, timing.modelRole);
     return error;
   }
-  logModelNetworkFailure(timing.startTime, timing.signal);
+  logModelNetworkFailure(timing.startTime, timing.signal, timing.modelRole);
   return new ModelProviderError('provider_unavailable');
 }
 

@@ -7,11 +7,13 @@ import { createBilingualLogWriter, createSafeLogSink, formatBilingualLogLine } f
 import { TurnTimingTracker } from '../../../examples/agent-sandbox/src/turn-timing.js';
 
 test('计时追踪器记录总耗时、阶段耗时和首 token 耗时', () => {
-  const values = [100, 115, 120, 145, 160, 190];
+  const values = [100, 115, 120, 125, 150, 155, 160, 190];
   const tracker = new TurnTimingTracker('trace-observability', () => values.shift() ?? 190);
 
   tracker.start('semantic.extract');
   tracker.end('semantic.extract');
+  tracker.start('route.propose');
+  tracker.end('route.propose');
   tracker.start('response.generate');
   tracker.firstToken('response.generate');
   tracker.end('response.generate');
@@ -21,7 +23,8 @@ test('计时追踪器记录总耗时、阶段耗时和首 token 耗时', () => {
     durationMs: 90,
     stages: [
       { stage: 'semantic.extract', status: 'completed', durationMs: 5 },
-      { stage: 'response.generate', status: 'completed', durationMs: 45, firstTokenMs: 15 }
+      { stage: 'route.propose', status: 'completed', durationMs: 25 },
+      { stage: 'response.generate', status: 'completed', durationMs: 35, firstTokenMs: 5 }
     ]
   });
 });
@@ -32,6 +35,7 @@ test('双语日志格式只展示受控摘要，不包含请求正文', () => {
     event: 'iar.turn.stage',
     traceId: 'trace-observability',
     stage: 'response.generate',
+    modelRole: 'response.generate',
     status: 'completed',
     durationMs: 42,
     secretBody: '不要输出我'
@@ -39,6 +43,7 @@ test('双语日志格式只展示受控摘要，不包含请求正文', () => {
 
   assert.match(line, /阶段耗时 \/ Stage timing/);
   assert.match(line, /response\.generate/);
+  assert.match(line, /modelRole=response\.generate/);
   assert.match(line, /status=completed/);
   assert.match(line, /42ms/);
   assert.doesNotMatch(line, /不要输出我/);

@@ -32,9 +32,9 @@ const SAFE_VALUES: Readonly<Record<string, readonly string[]>> = {
     '/api/sessions', '/api/sessions/:sessionId', '/api/sessions/:sessionId/chat', '/api/sessions/:sessionId/confirm',
     '/api/sessions/:sessionId/compact', '/api/sessions/:sessionId/state', '/api/sessions/:sessionId/reset', '/api/sessions/:sessionId/resume',
     '/api/bridge/v1/sessions', '/api/bridge/v1/sessions/:sessionId/input', '/api/bridge/v1/sessions/:sessionId/confirm', '/api/bridge/v1/sessions/:sessionId/state'],
-  stage: ['semantic.extract', 'route.select', 'action.execute', 'response.reasoning', 'response.generate'],
+  stage: ['semantic.extract', 'route.propose', 'route.select', 'action.execute', 'response.reasoning', 'response.generate'],
   status: ['completed', 'failed', 'skipped'],
-  modelRole: ['semantic.extract', 'response.generate'],
+  modelRole: ['semantic.extract', 'route.propose', 'function.call', 'context.compact', 'response.generate'],
   host: ['127.0.0.1'], mode: ['brain', 'scripted'], selection: ['explicit', 'configured', 'fallback']
 };
 /** 允许输出的数字字段。 */
@@ -259,12 +259,14 @@ export function formatBilingualLogLine(record: Record<string, unknown>): string 
   const event = typeof safe.event === 'string' ? safe.event : 'iar.observability';
   const label = event === 'iar.turn.stage' ? '阶段耗时 / Stage timing' : event === 'iar.turn.completed' ? '轮次完成 / Turn completed' : event === 'model.reasoning' ? '模型思考 / Model reasoning' : '运行事件 / Runtime event';
   const stage = typeof safe.stage === 'string' ? ` stage=${safe.stage}` : '';
+  const modelRole = typeof safe.modelRole === 'string' ? ` modelRole=${safe.modelRole}` : '';
+  const outcome = typeof safe.outcome === 'string' ? ` outcome=${safe.outcome}` : '';
   const status = typeof safe.status === 'string' ? ` status=${safe.status}` : '';
   const duration = typeof safe.durationMs === 'number' ? ` duration=${safe.durationMs}ms` : '';
   const firstToken = typeof safe.firstTokenMs === 'number' ? ` firstToken=${safe.firstTokenMs}ms` : '';
   const level = typeof safe.level === 'string' ? safe.level.toUpperCase() : 'INFO';
   const trace = typeof safe.traceId === 'string' ? ` traceId=${safe.traceId}` : '';
-  return `${level} ${label}${stage}${status}${duration}${firstToken}${trace}`;
+  return `${level} ${label}${stage}${modelRole}${status}${outcome}${duration}${firstToken}${trace}`;
 }
 
 /**
@@ -338,13 +340,13 @@ export function registerDebugSignal(): () => void {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function logModelSuccess(startTime: number, status: number): void {
+export function logModelSuccess(startTime: number, status: number, modelRole?: string): void {
   const endTime = Date.now();
   const isSlow = endTime - startTime >= MODEL_SLOW_MS;
   // 未开启调试且调用不慢时无需输出。
   if (!isDebugEnabled && !isSlow) return;
   const context = contexts.getStore() ?? { traceId: randomUUID() };
-  writeSafeLog({ level: isSlow ? 'warn' : 'debug', event: 'model.http', outcome: isSlow ? 'slow' : 'success', ...context,
+  writeSafeLog({ level: isSlow ? 'warn' : 'debug', event: 'model.http', outcome: isSlow ? 'slow' : 'success', ...(modelRole === undefined ? {} : { modelRole }), ...context,
     target: 'model.chat.completions', startTime, endTime, durationMs: endTime - startTime, status });
 }
 
@@ -370,10 +372,10 @@ export function runWithLogContext(context: LogContext, next: () => void): void {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function logModelNetworkFailure(startTime: number, signal: AbortSignal): void {
+export function logModelNetworkFailure(startTime: number, signal: AbortSignal, modelRole?: string): void {
   const isTimeout = signal.aborted && signal.reason instanceof DOMException && signal.reason.name === 'TimeoutError';
   const outcome = isTimeout ? 'timeout' : signal.aborted ? 'aborted' : 'network_error';
-  writeModelFailure(startTime, outcome);
+  writeModelFailure(startTime, outcome, undefined, modelRole);
 }
 
 /**
@@ -385,8 +387,8 @@ export function logModelNetworkFailure(startTime: number, signal: AbortSignal): 
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function logModelHttpFailure(startTime: number, status: number): void {
-  writeModelFailure(startTime, 'http_error', status);
+export function logModelHttpFailure(startTime: number, status: number, modelRole?: string): void {
+  writeModelFailure(startTime, 'http_error', status, modelRole);
 }
 
 /**
@@ -398,8 +400,8 @@ export function logModelHttpFailure(startTime: number, status: number): void {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function logModelInvalidResponse(startTime: number, status: number): void {
-  writeModelFailure(startTime, 'invalid_response', status);
+export function logModelInvalidResponse(startTime: number, status: number, modelRole?: string): void {
+  writeModelFailure(startTime, 'invalid_response', status, modelRole);
 }
 
 /**
@@ -411,9 +413,9 @@ export function logModelInvalidResponse(startTime: number, status: number): void
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-function writeModelFailure(startTime: number, outcome: 'timeout' | 'aborted' | 'network_error' | 'http_error' | 'invalid_response', status?: number): void {
+function writeModelFailure(startTime: number, outcome: 'timeout' | 'aborted' | 'network_error' | 'http_error' | 'invalid_response', status?: number, modelRole?: string): void {
   const endTime = Date.now();
   const context = contexts.getStore() ?? { traceId: randomUUID() };
-  writeSafeLog({ level: 'warn', event: 'model.http', outcome, ...context, target: 'model.chat.completions',
+  writeSafeLog({ level: 'warn', event: 'model.http', outcome, ...(modelRole === undefined ? {} : { modelRole }), ...context, target: 'model.chat.completions',
     startTime, endTime, durationMs: endTime - startTime, status });
 }

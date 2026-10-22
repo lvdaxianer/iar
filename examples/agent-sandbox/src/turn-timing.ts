@@ -16,7 +16,7 @@ export type TimingStageStatus = 'completed' | 'failed' | 'skipped';
 /**
  * 可观测阶段名称。
  */
-export type TimingStage = 'semantic.extract' | 'route.select' | 'action.execute' | 'response.reasoning' | 'response.generate';
+export type TimingStage = 'semantic.extract' | 'route.propose' | 'route.select' | 'action.execute' | 'response.reasoning' | 'response.generate';
 
 /**
  * 对外公开的阶段耗时摘要。

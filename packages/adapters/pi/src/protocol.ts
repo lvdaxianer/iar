@@ -22,7 +22,7 @@ export type BridgeTimingSummary = {
   traceId: string;
   durationMs: number;
   stages: Array<{
-    stage: 'semantic.extract' | 'route.select' | 'action.execute' | 'response.reasoning' | 'response.generate';
+    stage: 'semantic.extract' | 'route.propose' | 'route.select' | 'action.execute' | 'response.reasoning' | 'response.generate';
     status: 'completed' | 'failed' | 'skipped';
     durationMs: number;
     firstTokenMs?: number;
