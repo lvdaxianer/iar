@@ -7,10 +7,21 @@ import type { ActionDefinition, ActionResult, BehaviorContext } from '@iar/contr
 import type { PluginDescriptor } from '@iar/plugins';
 import { ModelResponseLimitError, trackModelResponseLimit } from './models/model-transport.js';
 import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
-import { resolveSandboxTraceId, writeSafeLog } from './safe-log.js';
+import { logRouteContractFailure, resolveSandboxTraceId, writeSafeLog } from './safe-log.js';
 import type { SandboxSessionReplies } from './session-replies.js';
 import { hasVerifiedFactsForFollowUp } from './session-clarification.js';
-import type { ConfirmResult, OperationKind, PassThroughCapabilityContext, RouteEvidence, TurnResult } from './session-types.js';
+import type { ConfirmResult, ExecuteTurnOutcome, OperationKind, PassThroughCapabilityContext, RouteEvidence, TurnResult } from './session-types.js';
+
+/** 将动作阶段的契约失败投影到公开证据并写入安全诊断日志。 */
+export function applyRouteDiagnostic(evidence: RouteEvidence, traceId: string, outcome: ExecuteTurnOutcome): void {
+  if (outcome.status !== 'clarification' && outcome.status !== 'failed') return;
+  if (outcome.diagnostic === undefined) return;
+  evidence.status = 'clarification';
+  evidence.reasonCode = outcome.diagnostic.reasonCode;
+  if (outcome.diagnostic.expectedOperation !== undefined) evidence.expectedOperation = outcome.diagnostic.expectedOperation;
+  if (outcome.diagnostic.actualOperation !== undefined) evidence.actualOperation = outcome.diagnostic.actualOperation;
+  logRouteContractFailure(traceId, outcome.diagnostic);
+}
 
 /** 构造待确认期间的 bridge 澄清结果。 */
 export function pendingBridgeResult(): TurnResult {

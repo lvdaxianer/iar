@@ -118,7 +118,7 @@ function toConfirmResponse(sessionId: string, result: ConfirmResult): BridgeConf
 
 /** 只公开路由摘要，禁止暴露模型和 Action 输入。 */
 function toRouteEvidence(route: RouteEvidence): BridgeRouteEvidence {
-  return { status: route.status, reasonCode: route.reasonCode, semanticIntent: route.semanticIntent, semanticConfidence: route.semanticConfidence, ...(route.functionId === undefined ? {} : { functionId: route.functionId }), ...(route.pluginId === undefined ? {} : { pluginId: route.pluginId }), ...(route.operationKind === undefined ? {} : { operationKind: route.operationKind }) };
+  return { status: route.status, reasonCode: route.reasonCode, semanticIntent: route.semanticIntent, semanticConfidence: route.semanticConfidence, ...(route.functionId === undefined ? {} : { functionId: route.functionId }), ...(route.pluginId === undefined ? {} : { pluginId: route.pluginId }), ...(route.operationKind === undefined ? {} : { operationKind: route.operationKind }), ...(route.expectedOperation === undefined ? {} : { expectedOperation: route.expectedOperation }), ...(route.actualOperation === undefined ? {} : { actualOperation: route.actualOperation }) };
 }
 
 /** 从公开 pending 摘要去除 Action input。 */

@@ -32,7 +32,7 @@ async function requestJson<T>(url: string, init: RequestInit): Promise<{ respons
 }
 
 test('缺少明确 operation 时动作型语义不会默认生成副作用输入', () => {
-  assert.deepEqual(buildActionInput('ticket.create', {}, '', 'create'), { missing: ['operation'], reasonCode: 'operation_missing' });
+  assert.deepEqual(buildActionInput('ticket.create', {}, '', 'create'), { missing: ['operation'], reasonCode: 'operation_missing', expectedOperation: 'unknown', actualOperation: 'missing' });
 });
 
 test('Function Calling arguments 是 Action 的唯一参数来源，并由 Runtime 补齐 operation', () => {

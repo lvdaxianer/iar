@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { callModelStream } from '../../../examples/agent-sandbox/src/models/model-stream-transport.js';
-import { createBilingualLogWriter, createSafeLogSink, formatBilingualLogLine } from '../../../examples/agent-sandbox/src/safe-log.js';
+import { createBilingualLogWriter, createSafeLogSink, formatBilingualLogLine, logRouteContractFailure } from '../../../examples/agent-sandbox/src/safe-log.js';
 import { TurnTimingTracker } from '../../../examples/agent-sandbox/src/turn-timing.js';
 
 test('计时追踪器记录总耗时、阶段耗时和首 token 耗时', () => {
@@ -59,6 +59,29 @@ test('双语日志写入器将结构化 JSON 转成可读单行', async () => {
   assert.match(output, /阶段耗时 \/ Stage timing/);
   assert.match(output, /route\.select/);
   assert.equal(output.trim().split('\n').length, 1);
+});
+
+test('路由契约失败输出固定双语诊断、expected/actual 和 traceId，不输出自由文本', async () => {
+  let output = '';
+  const restore = (await import('../../../examples/agent-sandbox/src/safe-log.js')).setSafeLogWriterForTesting((buffer, done) => { output += buffer.toString('utf8'); done(null, buffer.length); });
+  try {
+    logRouteContractFailure('123e4567-e89b-12d3-a456-426614174000', {
+      reasonCode: 'operation_conflict', expectedOperation: 'limit', actualOperation: 'stats'
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  } finally {
+    restore();
+  }
+  const formatted = formatBilingualLogLine(JSON.parse(output.trim()) as Record<string, unknown>);
+  assert.match(formatted, /WARN 路由契约失败 \/ Route contract failure/);
+  assert.match(formatted, /reasonCode=operation_conflict/);
+  assert.match(formatted, /expectedOperation=limit/);
+  assert.match(formatted, /actualOperation=stats/);
+  assert.match(formatted, /traceId=/);
+  assert.match(formatted, /操作信息冲突/);
+  assert.match(formatted, /Operation information conflicts/);
+  assert.doesNotMatch(formatted, /模型原始输出/);
 });
 
 test('日志模块先加载后仍能采用随后加载的 pretty 配置', () => {

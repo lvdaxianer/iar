@@ -6,7 +6,7 @@
 
 ## 2. 可观测日志与宿主诊断
 
-- [ ] 2.1 在 `safe-log`、turn failure/timing 结果和 Sandbox/Pi host 诊断展示中增加双语契约错误日志与安全 expected/actual 字段；任务边界仅覆盖日志白名单、reasonCode 传递、Trace 关联和可选 UI 展示，不重新设计路由算法；验证 JSON/pretty 日志、敏感字段排除、Trace 展示和旧成功响应兼容测试通过。
+- [x] 2.1 在 `safe-log`、turn failure/timing 结果和 Sandbox/Pi host 诊断展示中增加双语契约错误日志与安全 expected/actual 字段；任务边界仅覆盖日志白名单、reasonCode 传递、Trace 关联和可选 UI 展示，不重新设计路由算法；验证 JSON/pretty 日志、敏感字段排除、Trace 展示和旧成功响应兼容测试通过。
 
 ## 3. 端到端稳定性验证
 

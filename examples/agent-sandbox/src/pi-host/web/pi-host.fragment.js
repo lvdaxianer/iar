@@ -174,6 +174,8 @@
     document.getElementById('routeReplySource').textContent = PI_HOST_REPLY_SOURCE_META[route.replySource] || route.replySource || '-';
     document.getElementById('routeConfidence').textContent = route.semanticIntent ? route.semanticIntent + '（' + Math.round((route.semanticConfidence || 0) * 100) + '%）' : '-';
     document.getElementById('routeScore').textContent = route.reasonCode || '-';
+    document.getElementById('routeExpected').textContent = route.expectedOperation || '-';
+    document.getElementById('routeActual').textContent = route.actualOperation || '-';
   }
 
   /**

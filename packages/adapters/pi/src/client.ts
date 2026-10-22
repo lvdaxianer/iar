@@ -245,7 +245,14 @@ function validateRoute(value: unknown): BridgeRouteEvidence {
   const record = asRecord(value);
   if (!isBoundedString(record.status, 64) || !isBoundedString(record.reasonCode, 128) || !isBoundedString(record.semanticIntent, 256) || typeof record.semanticConfidence !== 'number' || record.semanticConfidence < 0 || record.semanticConfidence > 1) throw new BridgeClientError('invalid_bridge_response', 'IAR 路由证据无效。', false);
   if (record.operationKind !== undefined && record.operationKind !== 'read' && record.operationKind !== 'action') throw new BridgeClientError('invalid_bridge_response', 'IAR 路由证据无效。', false);
-  return { status: record.status, reasonCode: record.reasonCode, semanticIntent: record.semanticIntent, semanticConfidence: record.semanticConfidence, ...(optionalBounded(record, 'functionId', 256)), ...(optionalBounded(record, 'pluginId', 256)), ...(record.operationKind === undefined ? {} : { operationKind: record.operationKind }) };
+  return { status: record.status, reasonCode: record.reasonCode, semanticIntent: record.semanticIntent, semanticConfidence: record.semanticConfidence, ...(optionalBounded(record, 'functionId', 256)), ...(optionalBounded(record, 'pluginId', 256)), ...(record.operationKind === undefined ? {} : { operationKind: record.operationKind }), ...optionalRouteIdentifier(record, 'expectedOperation'), ...optionalRouteIdentifier(record, 'actualOperation') };
+}
+
+/** 校验契约诊断中的有限操作标识，拒绝自由文本进入 Bridge。 */
+function optionalRouteIdentifier(record: Record<string, unknown>, key: string): Record<string, string> {
+  if (record[key] === undefined) return {};
+  if (typeof record[key] !== 'string' || !/^[A-Za-z0-9_.|:-]{1,256}$/.test(record[key])) throw new BridgeClientError('invalid_bridge_response', 'IAR 路由证据无效。', false);
+  return { [key]: record[key] };
 }
 
 /** 读取路由证据中的可选标识。 */
