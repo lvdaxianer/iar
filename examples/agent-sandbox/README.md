@@ -86,7 +86,7 @@ IAR_SANDBOX_PORT=8788 npm run demo:sandbox
 
 | 字段 | 作用 |
 | --- | --- |
-| `role` | 模型角色：`semantic.extract` / `context.compact` / `response.generate` 使用普通交互模型；`function.select` / `plugin.select` 同时声明 JEV 和 Intent Model profile |
+| `role` | 模型角色：`semantic.extract` / `response.generate` 使用 `deepseek-v4-pro` 普通交互模型；`context.compact` 使用普通交互模型；新主路径的 `function.call` 使用 JEV，未配置 JEV 时使用 Intent Model；旧 `function.select` / `plugin.select` profile 仅为兼容保留 |
 | `decisionBackend` | 决策 profile 的 backend：`jev` 或 `intent-model`；同时存在时 JEV 固定优先 |
 | `provider` | 用哪个 provider：`brain`（普通交互模型）、`intent-model`（Intent Model）或 `mock`（离线确定性决策） |
 | `environment` | 非敏感环境变量名映射：`endpoint` / `apiKey` / `modelId`；变量值不写入 JSON |
@@ -95,7 +95,7 @@ IAR_SANDBOX_PORT=8788 npm run demo:sandbox
 
 接口地址、密钥和可变模型名通过 `environment` 映射从环境变量读取，不进配置文件。配置文件里的其他字符串值仍支持 `"${VAR_NAME}"` 环境变量引用（由 IAR 的 `loadModelProfiles` 在加载时解析，引用的变量未设置会启动报错）；IAR 运行时的 `config/models.yaml` 同样支持该写法。
 
-普通模型和 Intent Model 使用同一 OpenAI-compatible `chat/completions` JSON boundary。Intent Model 由 provider 固定注入 `iar.intent-decision-prompt/v1`，输出仍必须是 `iar.decision/v1`，因此切换 backend 不会改变路由结果结构。
+普通模型、Function Calling 和 Intent Model 使用同一 OpenAI-compatible `chat/completions` JSON boundary。主路径按 `semantic.extract → Plugin proposal → function.call → Action → response.generate` 执行：语义模型只接收 Plugin 描述；Function Calling 只接收已选 Plugin 的 Function tools，并返回 `iar.function-call/v1` 的 Function、Operation 和 arguments。Intent Model 由 provider 固定注入 `iar.intent-decision-prompt/v1`；JEV 未配置时只对 `function.call` 使用 Intent Model，不会静默退回 mock。
 
 没有 API Key 时直接用 `npm run demo:sandbox -- --brain scripted`（或省略参数）即可离线体验。
 

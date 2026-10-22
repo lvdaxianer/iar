@@ -248,7 +248,7 @@ function buildFunctionPrompt(input: Record<string, unknown>): FunctionPrompt {
   const tools = readFunctionTools(input.tools).map(toTransportTool);
   return {
     system: FUNCTION_CALL_SYSTEM_PROMPT,
-    user: JSON.stringify({ currentMessage: input.currentMessage ?? '', behaviorContext: input.behaviorContext ?? {}, recentMessages: input.recentMessages ?? [] }),
+    user: JSON.stringify({ currentMessage: input.currentMessage ?? '', semantic: input.semantic ?? {}, behaviorContext: input.behaviorContext ?? {}, recentMessages: input.recentMessages ?? [] }),
     ...(tools.length > 0 ? { tools, toolChoice: tools.length === 1 ? { type: 'function', function: { name: tools[0]!.function.name } } : 'auto', allowToolCalls: true } : {})
   };
 }

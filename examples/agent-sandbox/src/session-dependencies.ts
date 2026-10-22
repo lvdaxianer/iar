@@ -108,10 +108,35 @@ function readSandboxDecisionBackend(): SandboxDecisionBackend | undefined {
 function createDecisionModelProvider(): ModelProvider {
   // 本地 provider 仅从运行时提供的候选集中选取第一项。
   return { complete: async (request) => {
+    if (request.profile.role === 'function.call') return createScriptedFunctionCall(request.input);
     const input = request.input as { request?: DecisionRequest } & Partial<DecisionRequest>;
     const decision = input.request ?? input as DecisionRequest;
     return { schemaVersion: SCHEMA_VERSIONS.decision, decisionType: decision.decisionType, decisionVersion: decision.decisionVersion,
       status: 'choice', choice: decision.candidates[0]?.candidateId, score: 0.99, reasonCode: 'sandbox.choice',
       candidateIds: decision.candidates.map((candidate) => candidate.candidateId) };
   } };
+}
+
+/** 离线模式模拟 Function Calling：只从 Runtime 提供的工具和 semantic slots 生成参数。 */
+function createScriptedFunctionCall(rawInput: unknown): unknown {
+  const input = asRecord(rawInput);
+  const tools = Array.isArray(input.tools) ? input.tools.filter(isRecord) : [];
+  const semantic = asRecord(input.semantic);
+  const slots = asRecord(semantic.slots);
+  const operation = typeof slots.operation === 'string' ? slots.operation : undefined;
+  const tool = tools.find((item) => operation === undefined || item.operation === operation) ?? tools[0];
+  if (!tool || typeof tool.pluginId !== 'string' || typeof tool.functionId !== 'string' || typeof tool.operation !== 'string') return { schemaVersion: 'iar.function-call/v1', pluginId: '', functionId: '', operation: '', arguments: {}, confidence: 0 };
+  const args: Record<string, unknown> = { operation: tool.operation };
+  const query = typeof slots.query === 'string' ? slots.query : typeof input.currentMessage === 'string' ? input.currentMessage : undefined;
+  if (query) args.query = query;
+  if (isRecord(slots.params)) args.params = slots.params;
+  return { schemaVersion: 'iar.function-call/v1', pluginId: tool.pluginId, functionId: tool.functionId, operation: tool.operation, arguments: args, confidence: 0.99 };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

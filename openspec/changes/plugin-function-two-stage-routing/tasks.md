@@ -14,15 +14,15 @@
 
 ## 3. Sandbox 执行与回复集成
 
-- [ ] 3.1 将 session routing 接入新的 Function Calling adapter，并把模型提出的 arguments 作为唯一 Action 输入来源。
-- [ ] 3.2 保持 query/read 和 self-introduction 的结果进入 `response.generate`，confirmation/form/UI-only 继续跳过回复模型。
-- [ ] 3.3 更新 DeepSeek/JEV/Intent profile、提示词、离线 provider 和相关文档，保留旧 profile 兼容。
+- [x] 3.1 将 session routing 接入新的 Function Calling adapter，并把模型提出的 arguments 作为唯一 Action 输入来源。
+- [x] 3.2 保持 query/read 和 self-introduction 的结果进入 `response.generate`，confirmation/form/UI-only 继续跳过回复模型。
+- [x] 3.3 更新 DeepSeek/JEV/Intent profile、提示词、离线 provider 和相关文档，保留旧 profile 兼容。
 
 ## 4. Verification and audit
 
-- [ ] 4.1 覆盖 Plugin proposal、单/多 Function、错误参数、ownership mismatch、禁用 Plugin、JEV fallback、query 汇总和 side-effect confirmation。
-- [ ] 4.2 运行 focused tests、`npm run build`、完整 `npm test` 和 `openspec validate plugin-function-two-stage-routing --strict`。
-- [ ] 4.3 完成后端可靠性、日志边界、代码审查和计划一致性审计，逐项提交并合并回 `master`，归档 OpenSpec change。
+- [x] 4.1 覆盖 Plugin proposal、单/多 Function、错误参数、ownership mismatch、禁用 Plugin、JEV fallback、query 汇总和 side-effect confirmation。
+- [x] 4.2 运行 focused tests、`npm run build`、完整 `npm test` 和 `openspec validate plugin-function-two-stage-routing --strict`。
+- [x] 4.3 完成后端可靠性、日志边界、代码审查和计划一致性审计，逐项提交并合并回 `master`，归档 OpenSpec change。
 
 ## Workflow follow-up
 

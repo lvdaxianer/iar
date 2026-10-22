@@ -132,7 +132,7 @@ test('function.call transport sends bounded tools and parses a native tool call'
     return new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ type: 'function', function: { name: 'ticket.query', arguments: '{"ticketId":"ticket-1"}' } }] } }] }), { status: 200 });
   };
   try {
-    const result = await new BrainModelProvider().complete(providerRequest({ currentMessage: '查 ticket-1', tools: [tool] }));
+    const result = await new BrainModelProvider().complete(providerRequest({ currentMessage: '查 ticket-1', semantic: { slots: { query: 'ticket-1' } }, tools: [tool] }));
     assert.deepEqual(result, {
       schemaVersion: 'iar.function-call/v1',
       pluginId: 'ticket-plugin',
@@ -143,6 +143,8 @@ test('function.call transport sends bounded tools and parses a native tool call'
     });
     assert.equal(Array.isArray(body?.tools), true);
     assert.deepEqual(body?.tool_choice, { type: 'function', function: { name: 'ticket.query' } });
+    const messages = Array.isArray(body?.messages) ? body.messages as Array<{ role?: string; content?: string }> : [];
+    assert.match(messages.find((message) => message.role === 'user')?.content ?? '', /ticket-1/u);
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnvironment('IAR_TEST_ENDPOINT', previousEndpoint);

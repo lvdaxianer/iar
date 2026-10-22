@@ -5,7 +5,7 @@
 import type { ActionDefinition, BehaviorContext, JsonValue, PluginOperation, SlotValue } from '@iar/contracts';
 import { SELF_INTRODUCTION_FUNCTION_ID, type PluginDescriptor } from '@iar/plugins';
 import type { SemanticActionType, SemanticFrame } from '@iar/runtime';
-import type { RouteResult } from '@iar/runtime';
+import type { FunctionCallProposal, RouteResult } from '@iar/runtime';
 import type { RuleEvaluationFacts } from '@iar/runtime';
 import type { PendingActionSummary, RouteEvidence } from './session-types.js';
 
@@ -39,6 +39,7 @@ export function buildFacts(frame: SemanticFrame): RuleEvaluationFacts {
     slots: frame.slots,
     references: frame.references
   };
+  if (frame.pluginId !== undefined) semantic.pluginId = frame.pluginId;
   if (frame.action !== undefined) semantic.action = frame.action;
   return { semantic };
 }
@@ -95,6 +96,15 @@ export function buildActionInput(functionId: string, slots: Record<string, JsonV
   input.operation = operation.slice(0, 60);
   if (query) input.query = query.slice(0, 500);
   if (params) input.params = params;
+  return { input };
+}
+
+/** 将 Function Calling 的已校验 arguments 转成唯一 Action 输入。 */
+export function buildFunctionCallInput(proposal: FunctionCallProposal): { input: JsonValue } | { missing: string[] } {
+  const input = structuredClone(proposal.arguments) as Record<string, JsonValue>;
+  const declaredOperation = input.operation;
+  if (declaredOperation !== undefined && declaredOperation !== proposal.operation) return { missing: ['operation'] };
+  input.operation = proposal.operation;
   return { input };
 }
 
