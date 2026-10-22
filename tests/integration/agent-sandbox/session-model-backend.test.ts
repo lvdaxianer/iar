@@ -24,6 +24,7 @@ test('sandbox keeps JEV priority when JEV is explicitly configured', async () =>
     const selected = models.registry.list().filter((profile) => profile.role === 'function.select' || profile.role === 'plugin.select');
     assert.ok(selected.length > 0);
     assert.ok(selected.every((profile) => profile.decisionBackend === 'jev'));
+    assert.ok(selected.every((profile) => profile.provider === 'jev'));
   });
 });
 

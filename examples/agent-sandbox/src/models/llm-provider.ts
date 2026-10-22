@@ -25,8 +25,8 @@ import {
   type NestedFunctionToolDefinition
 } from '@iar/runtime';
 import type { JsonValue } from '@iar/contracts';
-import { callModel, type ModelTransportTool } from './model-transport.js';
-import { runWithModelLogContext } from '../safe-log.js';
+import { callModel, cancelModelBody, countModelBytes, type ModelTransportTool } from './model-transport.js';
+import { logModelHttpFailure, logModelInvalidResponse, logModelNetworkFailure, logModelSuccess, runWithModelLogContext } from '../safe-log.js';
 import { callModelStream } from './model-stream-transport.js';
 import { SEMANTIC_SYSTEM_PROMPT, FUNCTION_CALL_SYSTEM_PROMPT, COMPACT_SYSTEM_PROMPT, buildResponseStreamSystemPrompt, buildResponseSystemPrompt,
   buildCompactionUserPrompt, buildResponseUserPrompt, buildSemanticUserPrompt, readString } from './model-input-transport.js';
@@ -172,7 +172,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
-  private resolveConnection(profile: ModelProviderRequest['profile']): { apiKey: string | undefined; baseUrl: string | undefined; model: string } {
+  protected resolveConnection(profile: ModelProviderRequest['profile']): { apiKey: string | undefined; baseUrl: string | undefined; model: string } {
     const environment = profile.environment as ModelProfileEnvironment | undefined;
     const mappedEndpoint = readEnvironment(environment?.endpoint);
     const mappedApiKey = readEnvironment(environment?.apiKey);
@@ -183,6 +183,183 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     return { apiKey, baseUrl: baseUrl?.replace(/\/+$/, ''), model };
   }
 
+}
+
+/**
+ * 真实 JEV System One provider，仅承担有限候选决策，不执行任何 Function。
+ *
+ * JEV 的协议不是 OpenAI Chat Completions：请求使用 state + choice question，
+ * 返回的 typed answer 在这里转换成 IAR 的 iar.decision/v1；最终候选、阈值、
+ * Plugin 所有权和权限仍由 Runtime 的共享校验链负责。
+ *
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-22
+ */
+export class JevModelProvider extends OpenAICompatibleModelProvider {
+  /**
+   * 创建绑定 IAR_JEV_* 环境变量的 JEV provider。
+   *
+   * @param options - 可选的 provider 覆盖配置
+   */
+  public constructor(options: BrainProviderOptions = {}) {
+    super({ ...options, endpointEnv: 'IAR_JEV_ENDPOINT', apiKeyEnv: 'IAR_JEV_API_KEY', modelIdEnv: 'IAR_JEV_MODEL_ID' });
+  }
+
+  /**
+   * 执行一次真实 JEV 决策请求。
+   *
+   * @param request - 已通过 Runtime 校验的决策请求
+   * @returns 公共 DecisionResult
+   */
+  public override async complete(request: ModelProviderRequest): Promise<unknown> {
+    if (request.profile.role !== 'function.select' && request.profile.role !== 'plugin.select') throw new ModelProviderError('provider_failed');
+    const connection = this.resolveConnection(request.profile);
+    if (!connection.apiKey || !connection.baseUrl) throw new ModelProviderError('provider_unavailable');
+    const input = asRecord(request.input);
+    const decision = asRecord(input.request) && Object.hasOwn(input, 'request') ? asRecord(input.request) : input;
+    const candidates = readDecisionCandidates(decision.candidates);
+    if (!decisionTypeIsSelection(decision.decisionType) || typeof decision.decisionVersion !== 'string' || candidates.length === 0) throw new ModelProviderError('provider_failed');
+    const body = {
+      model: connection.model,
+      state: {
+        ...(typeof input.currentMessage === 'string' ? { currentMessage: input.currentMessage } : {}),
+        ...(input.behaviorContext !== undefined ? { behaviorContext: input.behaviorContext } : {}),
+        ...(input.recentMessages !== undefined ? { recentMessages: input.recentMessages } : {})
+      },
+      questions: {
+        route: {
+          type: 'choice',
+          instructions: `从有限候选中选择最符合当前 ${decision.decisionType} 的一个候选；只能返回候选标识，不要创建新候选。`,
+          criteria: Object.fromEntries(candidates.map((candidate) => [candidate.candidateId, candidate.description ?? candidate.candidateId]))
+        }
+      }
+    };
+    const startTime = Date.now();
+    let response: Response;
+    try {
+      response = await fetch(resolveJevEndpoint(connection.baseUrl), {
+        method: 'POST', signal: request.signal,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${connection.apiKey}` },
+        body: JSON.stringify(body)
+      });
+    } catch {
+      logModelNetworkFailure(startTime, request.signal, request.profile.role, 'model.jev.systemone');
+      throw new ModelProviderError('provider_unavailable');
+    }
+    if (!response.ok) {
+      logModelHttpFailure(startTime, response.status, request.profile.role, 'model.jev.systemone');
+      const body = response.body;
+      if (body) cancelModelBody(() => body.cancel());
+      throw new ModelProviderError('provider_failed');
+    }
+    let payload: unknown;
+    try {
+      payload = JSON.parse(await readJevBody(response));
+    } catch {
+      logModelInvalidResponse(startTime, response.status, request.profile.role, 'model.jev.systemone');
+      throw new ModelProviderError('provider_failed');
+    }
+    let result: JsonValue;
+    try {
+      result = normalizeJevDecision(payload, decision, candidates);
+    } catch (error) {
+      logModelInvalidResponse(startTime, response.status, request.profile.role, 'model.jev.systemone');
+      if (error instanceof ModelProviderError) throw error;
+      throw new ModelProviderError('provider_failed');
+    }
+    logModelSuccess(startTime, response.status, request.profile.role, 'model.jev.systemone');
+    return result;
+  }
+}
+
+/**
+ * 解析 JEV endpoint，兼容 base URL、/v1 和完整 /v1/systemone 配置。
+ *
+ * @param baseUrl - profile 解析出的 JEV 基础地址
+ * @returns JEV System One 地址
+ */
+function resolveJevEndpoint(baseUrl: string): string {
+  const normalized = baseUrl.replace(/\/+$/, '');
+  if (normalized.endsWith('/systemone')) return normalized;
+  if (normalized.endsWith('/v1')) return `${normalized}/systemone`;
+  return `${normalized}/v1/systemone`;
+}
+
+/**
+ * 只读取决策请求中已经由 Runtime 校验过的候选字段。
+ *
+ * @param value - 候选输入
+ * @returns 有界候选摘要
+ */
+function readDecisionCandidates(value: unknown): Array<{ candidateId: string; description?: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const candidate = asRecord(item);
+    if (typeof candidate.candidateId !== 'string' || candidate.candidateId.length === 0) return [];
+    return [{ candidateId: candidate.candidateId, ...(typeof candidate.description === 'string' ? { description: candidate.description } : {}) }];
+  });
+}
+
+/**
+ * JEV provider 只允许本地决策的两个选择阶段。
+ *
+ * @param value - 决策类型
+ * @returns 是否为受支持的选择阶段
+ */
+function decisionTypeIsSelection(value: unknown): boolean {
+  return value === 'function.select' || value === 'plugin.select';
+}
+
+/**
+ * 将 JEV typed choice 映射为公共 DecisionResult，候选/阈值仍由下游再次校验。
+ *
+ * @param payload - JEV 返回体
+ * @param decision - 已校验的决策请求
+ * @param candidates - 已校验的候选
+ * @returns 公共 DecisionResult
+ */
+function normalizeJevDecision(payload: unknown, decision: Record<string, unknown>, candidates: readonly { candidateId: string }[]): JsonValue {
+  const answers = asRecord(asRecord(payload).answers);
+  const answer = asRecord(answers.route);
+  const candidateIds = candidates.map((candidate) => candidate.candidateId);
+  const base = {
+    schemaVersion: 'iar.decision/v1',
+    decisionType: decision.decisionType,
+    decisionVersion: decision.decisionVersion,
+    candidateIds
+  };
+  if (answer.type !== 'choice' || typeof answer.choice !== 'string') throw new ModelProviderError('provider_failed');
+  const confidence = typeof answer.confidence === 'number' && Number.isFinite(answer.confidence) ? answer.confidence : 0;
+  return { ...base, status: 'choice', choice: answer.choice, score: confidence, reasonCode: 'jev.choice' } as unknown as JsonValue;
+}
+
+/**
+ * 限制 JEV 响应体大小，避免异常上游响应进入内存。
+ *
+ * @param response - JEV HTTP 响应
+ * @returns 有界响应正文
+ */
+async function readJevBody(response: Response): Promise<string> {
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const chunks: string[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const item = await reader.read();
+      if (item.done) break;
+      size = countModelBytes(size, item.value);
+      chunks.push(decoder.decode(item.value, { stream: true }));
+    }
+    chunks.push(decoder.decode());
+    return chunks.join('');
+  } catch (error) {
+    cancelModelBody(() => reader.cancel());
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 /** 普通交互模型 provider，保留既有 brain 角色的提示词协议。 */

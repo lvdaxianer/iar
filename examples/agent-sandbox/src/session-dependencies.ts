@@ -7,7 +7,7 @@ import { createIarAgent, type IarRuntime, type SelfIntroductionOptions } from '@
 import { PluginHost } from '@iar/plugins';
 import { allSandboxPlugins, sandboxFunctionIds } from './functions/index.js';
 import { assertSandboxKnowledgeBases } from './knowledge/retrieval.js';
-import { BrainModelProvider, IntentModelProvider } from './models/llm-provider.js';
+import { BrainModelProvider, IntentModelProvider, JevModelProvider } from './models/llm-provider.js';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
 import type { SandboxDecisionBackend, SandboxMode } from './session-types.js';
 
@@ -49,8 +49,10 @@ export function createSandboxModels(options: { mode: SandboxMode; decisionBacken
   const brain = options.mode === 'brain' ? new BrainModelProvider() : scripted;
   const decision = createDecisionModelProvider();
   const intent = options.mode === 'brain' ? new IntentModelProvider() : decision;
+  // brain 模式使用真实 JEV System One；scripted 模式才注入离线确定性 provider。
+  const jev = options.mode === 'brain' ? new JevModelProvider() : decision;
   const registry = createSandboxRegistry(options.decisionBackend);
-  const gateway = new ModelGateway({ registry, providers: { brain, mock: decision, 'intent-model': intent } });
+  const gateway = new ModelGateway({ registry, providers: { brain, mock: decision, jev, 'intent-model': intent } });
   const resolver = new DecisionBackendResolver(registry);
   return {
     brain,

@@ -24,6 +24,7 @@
 - [x] 4.3 运行真实模型基线测试并记录 `semantic.extract`、路由提议、执行、`response.generate` 和总耗时的 P50/P95；确认误路由不再触发额外回复模型。
 - [x] 4.4 运行 `openspec validate canonical-function-id-routing --strict`、`npm run lint`、`npm run build` 和 `npm test`，记录结果并完成代码审查。
 - [x] 4.5 修正沙箱决策后端自动选择：JEV 三项配置不完整时只使用 Intent Model，显式选择未配置的 JEV 时 fail-fast，并补充配置隔离回归测试。
+- [x] 4.6 将已配置的 JEV profile 绑定到真实 JEV provider：仅在 JEV 三项连接配置完整时调用 JEV endpoint；未配置 JEV 时继续只调用 Intent Model，不得静默使用本地 mock provider。
 
 > 4.3 的代码侧本地基准已覆盖 1/5/10/20/40 个 Plugin、请求体规模、TTFB、总耗时和 20 次命名参数稳定性；真实模型基线见 `docs/performance/2026-10-22-real-model-baseline.md`。
 

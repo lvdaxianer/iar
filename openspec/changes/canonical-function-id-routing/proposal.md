@@ -13,6 +13,7 @@
 - 只有没有合法 ID、信息不足、能力关闭或模型/桥接失败时才进入兜底回答。
 - 查询类 Function 的结果继续交给 Response Model 汇总；待确认或 UI-only 动作不额外伪造模型回复。
 - 兼容决策路径在 JEV 三项配置不完整时只保留 Intent Model；显式选择未配置的 JEV 时启动即 fail-fast。
+- JEV 三项配置完整时，JEV profile 必须绑定真实 JEV provider；本地 mock 只允许用于离线测试和 scripted 模式，不能冒充生产 JEV。
 - 增加自然语言到规范 ID、错误分类、参数位置、Plugin 关闭和耗时回归测试。
 
 ## Capabilities
