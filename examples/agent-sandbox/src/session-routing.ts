@@ -179,7 +179,8 @@ export class SandboxSessionRouting {
     const functionRecord = resolved.value.functions.get(route.functionId);
     if (!functionRecord) return { status: 'failed', reply: '路由选中的 Plugin 不包含目标 Function。', reasonCode: 'function_unavailable' };
     const built = route.functionId === SELF_INTRODUCTION_FUNCTION_ID ? { input: buildSelfIntroductionInput(this.context.pluginHost.allDescriptors(), this.context.configuration.selfIntroduction.extraPrompt) } : route.functionCallProposal ? buildFunctionCallInput(route.functionCallProposal) : buildActionInput(route.functionId, frame.slots, userText, frame.action, behaviorContext, functionRecord.operations);
-    if ('missing' in built) return { status: 'clarification', reply: `还缺少必要信息（${built.missing.join('、')}），请补充完整后再试。`, reasonCode: 'slots_missing' };
+    if ('reasonCode' in built && built.reasonCode === 'operation_conflict') return { status: 'clarification', reply: '模型返回的操作信息不一致，请重试。', reasonCode: built.reasonCode };
+    if ('missing' in built) return { status: 'clarification', reply: `还缺少必要信息（${built.missing.join('、')}），请补充完整后再试。`, reasonCode: built.reasonCode };
     if (!validateJsonSchemaValue(functionRecord.definition.inputSchema, built.input).ok) return { status: 'clarification', reply: '模型提出的 Function 参数不完整或不符合输入契约，请补充必要信息后再试。', reasonCode: 'function_arguments_invalid' };
     const operationKind = sandboxOperationKind(route.functionId, built.input, functionRecord.operations);
     const action = this.createAction({ runId, functionId: route.functionId, pluginId: route.pluginId, input: built.input, policy: manifest.policy, operations: functionRecord.operations });

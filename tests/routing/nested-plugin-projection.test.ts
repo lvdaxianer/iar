@@ -50,7 +50,7 @@ test('each enabled Plugin is projected as one OpenAI-compatible nested tool', ()
   assert.deepEqual(bindings.find((binding) => binding.pluginId === 'ticket-plugin')?.tool.function.parameters.properties, {
     functionId: { type: 'string', enum: ['ticket'] },
     operation: { type: 'string', enum: ['query', 'create'] },
-    arguments: { type: 'object', additionalProperties: true, description: '必须符合所选 Function 的 inputSchema' }
+    arguments: { type: 'object', additionalProperties: true, description: '只填写所选 Function 的业务参数，必须符合 inputSchema；禁止重复填写 operation' }
   });
 });
 

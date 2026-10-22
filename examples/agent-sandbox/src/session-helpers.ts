@@ -82,16 +82,21 @@ export function buildEvidence(route: RouteResult, frame: SemanticFrame): RouteEv
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function buildActionInput(functionId: string, slots: Record<string, JsonValue>, userText: string, actionType: SemanticActionType = 'unknown', behaviorContext?: BehaviorContext, operations: readonly PluginOperation[] = []): { input: JsonValue } | { missing: string[] } {
-  if (functionId.trim().length === 0) return { missing: ['functionId'] };
-  if (actionType === 'unknown') return { missing: ['actionType'] };
+export type ActionInputBuildResult =
+  | { input: JsonValue }
+  | { missing: string[]; reasonCode: 'function_missing' | 'action_type_missing' | 'operation_missing' | 'query_missing' }
+  | { reasonCode: 'operation_conflict'; expectedOperation: string; actualOperation: string };
+
+export function buildActionInput(functionId: string, slots: Record<string, JsonValue>, userText: string, actionType: SemanticActionType = 'unknown', behaviorContext?: BehaviorContext, operations: readonly PluginOperation[] = []): ActionInputBuildResult {
+  if (functionId.trim().length === 0) return { missing: ['functionId'], reasonCode: 'function_missing' };
+  if (actionType === 'unknown') return { missing: ['actionType'], reasonCode: 'action_type_missing' };
   const rawOperation = stringSlot(slots, 'operation');
   const query = stringSlot(slots, 'query') ?? (userText.length > 0 ? userText : undefined);
   const expectedKind = actionType === 'query' ? 'read' : 'action';
   const operation = chooseCompatibleOperation(operations, rawOperation, expectedKind);
   const params = inheritFactParams(functionId, paramsSlot(slots), behaviorContext);
-  if (!operation) return { missing: ['operation'] };
-  if (operation === 'search' && !query) return { missing: ['query'] };
+  if (!operation) return { missing: ['operation'], reasonCode: 'operation_missing' };
+  if (operation === 'search' && !query) return { missing: ['query'], reasonCode: 'query_missing' };
   const input: Record<string, JsonValue> = {};
   input.operation = operation.slice(0, 60);
   if (query) input.query = query.slice(0, 500);
@@ -100,10 +105,10 @@ export function buildActionInput(functionId: string, slots: Record<string, JsonV
 }
 
 /** 将 Function Calling 的已校验 arguments 转成唯一 Action 输入。 */
-export function buildFunctionCallInput(proposal: FunctionCallProposal): { input: JsonValue } | { missing: string[] } {
+export function buildFunctionCallInput(proposal: FunctionCallProposal): ActionInputBuildResult {
   const input = structuredClone(proposal.arguments) as Record<string, JsonValue>;
   const declaredOperation = input.operation;
-  if (declaredOperation !== undefined && declaredOperation !== proposal.operation) return { missing: ['operation'] };
+  if (declaredOperation !== undefined && declaredOperation !== proposal.operation) return { reasonCode: 'operation_conflict', expectedOperation: proposal.operation, actualOperation: String(declaredOperation) };
   input.operation = proposal.operation;
   return { input };
 }

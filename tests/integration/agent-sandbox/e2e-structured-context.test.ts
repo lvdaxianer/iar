@@ -32,7 +32,7 @@ async function requestJson<T>(url: string, init: RequestInit): Promise<{ respons
 }
 
 test('缺少明确 operation 时动作型语义不会默认生成副作用输入', () => {
-  assert.deepEqual(buildActionInput('ticket.create', {}, '', 'create'), { missing: ['operation'] });
+  assert.deepEqual(buildActionInput('ticket.create', {}, '', 'create'), { missing: ['operation'], reasonCode: 'operation_missing' });
 });
 
 test('Function Calling arguments 是 Action 的唯一参数来源，并由 Runtime 补齐 operation', () => {
@@ -41,7 +41,11 @@ test('Function Calling arguments 是 Action 的唯一参数来源，并由 Runti
     arguments: { query: '模型提取的查询', params: { source: 'model' } }, confidence: 0.99
   };
   assert.deepEqual(buildFunctionCallInput(proposal), { input: { operation: 'search', query: '模型提取的查询', params: { source: 'model' } } });
-  assert.deepEqual(buildFunctionCallInput({ ...proposal, arguments: { operation: 'list', query: '冲突操作' } }), { missing: ['operation'] });
+  assert.deepEqual(buildFunctionCallInput({ ...proposal, arguments: { operation: 'list', query: '冲突操作' } }), {
+    reasonCode: 'operation_conflict',
+    expectedOperation: 'search',
+    actualOperation: 'list'
+  });
 });
 
 test('自由追问可从结构化事实回答并在压缩重启后继续，同时隔离其他会话', async () => {

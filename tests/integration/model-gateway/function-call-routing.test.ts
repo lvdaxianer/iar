@@ -278,6 +278,8 @@ test('nested Function-call transport sends OpenAI tools with thinking disabled',
     const systemMessage = (Array.isArray(body?.messages) ? body.messages : []).find((message) => (message as { role?: string }).role === 'system') as { content?: string } | undefined;
     assert.match(systemMessage?.content ?? '', /逐字复制工具提供的 pluginId、functionId 和 operation/u);
     assert.match(systemMessage?.content ?? '', /不要使用位置参数/u);
+    assert.match(systemMessage?.content ?? '', /operation 只能填写在外层/u);
+    assert.match(systemMessage?.content ?? '', /禁止在 arguments 中重复填写/u);
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnvironment('IAR_TEST_ENDPOINT', previousEndpoint);
