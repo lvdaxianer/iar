@@ -10,7 +10,7 @@ import type { JsonValue } from '@iar/contracts';
 import type { ModelGatewayInvocationOptions } from './types.js';
 
 /** 支持后端解析的决策 role。 */
-export type DecisionBackendRole = 'function.select' | 'plugin.select';
+export type DecisionBackendRole = 'function.call' | 'function.select' | 'plugin.select';
 
 /** 决策后端解析结果。 */
 export type DecisionBackendResolution = {
@@ -101,7 +101,7 @@ export function resolveFallbackProfile(registry: ModelProfileRegistry, primary: 
 /** 解析显式跨 backend fallback 的另一条 primary profile。 @param registry - profile registry @param primary - 已选 primary @returns 另一 backend 的 primary 或 undefined @author lvdaxianer@yeah.net @date 2026-10-17 */
 export function resolveCrossBackendProfile(registry: ModelProfileRegistry, primary: ModelProfile): ModelProfile | undefined {
   // 只有 Function/Plugin decision role 才有平行 backend，其他 role 不允许跨 role 猜测。
-  if (primary.role !== 'function.select' && primary.role !== 'plugin.select') return undefined;
+  if (primary.role !== 'function.call' && primary.role !== 'function.select' && primary.role !== 'plugin.select') return undefined;
   const backend = resolveDecisionBackend(primary, primary.role);
   const alternate = backend === 'jev' ? 'intent-model' : backend === 'intent-model' ? 'jev' : undefined;
   return alternate ? resolvePrimaryProfileByBackend(registry.list(), primary.role, alternate) : undefined;
@@ -112,7 +112,7 @@ export function resolveDecisionBackend(profile: ModelProfile, role: ModelRole): 
   // 显式字段优先，避免 Intent Model 被 legacy 默认覆盖。
   if (profile.decisionBackend) return profile.decisionBackend;
   // 缺失字段只对旧 selection profile 默认兼容为 JEV。
-  return role === 'function.select' || role === 'plugin.select' ? 'jev' : undefined;
+  return role === 'function.call' || role === 'function.select' || role === 'plugin.select' ? 'jev' : undefined;
 }
 
 /** 创建决策 role 的严格白名单审计摘要。 @param profile - 已选 profile @param input - 已冻结 provider 输入 @param reason - 稳定失败原因 @returns 不含请求正文的审计摘要 @author lvdaxianer@yeah.net @date 2026-10-17 */

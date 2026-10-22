@@ -5,6 +5,7 @@
  * @date 2026-10-18
  */
 import { ModelProviderError } from '@iar/runtime';
+import type { JsonValue } from '@iar/contracts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { logModelHttpFailure, logModelInvalidResponse, logModelNetworkFailure, logModelSuccess } from '../safe-log.js';
 
@@ -14,9 +15,17 @@ export type ModelTransportRequest = {
   system: string;
   user: string;
   signal: AbortSignal;
+  /** OpenAI-compatible Function tools，仅由 function.call 使用。 */
+  tools?: readonly ModelTransportTool[];
+  /** Function-call 工具选择策略。 */
+  toolChoice?: JsonValue;
+  /** 是否允许响应使用原生 tool_calls。 */
+  allowToolCalls?: boolean;
 };
 /** 响应内容的最小形状。 */
-type CompletionResponse = { choices?: Array<{ message?: { content?: unknown } }> };
+type CompletionResponse = { choices?: Array<{ message?: { content?: unknown; tool_calls?: unknown } }> };
+/** OpenAI-compatible 工具请求的最小安全形状。 */
+export type ModelTransportTool = { type: 'function'; function: { name: string; description: string; parameters: JsonValue } };
 /** 温度与已有模型配置保持一致。 */
 const TEMPERATURE = 0.2;
 /** 模型 HTTP 响应的累计原始字节上限，包括 SSE 帧。 */
@@ -121,7 +130,8 @@ function createFetchOptions(request: ModelTransportRequest, isStream: boolean): 
   return { method: 'POST', signal: request.signal,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${request.connection.apiKey}` },
     body: JSON.stringify({ model: request.connection.model, temperature: TEMPERATURE,
-      ...(isStream ? { stream: true } : { response_format: { type: 'json_object' } }),
+      ...(isStream ? { stream: true } : request.allowToolCalls ? {} : { response_format: { type: 'json_object' } }),
+      ...(request.tools ? { tools: request.tools } : {}), ...(request.toolChoice ? { tool_choice: request.toolChoice } : {}),
       messages: [{ role: 'system', content: request.system }, { role: 'user', content: request.user }] }) };
 }
 
@@ -136,38 +146,22 @@ function createFetchOptions(request: ModelTransportRequest, isStream: boolean): 
 export async function callModel(request: ModelTransportRequest): Promise<unknown> {
   const startTime = Date.now();
   const response = await fetchModelResponse(request, false, startTime);
-  const content = await readModelContent(response, { startTime, signal: request.signal });
+  const body = await readModelBody(response, { startTime, signal: request.signal });
   try {
+    const payload = JSON.parse(body) as CompletionResponse;
+    const toolCalls = payload.choices?.[0]?.message?.tool_calls;
+    if (request.allowToolCalls && Array.isArray(toolCalls) && toolCalls.length > 0) {
+      logModelSuccess(startTime, response.status);
+      return { toolCalls };
+    }
+    const content = payload.choices?.[0]?.message?.content;
+    if (typeof content !== 'string' || content.length === 0) throw new ModelProviderError('provider_failed');
     const result = JSON.parse(content) as unknown;
     logModelSuccess(startTime, response.status);
     return result;
   } catch {
     // 响应正文格式无效时不记录其内容。
     logModelInvalidResponse(startTime, response.status);
-    throw new ModelProviderError('provider_failed');
-  }
-}
-
-/**
- * 从普通 HTTP 响应中读取模型正文。
- *
- * @param response - 模型 HTTP 响应
- * @param timing - 调用开始时间和取消信号
- * @returns 非空模型正文
- * @author lvdaxianer@yeah.net
- * @date 2026-10-18
- */
-async function readModelContent(response: Response, timing: { startTime: number; signal: AbortSignal }): Promise<string> {
-  const body = await readModelBody(response, timing);
-  try {
-    const payload = JSON.parse(body) as CompletionResponse;
-    const content = payload.choices?.[0]?.message?.content;
-    // 缺少正文按无效响应处理。
-    if (typeof content !== 'string' || content.length === 0) throw new ModelProviderError('provider_failed');
-    return content;
-  } catch {
-    // 读取成功后，仅正文解析或结构错误属于无效响应。
-    logModelInvalidResponse(timing.startTime, response.status);
     throw new ModelProviderError('provider_failed');
   }
 }

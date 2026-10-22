@@ -18,14 +18,15 @@ import {
   INTENT_DECISION_PROMPT_VERSION,
   INTENT_DECISION_SYSTEM_PROMPT,
   ModelProviderError,
+  type FunctionToolDefinition,
   type ModelProfileEnvironment,
   type ModelProvider,
   type ModelProviderRequest
 } from '@iar/runtime';
-import { callModel } from './model-transport.js';
+import { callModel, type ModelTransportTool } from './model-transport.js';
 import { runWithModelLogContext } from '../safe-log.js';
 import { callModelStream } from './model-stream-transport.js';
-import { SEMANTIC_SYSTEM_PROMPT, COMPACT_SYSTEM_PROMPT, buildResponseStreamSystemPrompt, buildResponseSystemPrompt,
+import { SEMANTIC_SYSTEM_PROMPT, FUNCTION_CALL_SYSTEM_PROMPT, COMPACT_SYSTEM_PROMPT, buildResponseStreamSystemPrompt, buildResponseSystemPrompt,
   buildCompactionUserPrompt, buildResponseUserPrompt, buildSemanticUserPrompt, readString } from './model-input-transport.js';
 
 /** brain provider 的可注入配置。 */
@@ -95,7 +96,8 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     const connection = this.resolveConnection(request.profile);
     if (!connection.apiKey || !connection.baseUrl) throw new ModelProviderError('provider_unavailable');
     const prompt = this.buildPrompt(request);
-    return await runWithModelLogContext(request.traceId, () => callModel({ connection, ...prompt, signal: request.signal }));
+    const raw = await runWithModelLogContext(request.traceId, () => callModel({ connection, ...prompt, signal: request.signal }));
+    return request.profile.role === 'function.call' ? normalizeFunctionCallResult(raw, readFunctionTools(asRecord(request.input).tools)) : raw;
   }
 
   /**
@@ -144,8 +146,9 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
-  protected buildPrompt(request: ModelProviderRequest): { system: string; user: string } {
+  protected buildPrompt(request: ModelProviderRequest): FunctionPrompt {
     const input = asRecord(request.input);
+    if (request.profile.role === 'function.call') return buildFunctionPrompt(input);
     if (request.profile.role === 'semantic.extract') {
       return { system: SEMANTIC_SYSTEM_PROMPT, user: buildSemanticUserPrompt(input) };
     }
@@ -228,12 +231,62 @@ export class IntentModelProvider extends OpenAICompatibleModelProvider {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
-  protected override buildPrompt(request: ModelProviderRequest): { system: string; user: string } {
+  protected override buildPrompt(request: ModelProviderRequest): FunctionPrompt {
+    if (request.profile.role === 'function.call') return super.buildPrompt(request);
     return {
       system: `${INTENT_DECISION_SYSTEM_PROMPT}\nPrompt version: ${INTENT_DECISION_PROMPT_VERSION}`,
       user: JSON.stringify({ promptVersion: INTENT_DECISION_PROMPT_VERSION, input: request.input })
     };
   }
+}
+
+/** 普通模型提示词以及可选的原生工具参数。 */
+type FunctionPrompt = { system: string; user: string; tools?: readonly ModelTransportTool[]; toolChoice?: { type: 'function'; function: { name: string } } | 'auto'; allowToolCalls?: boolean };
+
+/** 构造 Function-call 的有界工具请求。 */
+function buildFunctionPrompt(input: Record<string, unknown>): FunctionPrompt {
+  const tools = readFunctionTools(input.tools).map(toTransportTool);
+  return {
+    system: FUNCTION_CALL_SYSTEM_PROMPT,
+    user: JSON.stringify({ currentMessage: input.currentMessage ?? '', behaviorContext: input.behaviorContext ?? {}, recentMessages: input.recentMessages ?? [] }),
+    ...(tools.length > 0 ? { tools, toolChoice: tools.length === 1 ? { type: 'function', function: { name: tools[0]!.function.name } } : 'auto', allowToolCalls: true } : {})
+  };
+}
+
+/** 把安装工具定义转换为 OpenAI-compatible 工具形状。 */
+function toTransportTool(tool: FunctionToolDefinition): ModelTransportTool {
+  return { type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } };
+}
+
+/** 读取输入中的已安装工具快照，不接受模型提供的工具定义。 */
+function readFunctionTools(value: unknown): FunctionToolDefinition[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isFunctionTool).map((tool) => structuredClone(tool));
+}
+
+/** 将原生 tool call 归一化为公共 Function-call 提案。 */
+function normalizeFunctionCallResult(raw: unknown, tools: readonly FunctionToolDefinition[]): unknown {
+  if (!isRecord(raw) || !Array.isArray(raw.toolCalls)) return raw;
+  const call = raw.toolCalls[0];
+  if (!isRecord(call) || !isRecord(call.function) || typeof call.function.name !== 'string' || typeof call.function.arguments !== 'string') throw new ModelProviderError('provider_failed');
+  const functionName = call.function.name;
+  const argumentsText = call.function.arguments;
+  const tool = tools.find((item) => item.name === functionName);
+  if (!tool) throw new ModelProviderError('provider_failed');
+  let args: unknown;
+  try { args = JSON.parse(argumentsText); } catch { throw new ModelProviderError('provider_failed'); }
+  if (!isRecord(args)) throw new ModelProviderError('provider_failed');
+  return { schemaVersion: 'iar.function-call/v1', pluginId: tool.pluginId, functionId: tool.functionId, operation: tool.operation ?? 'read', arguments: args, confidence: 1 };
+}
+
+/** 检查工具是否满足 Runtime 交给 provider 的最小快照。 */
+function isFunctionTool(value: unknown): value is FunctionToolDefinition {
+  return isRecord(value) && typeof value.name === 'string' && typeof value.pluginId === 'string' && typeof value.functionId === 'string' && typeof value.description === 'string' && Object.hasOwn(value, 'parameters');
+}
+
+/** 判断未知值是否为普通对象。 */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** 读取 profile 声明的环境变量名对应的非空值。 */
