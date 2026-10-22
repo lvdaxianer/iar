@@ -22,8 +22,8 @@
 
 ## 5. 观测、兼容和回归测试
 
-- [ ] 5.1 为 nested route 增加 traceId、阶段耗时、模型调用次数和超时分类的日志/Timing 输出；验证日志不包含 prompt、response、token 或 API key，前端仍显示总耗时与 traceId。
-- [ ] 5.2 增加 1/5/10/20/40 Plugin 规模基准和 20 组参数位置准确性测试；验证请求规模、TTFB、总耗时、成功率和参数正确率可复现记录。
+- [x] 5.1 为 nested route 增加 traceId、阶段耗时、模型调用次数和超时分类的日志/Timing 输出；验证日志不包含 prompt、response、token 或 API key，前端仍显示总耗时与 traceId。
+- [x] 5.2 增加 1/5/10/20/40 Plugin 规模基准和 20 组参数位置准确性测试；验证请求规模、TTFB、总耗时、成功率和参数正确率可复现记录。
 
 ## 6. 文档与配置迁移
 
