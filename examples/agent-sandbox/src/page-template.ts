@@ -47,8 +47,9 @@ export function loadPiHostPage(): string {
   const template = readFileSync(join(pageDir, 'index.html'), 'utf8');
   const styles = readFileSync(join(sharedDir, 'styles.css'), 'utf8');
   const shared = PI_HOST_SHARED_PARTS.map((part) => readFileSync(join(sharedDir, part), 'utf8')).join('');
+  const context = readFileSync(join(pageDir, 'pi-host-context.fragment.js'), 'utf8');
   const adapter = readFileSync(join(pageDir, 'pi-host.fragment.js'), 'utf8');
-  const script = `'use strict';\n{\n${shared}${adapter}}\n`;
+  const script = `'use strict';\n{\n${shared}${context}${adapter}}\n`;
   const html = replaceMarker(replaceMarker(template, PI_HOST_STYLE_MARKER, `<style>${styles}</style>`), PI_HOST_SCRIPT_MARKER, `<script>${script}</script>`);
   if (!html.includes('id="messages"')) throw new Error('Pi host 演示页面模板无效。');
   return html;

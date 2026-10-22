@@ -18,6 +18,8 @@
   let piHostBubble = null;
   let piHostPendingRoute = null;
   let piHostPendingTiming = null;
+  let piHostPendingConfirm = null;
+  let piHostSessionInfo = null;
   let piHostExpectingEntry = false;
   let piHostEventSource = null;
   let piHostEvents = [];
@@ -199,6 +201,58 @@
    */
   function updatePiHostClientTiming() {
     if (piHostTurnStartedAt > 0) document.getElementById('timingClientTotal').textContent = (Date.now() - piHostTurnStartedAt) + 'ms';
+  }
+
+  /** 更新结构化上下文复制状态；状态使用 aria-live 对键盘和辅助技术可见。
+   * @param message - 要展示给用户的状态文字
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-22
+   */
+  function setPiHostContextCopyStatus(message) {
+    document.getElementById('contextCopyStatus').textContent = message;
+  }
+
+  /** 生成当前页面可复制的脱敏结构化上下文文本。
+   * @returns 格式化后的结构化 JSON
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-22
+   */
+  function buildPiHostContextText() {
+    return JSON.stringify(buildPiHostContextSnapshot({ session: { sessionId: piHostSessionId, mode: piHostSessionInfo && piHostSessionInfo.mode, bridgeUrl: piHostSessionInfo && piHostSessionInfo.bridgeUrl }, route: piHostPendingRoute, timing: piHostPendingTiming, pending: piHostPendingConfirm, events: piHostEvents }), null, 2);
+  }
+
+  /** 使用隐藏文本框兼容不支持 Clipboard API 的本地浏览器。
+   * @param text - 要复制的文本
+   * @returns 是否复制成功
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-22
+   */
+  function copyPiHostContextFallback(text) {
+    var textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    var copied = document.execCommand('copy');
+    textarea.remove();
+    return copied;
+  }
+
+  /** 复制版本化脱敏快照，并在页面上反馈成功或失败。
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-22
+   */
+  function copyPiHostContext() {
+    var text = buildPiHostContextText();
+    var copyPromise = navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(text) : Promise.resolve(copyPiHostContextFallback(text));
+    copyPromise.then(function (copied) {
+      if (copied === false) throw new Error('copy_failed');
+      setPiHostContextCopyStatus('已复制结构化上下文');
+    }).catch(function () { setPiHostContextCopyStatus('复制失败，请检查浏览器剪贴板权限'); });
   }
 
   /** 创建 Pi Agent 流式气泡，带 Thinking 指示器（三点动画）；
@@ -430,6 +484,7 @@
     var connBadge = document.getElementById('connBadge');
     es.addEventListener('ready', function (event) {
       var info = JSON.parse(event.data);
+      piHostSessionInfo = { mode: info.mode, bridgeUrl: info.bridgeUrl };
       var brain = info.mode === 'brain';
       var modeBadge = document.getElementById('modeBadge');
       modeBadge.textContent = brain ? 'brain real · 真实 LLM' : 'brain scripted · 离线假大脑';
@@ -460,6 +515,7 @@
     });
     es.addEventListener('confirm', function (event) {
       var pending = JSON.parse(event.data);
+      piHostPendingConfirm = pending;
       if (pending) { showPiHostConfirmBox(pending); recordPiHostEvent('确认', '等待 ' + pending.actionId); }
       else { clearPiHostConfirmBoxes(); recordPiHostEvent('确认', '已清空'); }
     });
@@ -488,6 +544,8 @@
   function resetPiHostDebugPanel() {
     piHostPendingRoute = null;
     piHostPendingTiming = null;
+    piHostPendingConfirm = null;
+    piHostSessionInfo = null;
     piHostEvents = [];
     document.getElementById('eventList').innerHTML = '';
     document.getElementById('sessionJson').textContent = '{}';
@@ -496,6 +554,7 @@
     document.getElementById('timingTraceId').textContent = '-';
     document.getElementById('timingClientTotal').textContent = '-';
     document.getElementById('timingList').innerHTML = '';
+    setPiHostContextCopyStatus('');
     highlightPiHostFlow([]);
   }
 
@@ -537,6 +596,7 @@
     submitPiHostTurn(text);
   };
   document.getElementById('clearSessionBtn').onclick = clearPiHostSession;
+  document.getElementById('copyContextBtn').onclick = copyPiHostContext;
   if (readPiHostHistory().length === 0) {
     appendMsg('bot', PI_HOST_WELCOME);
   } else {

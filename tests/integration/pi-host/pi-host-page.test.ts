@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import test from 'node:test';
 import { loadPiHostPage } from '../../../examples/agent-sandbox/src/page-template.js';
 
@@ -18,6 +19,8 @@ test('Pi host 页面模板占位符独立且唯一', () => {
   assert.match(template, /<!-- IAR_PI_HOST_STYLES -->/);
   assert.match(template, /<!-- IAR_PI_HOST_SCRIPT -->/);
   assert.match(template, /id="clearSessionBtn"/);
+  assert.match(template, /id="copyContextBtn"/);
+  assert.match(template, /id="contextCopyStatus"/);
   assert.doesNotMatch(template, /IAR_SANDBOX_(?:STYLES|SCRIPT)/);
 });
 
@@ -31,6 +34,26 @@ test('Pi host 页面复用沙箱同源样式与 Markdown 片段', () => {
   assert.ok(page.includes(markdown));
   assert.ok(page.includes('function renderMarkdown(src)'));
   assert.ok(page.includes('function renderPiHostEntry(entry)'));
+  assert.ok(page.includes('function buildPiHostContextSnapshot(input)'));
+});
+
+/* 复制内容只允许进入脱敏快照：调试字段采用白名单，禁止把模型输入输出和动作参数带出页面。 */
+test('Pi host 结构化上下文快照版本化且不含敏感字段', () => {
+  const source = readFileSync(join(PAGE_DIR, 'pi-host-context.fragment.js'), 'utf8');
+  const build = runInNewContext(`${source}\nbuildPiHostContextSnapshot`) as (input: unknown) => Record<string, unknown>;
+  const snapshot = build({
+    session: { sessionId: 'session-1', mode: 'brain', bridgeUrl: 'http://127.0.0.1:8787', apiKey: 'secret' },
+    route: { functionId: 'ticket.read', pluginId: 'ticket-v1', disposition: 'handled', semanticIntent: '查询工单', semanticConfidence: 0.9, prompt: '用户原话' },
+    timing: { traceId: 'trace-1', durationMs: 1234, stages: [{ stage: 'response.generate', durationMs: 999, rawPrompt: 'secret' }] },
+    pending: { actionId: 'action-1', runId: 'run-1', functionId: 'ticket.create', pluginId: 'ticket-v1', riskLevel: 'high', input: { title: '不要复制' } },
+    events: [{ name: '路由', detail: 'handled' }, { name: '通知', detail: '不要复制用户内容' }],
+  });
+  assert.equal(snapshot.schemaVersion, 'iar.pi-host-context/v1');
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot.route)), { functionId: 'ticket.read', pluginId: 'ticket-v1', disposition: 'handled', operationKind: '-', replySource: '-' });
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot.timing)), { traceId: 'trace-1', durationMs: 1234, stages: [{ stage: 'response.generate', durationMs: 999, firstTokenMs: null }] });
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot.pending)), { actionId: 'action-1', runId: 'run-1', functionId: 'ticket.create', pluginId: 'ticket-v1', riskLevel: 'high' });
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot.events)), [{ name: '路由', detail: 'handled' }, { name: '通知', detail: '-' }]);
+  assert.doesNotMatch(JSON.stringify(snapshot), /prompt|apiKey|rawPrompt|reasoning|input|不要复制/);
 });
 
 /* 首页响应必须自包含：无残留标记、无外链脚本样式，
@@ -97,4 +120,6 @@ test('Pi host 页面交互入口按职责拆分且有界', () => {
     assert.ok(method[0].split('\n').length <= 20, `${name} 为 ${method[0].split('\n').length} 行`);
   }
   assert.match(adapter, /clearSessionBtn'\)\.onclick = clearPiHostSession/);
+  assert.match(adapter, /copyContextBtn'\)\.onclick = copyPiHostContext/);
+  assert.match(adapter, /navigator\.clipboard/);
 });
