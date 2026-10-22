@@ -107,6 +107,38 @@ test('IAR bridge client rejects malformed responses and normalizes timeout failu
   await assert.rejects(() => timedOut.input('iar-1', '普通问题'), (error: unknown) => error instanceof BridgeClientError && error.code === 'bridge_timeout' && error.retryable);
 });
 
+test('IAR bridge client applies the environment timeout when no explicit timeout is supplied', async () => {
+  const previousTimeout = process.env.IAR_PI_BRIDGE_TIMEOUT_MS;
+  process.env.IAR_PI_BRIDGE_TIMEOUT_MS = '5';
+  let signal: AbortSignal | null | undefined;
+  try {
+    const client = new IarBridgeClient({
+      baseUrl: 'http://iar.test',
+      fetch: async (_input, options) => {
+        signal = options?.signal;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        return Response.json({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-1', disposition: 'pass_through' });
+      }
+    });
+    await client.input('iar-1', '普通问题');
+    assert.equal(signal?.aborted, true);
+  } finally {
+    if (previousTimeout === undefined) delete process.env.IAR_PI_BRIDGE_TIMEOUT_MS;
+    else process.env.IAR_PI_BRIDGE_TIMEOUT_MS = previousTimeout;
+  }
+});
+
+test('IAR bridge client rejects an invalid environment timeout at construction', () => {
+  const previousTimeout = process.env.IAR_PI_BRIDGE_TIMEOUT_MS;
+  process.env.IAR_PI_BRIDGE_TIMEOUT_MS = 'not-a-duration';
+  try {
+    assert.throws(() => new IarBridgeClient({ baseUrl: 'http://iar.test' }), (error: unknown) => error instanceof BridgeClientError && error.code === 'invalid_bridge_timeout');
+  } finally {
+    if (previousTimeout === undefined) delete process.env.IAR_PI_BRIDGE_TIMEOUT_MS;
+    else process.env.IAR_PI_BRIDGE_TIMEOUT_MS = previousTimeout;
+  }
+});
+
 test('IAR bridge client preserves stable server error codes', async () => {
   const client = new IarBridgeClient({
     baseUrl: 'http://iar.test',

@@ -238,6 +238,7 @@ test('function.call transport sends bounded tools and parses a native tool call'
     });
     assert.equal(Array.isArray(body?.tools), true);
     assert.deepEqual(body?.tool_choice, { type: 'function', function: { name: 'ticket.query' } });
+    assert.deepEqual(body?.thinking, { type: 'disabled' });
     const messages = Array.isArray(body?.messages) ? body.messages as Array<{ role?: string; content?: string }> : [];
     assert.match(messages.find((message) => message.role === 'user')?.content ?? '', /ticket-1/u);
   } finally {

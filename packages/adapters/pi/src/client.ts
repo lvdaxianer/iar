@@ -9,6 +9,7 @@ import { PI_BRIDGE_VERSION, isBridgeDisposition, isBridgeReplySource, type Bridg
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_TIMEOUT_MS = 60_000;
+const BRIDGE_TIMEOUT_ENV = 'IAR_PI_BRIDGE_TIMEOUT_MS';
 
 /** Fetch 的最小可替换接口，便于测试和宿主注入网络实现。 */
 export type BridgeFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -75,7 +76,7 @@ export class IarBridgeClient {
     if (!/^https?:\/\/[^\s/]+(?:\/.*)?$/.test(options.baseUrl)) throw new BridgeClientError('invalid_bridge_url', 'IAR 桥接地址无效。', false);
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.fetchImpl = options.fetch ?? fetch;
-    this.timeoutMs = normalizeTimeout(options.timeoutMs);
+    this.timeoutMs = normalizeTimeout(options.timeoutMs ?? readConfiguredTimeout());
     this.logger = options.logger;
   }
 
@@ -152,6 +153,12 @@ export class IarBridgeClient {
       throw normalized;
     }
   }
+}
+
+/** 读取宿主配置的 Bridge 默认超时；显式 constructor 配置优先。 */
+function readConfiguredTimeout(): number | undefined {
+  const value = process.env[BRIDGE_TIMEOUT_ENV];
+  return value === undefined ? undefined : Number(value);
 }
 
 /** 构造固定 JSON 请求配置。 */

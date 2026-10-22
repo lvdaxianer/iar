@@ -158,6 +158,24 @@ test('normal provider resolves endpoint, API key, and model ID from profile envi
     assert.equal(body.model, 'normal-env-model');
     assert.deepEqual(body.response_format, { type: 'json_object' });
     assert.deepEqual(body.messages.map((message) => message.role), ['system', 'user']);
+    assert.deepEqual((body as typeof body & { thinking?: unknown }).thinking, { type: 'disabled' });
+  } finally {
+    fetchStub.restore();
+    restoreEnvironment();
+  }
+});
+
+test('response generation does not inherit the extraction disabled-thinking policy', async () => {
+  const restoreEnvironment = setEnvironment({
+    IAR_TEST_NORMAL_ENDPOINT: 'https://normal.example/v1',
+    IAR_TEST_NORMAL_API_KEY: 'normal-secret',
+    IAR_TEST_NORMAL_MODEL: 'normal-env-model'
+  });
+  const fetchStub = installFetch({ choices: [{ message: { content: '{"ok":true}' } }] });
+  try {
+    await new BrainModelProvider().complete(request(normalProfile({ role: 'response.generate' })));
+    const body = JSON.parse(String(fetchStub.requests[0]?.init?.body)) as { thinking?: unknown };
+    assert.equal(body.thinking, undefined);
   } finally {
     fetchStub.restore();
     restoreEnvironment();
@@ -179,6 +197,10 @@ test('Intent Model provider uses independent mappings and fixed decision prompt'
     assert.equal(body.model, 'intent-env-model');
     assert.deepEqual(body.response_format, { type: 'json_object' });
     assert.match(body.messages[0]?.content ?? '', /iar\.intent-decision-prompt\/v1/);
+    assert.deepEqual((body as typeof body & { thinking?: unknown }).thinking, { type: 'disabled' });
+    await new IntentModelProvider().complete(request(intentProfile({ role: 'plugin.select' })));
+    const pluginBody = JSON.parse(String(fetchStub.requests[1]?.init?.body)) as { thinking?: unknown };
+    assert.deepEqual(pluginBody.thinking, { type: 'disabled' });
   } finally {
     fetchStub.restore();
     restoreEnvironment();
