@@ -6,12 +6,12 @@
  * @date 2026-10-20
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { BridgeConfirmResponse, BridgeInputResponse, BridgeOpenRequest, BridgeOpenResponse, BridgePendingAction, BridgeRouteEvidence, BridgeStateResponse } from '@iar/pi-bridge';
+import type { BridgeConfirmResponse, BridgeInputResponse, BridgeInputStreamEvent, BridgeOpenRequest, BridgeOpenResponse, BridgePendingAction, BridgeRouteEvidence, BridgeStateResponse } from '@iar/pi-bridge';
 import { PI_BRIDGE_VERSION } from '@iar/pi-bridge';
 import { readSessionId, type RunOperation } from './http-reservation.js';
 import { SandboxSessionManager, SessionError } from './session-manager.js';
 import type { IarSandboxSession } from './session.js';
-import type { ConfirmResult, RouteEvidence, TurnResult } from './session-types.js';
+import type { ConfirmResult, RouteEvidence, StreamEvent, TurnResult } from './session-types.js';
 
 const BRIDGE_PREFIX = '/api/bridge/v1';
 const MAX_PI_SESSION_ID_LENGTH = 512;
@@ -27,6 +27,7 @@ export function registerPiBridgeRoutes(app: FastifyInstance, manager: SandboxSes
     return reply.code(opened.resumed ? 200 : 201).send(opened);
   }));
   app.post(`${BRIDGE_PREFIX}/sessions/:sessionId/input`, async (request, reply) => handleBridge(reply, async () => run(request, 'mutate', (session) => handleInput(session, request, readSessionId(request)!))));
+  app.post(`${BRIDGE_PREFIX}/sessions/:sessionId/input/stream`, async (request, reply) => streamInput(request, reply, run));
   app.post(`${BRIDGE_PREFIX}/sessions/:sessionId/confirm`, async (request, reply) => handleBridge(reply, async () => run(request, confirmationOperation(request), (session) => handleConfirmation(session, request, readSessionId(request)!))));
   app.get(`${BRIDGE_PREFIX}/sessions/:sessionId/state`, async (request, reply) => handleBridge(reply, async () => run(request, 'read', (session) => handleState(session, readSessionId(request)!))));
 }
@@ -83,6 +84,48 @@ class PiBridgeDirectory {
 async function handleInput(session: IarSandboxSession, request: FastifyRequest, sessionId: string): Promise<BridgeInputResponse> {
   const result = await session.bridgeTurn(readInputText(request));
   return toInputResponse(sessionId, result);
+}
+
+/** 以 SSE 暴露最终 response.generate 的 reasoning/answer 增量。 */
+async function streamInput(request: FastifyRequest, reply: FastifyReply, run: RunOperation): Promise<void> {
+  const sessionId = readSessionId(request);
+  if (sessionId === undefined) { await handleBridge(reply, async () => { throw new BridgeRequestError(400, 'invalid_session_id', 'IAR 会话标识无效。'); }); return; }
+  let text: string;
+  try { text = readInputText(request); } catch (error) { await handleBridge(reply, async () => { throw error; }); return; }
+  reply.hijack();
+  reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive' });
+  try { await run(request, 'mutate', (session) => streamBridgeTurn(session, sessionId, text, reply)); }
+  catch (error) { writeBridgeStreamEvent(reply, bridgeStreamError(error)); }
+  if (!reply.raw.writableEnded) reply.raw.end();
+}
+
+/** 将会话流事件投影为 Bridge 公共 SSE 事件，过滤抽取和路由阶段。 */
+async function streamBridgeTurn(session: IarSandboxSession, sessionId: string, text: string, reply: FastifyReply): Promise<void> {
+  await session.bridgeTurnStreamed(text, (event) => {
+    const projected = projectBridgeStreamEvent(event, sessionId);
+    if (projected) writeBridgeStreamEvent(reply, projected);
+  });
+}
+
+/** 只转发最终回复、计时和终态；semantic.extract 不会进入 reasoning 流。 */
+function projectBridgeStreamEvent(event: StreamEvent, sessionId: string): BridgeInputStreamEvent | undefined {
+  if (event.type === 'reasoningDelta') return event;
+  if (event.type === 'delta') return event;
+  if (event.type === 'timing') return { type: 'timing', summary: event.summary };
+  if (event.type === 'done') return { type: 'done', result: toInputResponse(sessionId, event.result) };
+  return undefined;
+}
+
+/** 将 Bridge 错误投影成稳定 SSE 错误事件，不传播异常正文。 */
+function bridgeStreamError(error: unknown): BridgeInputStreamEvent {
+  if (error instanceof BridgeRequestError) return { type: 'error', code: error.code, message: error.message, retryable: false };
+  if (error instanceof SessionError) return { type: 'error', code: error.reasonCode, message: 'IAR 会话请求未完成。', retryable: error.status >= 500 || error.status === 429 };
+  return { type: 'error', code: 'bridge_internal_error', message: 'IAR 桥接请求未完成。', retryable: true };
+}
+
+/** 向仍开放的 SSE 响应写入一条 JSON 事件。 */
+function writeBridgeStreamEvent(reply: FastifyReply, event: BridgeInputStreamEvent): void {
+  if (!reply.raw.destroyed && !reply.raw.writableEnded) reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
 }
 
 /** 处理确认或取消，动作范围只从 IAR 当前 pending 读取。 */

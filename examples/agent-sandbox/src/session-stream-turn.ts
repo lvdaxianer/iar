@@ -2,7 +2,7 @@ import { ModelResponseLimitError, trackModelResponseLimit } from './models/model
 import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
-import { applyRouteDiagnostic, canPassThrough, runPiAgentDelegate } from './session-turn-helpers.js';
+import { applyRouteDiagnostic, canPassThrough, resolveNoMatchTurn, runPiAgentDelegate } from './session-turn-helpers.js';
 import type { ActionDefinition, ActionResult, BehaviorContext, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
@@ -69,12 +69,12 @@ export class SandboxSessionStreamTurn {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public async turnStreamed(text: string, emit: (event: StreamEvent) => void): Promise<TurnResult> {
+  public async turnStreamed(text: string, emit: (event: StreamEvent) => void, bridgeMode = false): Promise<TurnResult> {
     const userText = text.trim();
     const traceId = this.context.nextTraceId();
     const timing = new TurnTimingTracker(traceId);
     try {
-      const result = await this.executeStreamTurn({ userText, traceId, emit, timing });
+      const result = await this.executeStreamTurn({ userText, traceId, emit, timing, bridgeMode });
       return this.finishStreamResult(result, timing, emit);
     } catch (error) {
       this.finishStreamFailure(timing, emit);
@@ -82,8 +82,8 @@ export class SandboxSessionStreamTurn {
     }
   }
 
-  private async executeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; timing: TurnTimingTracker }): Promise<TurnResult> {
-    const { userText, traceId, emit, timing } = context;
+  private async executeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; timing: TurnTimingTracker; bridgeMode: boolean }): Promise<TurnResult> {
+    const { userText, traceId, emit, timing, bridgeMode } = context;
     emit({ type: 'stage', stage: 'semantic' });
     await this.context.cancelStalePending();
     const behaviorContext = this.context.currentBehaviorContext();
@@ -92,7 +92,7 @@ export class SandboxSessionStreamTurn {
     timing.start('semantic.extract');
     const extracted = await this.context.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext, this.context.recentMessages, selection.descriptor);
     timing.end('semantic.extract');
-    return withReplySource(await this.finishStreamExtraction({ userText, traceId, emit, behaviorContext, extracted, timing, ...(selection.descriptor === undefined ? {} : { selectedDescriptor: selection.descriptor }) }));
+    return withReplySource(await this.finishStreamExtraction({ userText, traceId, emit, behaviorContext, extracted, timing, bridgeMode, ...(selection.descriptor === undefined ? {} : { selectedDescriptor: selection.descriptor }) }));
   }
 
   /**
@@ -122,7 +122,7 @@ export class SandboxSessionStreamTurn {
    * @returns 本轮结果，不发送终态事件
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  protected async finishStreamExtraction(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; extracted: ExtractFrameOutcome; timing: TurnTimingTracker; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
+  protected async finishStreamExtraction(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; extracted: ExtractFrameOutcome; timing: TurnTimingTracker; bridgeMode: boolean; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
     const { userText, extracted } = context;
     // 抽取失败仍与普通入口一样保存失败说明。
     if (!extracted.ok) {
@@ -139,8 +139,8 @@ export class SandboxSessionStreamTurn {
    * @returns 本轮结果
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  protected async routeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }>; timing: TurnTimingTracker; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
-    const { userText, traceId, emit, behaviorContext, extracted, timing, selectedDescriptor } = context;
+  protected async routeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }>; timing: TurnTimingTracker; bridgeMode: boolean; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
+    const { userText, traceId, emit, behaviorContext, extracted, timing, bridgeMode, selectedDescriptor } = context;
     emit({ type: 'stage', stage: 'route' });
     const frame = extracted.frame;
     const references = this.context.resolveReferences(frame, behaviorContext);
@@ -162,6 +162,8 @@ export class SandboxSessionStreamTurn {
     const evidence = buildEvidence(route, frame);
     if (extracted.semanticFallback) evidence.semanticFallback = true;
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
+      const bridgeResult = bridgeMode ? await resolveNoMatchTurn({ piAgent: undefined, pushMessages: this.context.pushMessages, passThroughOnNoMatch: true, userText, evidence, behaviorContext, selectedDescriptor, functionDescriptors: this.context.functionDescriptors }) : undefined;
+      if (bridgeResult) return bridgeResult;
       const agentResult = await this.runStreamAgent({ userText, emit, timing, evidence, behaviorContext, selectedDescriptor });
       if (agentResult !== undefined) return agentResult;
       return this.finishStreamFallback({ userText, traceId, emit, behaviorContext: routeContext, timing, evidence, resolvedReferences: references.references });

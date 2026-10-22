@@ -47,6 +47,34 @@ test('IAR bridge client validates and preserves timing summary', async () => {
   assert.deepEqual(result.timing, { traceId: 'trace-1', durationMs: 120, stages: [{ stage: 'semantic.extract', status: 'completed', durationMs: 40 }] });
 });
 
+test('IAR bridge client forwards final response reasoning before answer and validates done', async () => {
+  const received: string[] = [];
+  const events = [
+    { type: 'reasoningDelta', text: '先核对结果。' },
+    { type: 'delta', text: '查询结果如下。' },
+    { type: 'done', result: { version: PI_BRIDGE_VERSION, iarSessionId: 'iar-1', disposition: 'handled', reply: '查询结果如下。', replySource: 'response_model' } }
+  ];
+  const client = new IarBridgeClient({
+    baseUrl: 'http://iar.test',
+    fetch: async () => new Response(new ReadableStream({ start(controller) { const encoder = new TextEncoder(); events.forEach((event) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))); controller.close(); } }), { headers: { 'content-type': 'text/event-stream' } })
+  });
+  const result = await client.inputStream('iar-1', '查询状态', { onReasoningDelta: (text) => received.push(`reasoning:${text}`), onDelta: (text) => received.push(`answer:${text}`) });
+  assert.deepEqual(received, ['reasoning:先核对结果。', 'answer:查询结果如下。']);
+  assert.equal(result.reply, '查询结果如下。');
+});
+
+test('IAR bridge client rejects reasoning arriving after answer delta', async () => {
+  const events = [
+    { type: 'delta', text: '答案' },
+    { type: 'reasoningDelta', text: '迟到思考' }
+  ];
+  const client = new IarBridgeClient({
+    baseUrl: 'http://iar.test',
+    fetch: async () => new Response(new ReadableStream({ start(controller) { const encoder = new TextEncoder(); events.forEach((event) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`))); controller.close(); } }), { headers: { 'content-type': 'text/event-stream' } })
+  });
+  await assert.rejects(() => client.inputStream('iar-1', '查询状态'), (error: unknown) => error instanceof BridgeClientError && error.code === 'invalid_bridge_response');
+});
+
 test('IAR bridge client rejects oversized pass-through capability context', async () => {
   const client = new IarBridgeClient({
     baseUrl: 'http://iar.test',

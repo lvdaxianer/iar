@@ -5,7 +5,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-21
  */
-import { createIarExtension, IarBridgeClient, type BridgeCapabilityDescriptor, type BridgeConfirmResponse, type BridgeInputResponse, type BridgePendingAction, type BridgeReplySource, type BridgeTimingSummary, type IarBridgeClientLike, type PiExtensionAPI, type PiExtensionContext, type PiInputResult } from '@iar/pi-bridge';
+import { createIarExtension, IarBridgeClient, type BridgeCapabilityDescriptor, type BridgeConfirmResponse, type BridgeInputResponse, type BridgeInputStreamHandlers, type BridgePendingAction, type BridgeReplySource, type BridgeTimingSummary, type IarBridgeClientLike, type PiExtensionAPI, type PiExtensionContext, type PiInputResult } from '@iar/pi-bridge';
 import { createPiAgentDelegate, type PiAgentDelegate } from '../models/pi-agent-delegate.js';
 import type { SandboxMode } from '../session-types.js';
 
@@ -30,6 +30,10 @@ export type PiHostSessionEvents = {
   onPiDelta?: (delta: string) => void;
   /** Pi Agent 单轮结束，回传完整回复。 */
   onPiDone?: (reply: string) => void;
+  /** IAR 最终 response.generate 的原始 reasoning 增量。 */
+  onIarReasoningDelta?: (delta: string) => void;
+  /** IAR 最终 response.generate 的答案增量。 */
+  onIarDelta?: (delta: string) => void;
 };
 
 /** Pi 宿主会话配置。 */
@@ -54,10 +58,10 @@ export type PiHostSessionOptions = {
 export type PiHostInputResult = { action: 'handled' | 'continue' };
 
 /** 可观测 client：在转发响应的同时提取路由证据和待确认状态。 */
-function observeClient(client: IarBridgeClientLike, hooks: { input?: (response: BridgeInputResponse) => void; confirm?: (response: BridgeConfirmResponse) => void }): IarBridgeClientLike {
+function observeClient(client: IarBridgeClientLike, hooks: { input?: (response: BridgeInputResponse) => void; confirm?: (response: BridgeConfirmResponse) => void; stream?: BridgeInputStreamHandlers }): IarBridgeClientLike {
   return {
     openSession: (request) => client.openSession(request),
-    input: async (sessionId, text) => { const response = await client.input(sessionId, text); hooks.input?.(response); return response; },
+    input: async (sessionId, text) => { const response = client.inputStream ? await client.inputStream(sessionId, text, hooks.stream ?? {}) : await client.input(sessionId, text); hooks.input?.(response); return response; },
     confirm: async (sessionId, actionId, accepted) => { const response = await client.confirm(sessionId, actionId, accepted); hooks.confirm?.(response); return response; },
     state: (sessionId) => client.state(sessionId)
   };
@@ -83,7 +87,8 @@ export class PiHostSession {
     const baseClient = options.client ?? new IarBridgeClient({ baseUrl: options.bridgeUrl ?? process.env.IAR_PI_BRIDGE_URL ?? 'http://127.0.0.1:8787' });
     const client = observeClient(baseClient, {
       input: (response) => { this.passThroughDescriptors = response.disposition === 'pass_through' ? response.capabilityContext?.functionDescriptors ?? [] : []; this.publishRoute(response); if (response.timing) this.events.onTiming?.(response.timing); this.events.onConfirm?.(response.pending ?? null); },
-      confirm: (response) => { this.events.onConfirm?.(response.pending ?? null); }
+      confirm: (response) => { this.events.onConfirm?.(response.pending ?? null); },
+      stream: { onReasoningDelta: (delta) => this.events.onIarReasoningDelta?.(delta), onDelta: (delta) => this.events.onIarDelta?.(delta) }
     });
     const pi: PiExtensionAPI = {
       on: (event, handler) => { this.handlers.set(event, handler); },

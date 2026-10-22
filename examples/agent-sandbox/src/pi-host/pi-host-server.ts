@@ -110,7 +110,9 @@ export function buildPiHostApp(options: PiHostServerOptions): { app: FastifyInst
       onTiming: emit('timing'),
       onConfirm: emit('confirm'),
       onPiDelta: emit('piDelta'),
-      onPiDone: emit('piDone')
+      onPiDone: emit('piDone'),
+      onIarReasoningDelta: emit('iarReasoningDelta'),
+      onIarDelta: emit('iarDelta')
     };
     const session = new PiHostSession({ sessionId, mode: options.mode, ...(options.bridgeUrl === undefined ? {} : { bridgeUrl: options.bridgeUrl }), ...(options.client === undefined ? {} : { client: options.client }), events });
     sessions.set(sessionId, session);

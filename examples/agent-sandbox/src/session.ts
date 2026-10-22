@@ -23,7 +23,6 @@ export class IarSandboxSession extends SandboxSessionCore {
   private readonly replies = this.createReplies();
   /** 流式组件只持有宿主能力，重置后仍访问当前状态。 */
   private readonly streaming = this.createStreaming();
-  /** 普通与 bridge 入口共用同一套计时和轮次编排。 */
   private readonly turnRunner = this.createTurnRunner();
   /** 绑定路由依赖和可变状态，重置不会留下过期引用。 */
   private createRouting(): SandboxSessionRouting {
@@ -133,6 +132,9 @@ export class IarSandboxSession extends SandboxSessionCore {
   public turnStreamed(text: string, emit: (event: StreamEvent) => void): Promise<TurnResult> {
     return this.whenReady().then(() => this.streaming.turnStreamed(text, emit)).then((result) => recordAgentExchange(this.piAgent, text, withReplySource(result)));
   }
+
+  /** Bridge 流式输入保持 pass_through；@author lvdaxianer@yeah.net @date 2026-10-22 */
+  public bridgeTurnStreamed(text: string, emit: (event: StreamEvent) => void): Promise<TurnResult> { return this.whenReady().then(() => this.streaming.turnStreamed(text, emit, true)).then((result) => withReplySource(result)); }
   /**
    * 执行一轮对话：抽取 → 路由 → 策略/确认 → 执行 → 回复生成。
    *

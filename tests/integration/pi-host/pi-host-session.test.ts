@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BridgeClientError, PI_BRIDGE_VERSION, type BridgeConfirmResponse, type BridgeInputResponse, type BridgeRouteEvidence, type IarBridgeClientLike } from '@iar/pi-bridge';
+import { BridgeClientError, PI_BRIDGE_VERSION, type BridgeConfirmResponse, type BridgeInputResponse, type BridgeInputStreamHandlers, type BridgeRouteEvidence, type IarBridgeClientLike } from '@iar/pi-bridge';
 import { buildPiHostApp } from '../../../examples/agent-sandbox/src/pi-host/pi-host-server.js';
 import { PiHostSession, type PiHostRouteInfo, type PiHostSessionEvents } from '../../../examples/agent-sandbox/src/pi-host/pi-host-session.js';
 import type { PiAgentDelegate } from '../../../examples/agent-sandbox/src/models/pi-agent-delegate.js';
@@ -14,8 +14,8 @@ function businessRoute(): BridgeRouteEvidence {
   return { status: 'matched', reasonCode: 'none', semanticIntent: 'api.gateway', semanticConfidence: 0.92, functionId: 'api.gateway', pluginId: 'api-gateway-v1', expectedOperation: 'limit|stats', actualOperation: 'limit' };
 }
 
-function makeFakeBridge(overrides: { input?: (text: string) => BridgeInputResponse; onConfirm?: (actionId: string, accepted: boolean) => void; failOpen?: boolean } = {}): IarBridgeClientLike {
-  return {
+function makeFakeBridge(overrides: { input?: (text: string) => BridgeInputResponse; inputStream?: (text: string, handlers: BridgeInputStreamHandlers) => BridgeInputResponse; onConfirm?: (actionId: string, accepted: boolean) => void; failOpen?: boolean } = {}): IarBridgeClientLike {
+  const client: IarBridgeClientLike = {
     openSession: async () => {
       if (overrides.failOpen) throw new BridgeClientError('bridge_unavailable', 'IAR 不可用', true);
       return { version: PI_BRIDGE_VERSION, piSessionId: 'pi-demo', iarSessionId: 'iar-demo', resumed: false };
@@ -30,8 +30,10 @@ function makeFakeBridge(overrides: { input?: (text: string) => BridgeInputRespon
       overrides.onConfirm?.(actionId, accepted);
       return { version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo', disposition: 'handled', reply: accepted ? '已确认执行。' : '已取消该操作。' };
     },
-    state: async () => ({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo' })
+    state: async () => ({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo' }),
   };
+  if (overrides.inputStream) client.inputStream = async (_sessionId, text, handlers) => { const response = overrides.inputStream!(text, handlers); return response; };
+  return client;
 }
 
 /** 记录事件的会话探针；piAgent 为 undefined 时使用真实 scripted 委托。 */
@@ -43,6 +45,8 @@ function makeProbe(options: { client: IarBridgeClientLike; piAgent?: PiAgentDele
   const timings: Array<unknown> = [];
   const deltas: string[] = [];
   const piDones: string[] = [];
+  const iarReasoning: string[] = [];
+  const iarDeltas: string[] = [];
   const recorded: Array<{ userText: string; reply: string }> = [];
   const piRuns: string[] = [];
   const events: PiHostSessionEvents = {
@@ -52,7 +56,9 @@ function makeProbe(options: { client: IarBridgeClientLike; piAgent?: PiAgentDele
     onConfirm: (pending) => { confirms.push(pending); },
     onTiming: (timing) => { timings.push(timing); },
     onPiDelta: (delta) => { deltas.push(delta); },
-    onPiDone: (reply) => { piDones.push(reply); }
+    onPiDone: (reply) => { piDones.push(reply); },
+    onIarReasoningDelta: (delta) => { iarReasoning.push(delta); },
+    onIarDelta: (delta) => { iarDeltas.push(delta); }
   };
   const piAgent: PiAgentDelegate = options.piAgent ?? {
     run: async (text) => { piRuns.push(text); return /你是谁/.test(text) ? '我是 IAR Agent Sandbox 里的 Pi Agent。' : 'Pi 通用回答：' + text; },
@@ -60,7 +66,7 @@ function makeProbe(options: { client: IarBridgeClientLike; piAgent?: PiAgentDele
     reset: () => {}
   };
   const session = new PiHostSession({ sessionId: 'pi-demo', mode: 'scripted', client: options.client, piAgent, events });
-  return { session, entries, notifications, routes, confirms, timings, deltas, piDones, recorded, piRuns };
+  return { session, entries, notifications, routes, confirms, timings, deltas, piDones, iarReasoning, iarDeltas, recorded, piRuns };
 }
 
 test('Pi host session routes business input to IAR and blocks the Pi Agent', async () => {
@@ -87,6 +93,22 @@ test('Pi host session forwards bridge timing to the UI event boundary', async ()
   await probe.session.start();
   await probe.session.handleUserInput('查询状态');
   assert.deepEqual(probe.timings, [timing]);
+});
+
+test('Pi host session forwards only final response reasoning and answer deltas', async () => {
+  const client = makeFakeBridge({
+    inputStream: (text, handlers) => {
+      handlers.onReasoningDelta?.('先核对当前工单。');
+      handlers.onDelta?.('工单结果如下。');
+      return { version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo', disposition: 'handled', reply: '工单结果如下。', replySource: 'response_model', route: businessRoute() };
+    },
+    input: () => ({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo', disposition: 'handled', reply: '不应走非流式', route: businessRoute() })
+  });
+  const probe = makeProbe({ client });
+  await probe.session.start();
+  await probe.session.handleUserInput('查询工单');
+  assert.deepEqual(probe.iarReasoning, ['先核对当前工单。']);
+  assert.deepEqual(probe.iarDeltas, ['工单结果如下。']);
 });
 
 test('Pi host session lets the Pi Agent answer non-business input', async () => {
@@ -183,4 +205,35 @@ test('Pi host app serves assembled shared page by default', async t => {
   assert.match(page.body, /function renderMarkdown\(src\)/);
   assert.match(page.body, /function renderPiHostEntry\(entry\)/);
   assert.doesNotMatch(page.body, /IAR_PI_HOST_(?:STYLES|SCRIPT)/);
+});
+
+test('Pi host app forwards only final response stream events over SSE', async t => {
+  const client = makeFakeBridge({
+    inputStream: (_text, handlers) => {
+      handlers.onReasoningDelta?.('核对工单信息。');
+      handlers.onDelta?.('工单结果如下。');
+      return { version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo', disposition: 'handled', reply: '工单结果如下。', replySource: 'response_model', route: businessRoute() };
+    }
+  });
+  const { app, closeClients } = buildPiHostApp({ mode: 'scripted', client });
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  t.after(async () => { closeClients(); await app.close(); });
+  const address = app.server.address();
+  assert.ok(address && typeof address === 'object');
+  const events = await fetch(`http://127.0.0.1:${address.port}/api/pi-host/events?session=stream-demo`);
+  assert.equal(events.status, 200);
+  const reader = events.body!.getReader();
+  const chat = await app.inject({ method: 'POST', url: '/api/pi-host/chat', payload: { session: 'stream-demo', text: '查询工单' } });
+  assert.equal(chat.statusCode, 200);
+  let body = '';
+  while (!body.includes('event: iarDelta')) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    body += new TextDecoder().decode(chunk.value);
+  }
+  await reader.cancel();
+  assert.match(body, /event: iarReasoningDelta/);
+  assert.match(body, /核对工单信息/);
+  assert.match(body, /event: iarDelta/);
+  assert.match(body, /工单结果如下/);
 });

@@ -280,7 +280,7 @@
     div.appendChild(stageEl);
     piHostMessagesEl.appendChild(div);
     piHostMessagesEl.scrollTop = piHostMessagesEl.scrollHeight;
-    piHostBubble = { div: div, textEl: textEl, stageEl: stageEl, gotDelta: false };
+    piHostBubble = { div: div, textEl: textEl, stageEl: stageEl, gotDelta: false, iarStreamed: false };
   }
 
   /** 追加 Pi Agent 增量，首个增量到达时移除 Thinking 指示器。 */
@@ -288,6 +288,51 @@
     if (!piHostBubble) createPiHostBubble();
     if (!piHostBubble.gotDelta) { piHostBubble.gotDelta = true; piHostBubble.stageEl.remove(); }
     piHostBubble.textEl.textContent += text;
+    piHostMessagesEl.scrollTop = piHostMessagesEl.scrollHeight;
+  }
+
+  /** 展示最终 Response Model 的原始思考增量；抽取与路由阶段不会调用此入口。 */
+  function appendPiHostIarReasoning(text) {
+    if (!piHostBubble || typeof text !== 'string' || !text) return;
+    var bubble = piHostBubble;
+    if (!bubble.reasoningEl) {
+      var details = document.createElement('details');
+      details.className = 'reasoning';
+      details.open = true;
+      var summary = document.createElement('summary');
+      summary.textContent = '原始思考 / Raw thinking';
+      var body = document.createElement('pre');
+      details.appendChild(summary);
+      details.appendChild(body);
+      bubble.div.insertBefore(details, bubble.textEl);
+      bubble.reasoningEl = details;
+      bubble.reasoningBody = body;
+    }
+    bubble.reasoningBody.textContent += text;
+    piHostMessagesEl.scrollTop = piHostMessagesEl.scrollHeight;
+  }
+
+  /** 收到正式答案首增量后立即收起思考，并继续以纯文本追加答案。 */
+  function appendPiHostIarDelta(text) {
+    if (!piHostBubble || typeof text !== 'string' || !text) return;
+    var bubble = piHostBubble;
+    bubble.iarStreamed = true;
+    if (bubble.reasoningEl) bubble.reasoningEl.open = false;
+    appendPiHostDelta(text);
+  }
+
+  /** 结束最终回复气泡：只对正式答案做 Markdown 渲染，思考始终保留为 details。 */
+  function finalizePiHostIarBubble(reply, meta) {
+    if (!piHostBubble) return;
+    var bubble = piHostBubble;
+    piHostBubble = null;
+    if (bubble.reasoningEl) bubble.reasoningEl.open = false;
+    bubble.stageEl.remove();
+    if (!bubble.gotDelta && reply) bubble.textEl.textContent = reply;
+    var rawText = bubble.textEl.textContent;
+    bubble.textEl.innerHTML = renderMarkdown(rawText);
+    appendMessageMeta(bubble.div, meta.text, meta.traceId);
+    recordPiHostConversation('bot', rawText, meta.text);
     piHostMessagesEl.scrollTop = piHostMessagesEl.scrollHeight;
   }
 
@@ -331,6 +376,7 @@
    */
   function streamPiHostEntryText(text, meta) {
     var bubble = piHostBubble;
+    if (bubble.reasoningEl) bubble.reasoningEl.open = false;
     bubble.gotDelta = true;
     bubble.stageEl.remove();
     var cursor = 0;
@@ -369,10 +415,18 @@
     if (!data || entry.customType !== 'iar-bridge' || typeof data.content !== 'string') return false;
     var meta = formatTimingMeta(piHostEntryMeta(data), piHostPendingTiming);
     piHostPendingTiming = null;
-    if (piHostBubble && piHostExpectingEntry) streamPiHostEntryText(data.content, meta);
+    if (piHostBubble && piHostExpectingEntry && piHostBubble.iarStreamed) finalizePiHostIarBubble(data.content, meta);
+    else if (piHostBubble && piHostExpectingEntry) streamPiHostEntryText(data.content, meta);
     else { appendMsg('bot', data.content, meta.text, meta.traceId); recordPiHostConversation('bot', data.content, meta.text); }
     if (data.disposition === 'handled' || data.disposition === 'context_answered') highlightPiHostFlow(['input', 'hook', 'iar', 'handled']);
     return true;
+  }
+
+  /** 分发 IAR 最终回复流事件；只允许 reasoning 先于 answer 到达。 */
+  function handlePiHostIarStreamEvent(event) {
+    if (!event || typeof event !== 'object') return;
+    if (event.type === 'iarReasoningDelta') appendPiHostIarReasoning(event.text);
+    if (event.type === 'iarDelta') appendPiHostIarDelta(event.text);
   }
 
   /** 移除全部确认卡片；新确认事件或清空事件都走这里。 */
@@ -507,6 +561,12 @@
       piHostPendingTiming = timing;
       updatePiHostTimingPanel(timing);
       recordPiHostEvent('耗时', (timing.durationMs || 0) + 'ms');
+    });
+    es.addEventListener('iarReasoningDelta', function (event) {
+      handlePiHostIarStreamEvent({ type: 'iarReasoningDelta', text: JSON.parse(event.data) });
+    });
+    es.addEventListener('iarDelta', function (event) {
+      handlePiHostIarStreamEvent({ type: 'iarDelta', text: JSON.parse(event.data) });
     });
     es.addEventListener('entry', function (event) {
       var entry;
