@@ -61,6 +61,10 @@
 
 先修正误路由，确认不再因 `plugin_rule_not_matched` 触发额外 `response.generate`。然后用真实模型测试 `semantic.extract`、路由提议、执行和回复阶段的 P50/P95；只有测试证明安全且准确率不下降，才评估合并模型调用。
 
+### 6. 决策后端按配置完整性选择
+
+沙箱兼容路径默认读取 `IAR_JEV_ENDPOINT`、`IAR_JEV_API_KEY` 和 `IAR_JEV_MODEL_ID` 三项配置：三项完整时选择 JEV，任一缺失或为占位值时只保留 Intent Model profile。显式指定 `IAR_SANDBOX_DECISION_BACKEND=jev` 但配置不完整时直接拒绝启动，避免把 mock provider 误当成真实 JEV；显式选择 `intent-model` 始终只保留 Intent Model profile。通用 `DecisionBackendResolver` 仍保持 JEV 优先语义，由沙箱 registry 在进入 resolver 前完成环境选择。
+
 ## Risks / Trade-offs
 
 - [模型返回合法 ID 但语义选择错误] → 维持有限工具集合、置信度、澄清阈值和程序侧最终门禁。
