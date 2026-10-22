@@ -38,6 +38,7 @@ export class ScriptedModelProvider implements ModelProvider {
   public async complete(request: ModelProviderRequest): Promise<unknown> {
     const input = asRecord(request.input);
     if (request.profile.role === 'semantic.extract') return this.extract(readString(input, 'text') ?? '', asRecord(input.behaviorContext), readPluginDescriptors(input.pluginDescriptors));
+    if (request.profile.role === 'route.propose') return this.routeProposal(input);
     if (request.profile.role === 'context.compact') return this.compact(input);
     return this.generate(input);
   }
@@ -134,6 +135,28 @@ export class ScriptedModelProvider implements ModelProvider {
       preservedFacts: [...REQUIRED_PRESERVED_FACTS],
       warnings: []
     };
+  }
+
+  /** 离线模式模拟一次 nested Plugin/Function proposal，只从宿主工具快照选择。 */
+  private routeProposal(input: Record<string, unknown>): unknown {
+    const tools = Array.isArray(input.nestedTools) ? input.nestedTools.filter(isRecord) : [];
+    const semantic = asRecord(input.semantic);
+    const slots = asRecord(semantic.slots);
+    const intent = readString(semantic, 'intent');
+    const tool = tools.find((candidate) => {
+      const candidates = Array.isArray(candidate.candidates) ? candidate.candidates.filter(isRecord) : [];
+      return candidates.some((item) => item.functionId === intent);
+    }) ?? tools[0];
+    const candidates = tool && Array.isArray(tool.candidates) ? tool.candidates.filter(isRecord) : [];
+    const candidate = candidates.find((item) => item.functionId === intent) ?? candidates[0];
+    const operations = candidate && Array.isArray(candidate.operations) ? candidate.operations.filter(isRecord) : [];
+    const operation = readString(slots, 'operation') ?? readString(operations[0] ?? {}, 'name') ?? 'read';
+    const args: Record<string, JsonValue> = { operation };
+    const query = readString(slots, 'query');
+    if (query) args.query = query;
+    if (isRecord(slots.params)) args.params = structuredClone(slots.params) as JsonValue;
+    if (!tool || !candidate || typeof tool.pluginId !== 'string' || typeof tool.name !== 'string' || typeof candidate.functionId !== 'string') return { schemaVersion: 'iar.nested-function-call/v1', pluginId: '', toolName: '', functionId: '', operation: '', arguments: {}, confidence: 0 };
+    return { schemaVersion: 'iar.nested-function-call/v1', pluginId: tool.pluginId, toolName: tool.name, functionId: candidate.functionId, operation, arguments: args, confidence: 0.99 };
   }
 
   /**

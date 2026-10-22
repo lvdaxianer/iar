@@ -13,11 +13,11 @@
 ## 3. 一次模型调用与 Function Calling 传输
 
 - [x] 3.1 增加 nested tool adapter，将模型 tool call 解析为 Plugin、Function、Operation 和命名 JSON 参数，并使用 `thinking.type=disabled`；验证正常 provider、无 tool call、非法 JSON、未知工具和超时均有稳定结果。
-- [ ] 3.2 让模型网关按统一 normal interaction model 发送一次 nested proposal，保留 JEV/Intent Model 显式兼容回退；验证一次请求不会重复调用 Plugin/Function 选择模型，并记录模型角色和耗时。
+- [x] 3.2 让模型网关按统一 normal interaction model 发送一次 nested proposal，保留 JEV/Intent Model 显式兼容回退；验证一次请求不会重复调用 Plugin/Function 选择模型，并记录模型角色和耗时。
 
 ## 4. Sandbox 主路由与运行时执行
 
-- [ ] 4.1 替换 Sandbox 主路由为 nested proposal → 运行时所有权/Schema/授权/策略/确认校验 → Function 执行；验证 query/create/update/self-introduction 的 Plugin 与 Function 归属正确，参数错位不会执行。
+- [x] 4.1 替换 Sandbox 主路由为 nested proposal → 运行时所有权/Schema/授权/策略/确认校验 → Function 执行；验证 query/create/update/self-introduction 的 Plugin 与 Function 归属正确，参数错位不会执行。
 - [ ] 4.2 按统一 response contract 处理 query 的 `response.generate`、确认/表单的 `none`、允许的 direct 结果和失败错误；验证查询结果交给模型汇总且动作确认不伪造聊天回复。
 
 ## 5. 观测、兼容和回归测试

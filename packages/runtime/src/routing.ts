@@ -11,7 +11,7 @@
  * @date 2026-10-17
  */
 import { ACTION_TYPES, ERROR_CODES, MAX_ROUTING_SCOPE_PLUGINS, SCHEMA_VERSIONS, type ActionType, type BehaviorContext, type DecisionResult, type JsonValue, type RoutingScope } from '@iar/contracts';
-import { providerFailureResult, type DecisionCandidate, type DecisionProvider, type DecisionRequest, type FunctionCallProposal, type FunctionToolDefinition, type ModelGatewayResult } from './intent/decision/index.js';
+import { providerFailureResult, type DecisionCandidate, type DecisionProvider, type DecisionRequest, type FunctionCallProposal, type FunctionToolDefinition, type ModelGatewayResult, type NestedFunctionCallProposal, type NestedFunctionToolDefinition } from './intent/decision/index.js';
 import type { FunctionRule, PluginCandidate, PluginRule, RuleEvaluationFacts, RuleEvaluationResult } from './intent/rules/index.js';
 import { RuleEngine } from './intent/rules/index.js';
 import type { PluginHost, PluginRecord } from '@iar/plugins';
@@ -40,6 +40,11 @@ export type AsyncDecisionAdapter = {
 /** 已选 Plugin 内部的 Function Calling 适配器。 */
 export type AsyncFunctionCallAdapter = {
   call(invocation: { traceId: string; runId: string; input: JsonValue; tools: readonly FunctionToolDefinition[] }): Promise<ModelGatewayResult<FunctionCallProposal>>;
+};
+
+/** 主路由使用的 nested Plugin tool 适配器；普通模型一次提出 Plugin/Function/Operation。 */
+export type AsyncNestedRouteAdapter = {
+  call(invocation: { traceId: string; runId: string; input: JsonValue; tools: readonly NestedFunctionToolDefinition[] }): Promise<ModelGatewayResult<NestedFunctionCallProposal>>;
 };
 
 /** 授权回调当前正在验证的阶段和不可变宿主记录。 */
@@ -98,6 +103,8 @@ export type AsyncRouteRequest = Omit<RouteRequest, 'functionProvider' | 'pluginP
   pluginDecisionAdapter: AsyncDecisionAdapter;
   /** 存在时启用新的 Plugin proposal → scoped Function Calling 路径。 */
   functionCallAdapter?: AsyncFunctionCallAdapter;
+  /** 存在时启用一次性 nested Plugin/Function route proposal 主路径。 */
+  nestedRouteAdapter?: AsyncNestedRouteAdapter;
 };
 
 /** 两阶段路由结果，永远不代表已执行插件。 */
@@ -120,6 +127,8 @@ export type RouteResult = {
   pluginDecision?: DecisionResult;
   /** Function Calling 的受控提案证据。 */
   functionCallProposal?: FunctionCallProposal;
+  /** Nested Plugin route 的原始受控提案证据。 */
+  nestedFunctionCallProposal?: NestedFunctionCallProposal;
   /** 供下一轮意图识别使用的有界 Plugin/Action 范围。 */
   routingScope?: RoutingScope;
 };
@@ -161,6 +170,8 @@ export class TwoStageRouter {
    * @date 2026-10-17
    */
   public async routeAsync(request: AsyncRouteRequest): Promise<RouteResult> {
+    // 已知动作直接进入一次性 nested route；unknown 保留旧的 no-match/上下文回答路径。
+    if (request.nestedRouteAdapter && hasKnownAction(request.facts)) return this.routeNestedProposalAsync(request);
     const functionEvaluation = this.engine.evaluateFunctions({ facts: request.facts, rules: request.functionRules });
     // Function 未形成可执行选择时，异步模型和同步 provider 一样不能启动 Plugin。
     if (functionEvaluation.status !== 'matched') return evaluationResult('function', functionEvaluation);
@@ -206,6 +217,39 @@ export class TwoStageRouter {
     if (pluginDecision.status !== 'choice' || !pluginDecision.choice) return { status: routeStatus(pluginDecision.status), reasonCode: `plugin_${pluginDecision.status}`, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision };
     return finalizePluginRoute({ request, functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision });
   }
+
+  /** 使用普通交互模型一次选择 Plugin、Function、Operation 和参数，再执行本地授权门禁。 */
+  public async routeNestedProposalAsync(request: AsyncRouteRequest): Promise<RouteResult> {
+    const bindings = request.pluginHost.nestedTools({
+      authorize: (record) => request.authorizePlugin({ phase: 'candidate', ...requestContext(request, freezeRecordSnapshot(record)) })
+    });
+    const tools = nestedToolsForRuntime(bindings);
+    if (tools.length === 0) return rejectedResult({ functionId: '', functionEvaluation: emptyFunctionEvaluation(), functionDecision: emptyFunctionDecision(''), pluginEvaluation: emptyPluginEvaluation(), pluginDecision: emptyPluginDecision(''), reasonCode: 'plugin_tools_unavailable' });
+    const proposal = await safeNestedRoute(request.nestedRouteAdapter!, request.traceId, request.runId, {
+      currentMessage: request.currentMessage ?? '',
+      behaviorContext: request.behaviorContext ?? null,
+      recentMessages: request.recentMessages ?? [],
+      semantic: isRecord(request.facts.semantic) ? structuredClone(request.facts.semantic) as JsonValue : {}
+    }, tools);
+    if (!proposal) return rejectedResult({ functionId: '', functionEvaluation: emptyFunctionEvaluation(), functionDecision: emptyFunctionDecision(''), pluginEvaluation: emptyPluginEvaluation(), pluginDecision: emptyPluginDecision(''), reasonCode: 'nested_route_failed' });
+    const selected = bindings.find((binding) => binding.pluginId === proposal.pluginId && binding.toolName === proposal.toolName);
+    const candidate = selected?.candidates.find((item) => item.functionId === proposal.functionId && item.operations.some((operation) => operation.name === proposal.operation));
+    if (!selected || !candidate) return rejectedResult({ functionId: proposal.functionId, functionEvaluation: functionSelectionEvaluation([proposal.functionId]), functionDecision: functionDecisionFromNestedProposal(proposal), pluginEvaluation: emptyPluginEvaluation(), pluginDecision: emptyPluginDecision(proposal.pluginId), nestedFunctionCallProposal: proposal, reasonCode: 'nested_route_out_of_scope' });
+    const semanticAction = isRecord(request.facts.semantic) ? request.facts.semantic.action : undefined;
+    if (!isActionType(semanticAction) || !candidate.actionTypes.includes(semanticAction)) return rejectedResult({ functionId: proposal.functionId, functionEvaluation: functionSelectionEvaluation([proposal.functionId]), functionDecision: functionDecisionFromNestedProposal(proposal), pluginEvaluation: emptyPluginEvaluation(), pluginDecision: emptyPluginDecision(proposal.pluginId), nestedFunctionCallProposal: proposal, reasonCode: 'nested_route_action_mismatch' });
+    const selectedRecord = request.pluginHost.get(selected.pluginId);
+    if (!selectedRecord || selectedRecord.manifest.pluginKind !== 'business') return rejectedResult({ functionId: proposal.functionId, functionEvaluation: functionSelectionEvaluation([proposal.functionId]), functionDecision: functionDecisionFromNestedProposal(proposal), pluginEvaluation: emptyPluginEvaluation(), pluginDecision: emptyPluginDecision(proposal.pluginId), nestedFunctionCallProposal: proposal, reasonCode: 'plugin_unavailable' });
+    const authorized = authorizeCandidates(request, [selectedRecord], () => proposal.functionId);
+    const pluginEvaluation = this.engine.evaluatePlugins({ facts: request.facts, functionId: proposal.functionId, candidates: authorized, rules: request.pluginRules.filter((rule) => rule.pluginId === proposal.pluginId && rule.functionId === proposal.functionId) });
+    if (pluginEvaluation.status !== 'matched' || pluginEvaluation.candidates.length === 0) return rejectedResult({ functionId: proposal.functionId, functionEvaluation: functionSelectionEvaluation([proposal.functionId]), functionDecision: functionDecisionFromNestedProposal(proposal), pluginEvaluation, pluginDecision: emptyPluginDecision(proposal.pluginId), nestedFunctionCallProposal: proposal, reasonCode: 'plugin_rule_not_matched' });
+    const pluginDecision = pluginDecisionFromProposal(proposal.pluginId, pluginEvaluation);
+    const functionDecision = functionDecisionFromNestedProposal(proposal);
+    const functionEvaluation = functionSelectionEvaluation([proposal.functionId]);
+    const routingScope = buildRoutingScope(pluginEvaluation, selectedRecord, request.behaviorContext, proposal.functionId);
+    const functionCallProposal = functionCallFromNestedProposal(proposal);
+    const result = finalizePluginRoute({ request, functionId: proposal.functionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision, routingScope });
+    return { ...result, functionCallProposal, nestedFunctionCallProposal: proposal };
+  }
 }
 
 /**
@@ -219,6 +263,8 @@ export class PluginFirstRouter {
 
   /** 执行 Plugin-first → Function-secondary 的异步路由。 */
   public async routeAsync(request: AsyncRouteRequest): Promise<RouteResult> {
+    // 主路径同样复用一次性 nested proposal；没有 nested adapter 时保留旧兼容链路。
+    if (request.nestedRouteAdapter && hasKnownAction(request.facts)) return new TwoStageRouter().routeNestedProposalAsync(request);
     // 只有 semantic.extract 已提出经过校验前仍不可信的 Plugin proposal 时，才进入新链路；
     // 旧帧没有 pluginId 时保留兼容路径，避免把历史调用方静默改成无路由。
     if (request.functionCallAdapter && semanticPluginId(request.facts)) return this.routePluginProposalAsync(request);
@@ -316,6 +362,26 @@ function filterRecordsByActionType(records: readonly PluginRecord[], facts: Rule
   const action = typeof semantic === 'object' && semantic !== null && !Array.isArray(semantic) ? (semantic as Record<string, unknown>).action : undefined;
   if (!isActionType(action)) return [];
   return records.filter((record) => record.manifest.pluginKind === 'business' && pluginFunctionIds(record).some((functionId) => record.functions.get(functionId)?.definition.actionTypes.includes(action)));
+}
+
+/** 只有 semantic.extract 已经给出固定动作时，nested route 才会启动。 */
+function hasKnownAction(facts: RuleEvaluationFacts): boolean {
+  const semantic = facts.semantic;
+  if (!isRecord(semantic)) return false;
+  const action = semantic.action;
+  const intent = semantic.intent;
+  return isActionType(action) && typeof intent === 'string' && intent.length > 0 && intent !== 'unknown';
+}
+
+/** 将 PluginHost 的 OpenAI 工具绑定投影成 runtime validator 使用的 nested tool。 */
+function nestedToolsForRuntime(bindings: ReturnType<PluginHost['nestedTools']>): NestedFunctionToolDefinition[] {
+  return bindings.map((binding) => ({
+    name: binding.tool.function.name,
+    pluginId: binding.pluginId,
+    description: binding.tool.function.description,
+    parameters: structuredClone(binding.tool.function.parameters) as JsonValue,
+    candidates: binding.candidates.map((candidate) => ({ pluginId: candidate.pluginId, functionId: candidate.functionId, operations: candidate.operations.map((operation) => ({ name: operation.name })) }))
+  }));
 }
 
 /** 读取 semantic.extract 的不可信 Plugin proposal。 */
@@ -470,8 +536,26 @@ async function safeFunctionCall(adapter: AsyncFunctionCallAdapter, traceId: stri
   }
 }
 
+/** 调用一次 nested route proposal；失败只返回稳定的空结果。 */
+async function safeNestedRoute(adapter: AsyncNestedRouteAdapter, traceId: string, runId: string, input: JsonValue, tools: readonly NestedFunctionToolDefinition[]): Promise<NestedFunctionCallProposal | undefined> {
+  try {
+    const result = await adapter.call({ traceId, runId, input, tools });
+    return result.ok ? result.value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function functionDecisionFromCall(proposal: FunctionCallProposal): DecisionResult {
   return { schemaVersion: SCHEMA_VERSIONS.decision, decisionType: 'function.select', decisionVersion: DECISION_VERSION, status: 'choice', choice: proposal.functionId, score: proposal.confidence, reasonCode: 'function_call.choice', candidateIds: [proposal.functionId] };
+}
+
+function functionDecisionFromNestedProposal(proposal: NestedFunctionCallProposal): DecisionResult {
+  return { schemaVersion: SCHEMA_VERSIONS.decision, decisionType: 'function.select', decisionVersion: DECISION_VERSION, status: 'choice', choice: proposal.functionId, score: proposal.confidence, reasonCode: 'nested_route.function.choice', candidateIds: [proposal.functionId] };
+}
+
+function functionCallFromNestedProposal(proposal: NestedFunctionCallProposal): FunctionCallProposal {
+  return { schemaVersion: 'iar.function-call/v1', pluginId: proposal.pluginId, functionId: proposal.functionId, operation: proposal.operation, arguments: structuredClone(proposal.arguments), confidence: proposal.confidence };
 }
 
 function pluginDecisionFromProposal(pluginId: string, evaluation: RuleEvaluationResult): DecisionResult {
@@ -480,6 +564,10 @@ function pluginDecisionFromProposal(pluginId: string, evaluation: RuleEvaluation
 
 function emptyPluginDecision(pluginId: string): DecisionResult {
   return { schemaVersion: SCHEMA_VERSIONS.decision, decisionType: 'plugin.select', decisionVersion: DECISION_VERSION, status: 'rejected', reasonCode: 'plugin_unavailable', candidateIds: [pluginId] };
+}
+
+function emptyPluginEvaluation(): RuleEvaluationResult {
+  return { status: 'no_match', candidates: [], matchedRules: [], excludedCandidates: [], conflicts: [] };
 }
 
 /**
@@ -582,7 +670,7 @@ function routeStatus(status: DecisionResult['status']): RouteResult['status'] {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-function rejectedResult(input: RouteEvidence & { reasonCode: string }): RouteResult {
+function rejectedResult(input: RouteEvidence & { reasonCode: string; nestedFunctionCallProposal?: NestedFunctionCallProposal }): RouteResult {
   return { status: 'rejected', ...input };
 }
 
