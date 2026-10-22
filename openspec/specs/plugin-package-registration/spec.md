@@ -1,5 +1,7 @@
 # Plugin Package Registration
 
+## Purpose
+
 为 IAR 建立以 Plugin 为顶层分发单元、以 Function 为能力单元的注册契约，使一个插件包可以安全地提供多项业务能力，并由统一入口完成可验证的运行时装配。
 
 ## Requirements

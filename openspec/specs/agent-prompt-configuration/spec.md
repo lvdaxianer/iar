@@ -1,5 +1,7 @@
 # Agent Prompt Configuration
 
+## Purpose
+
 为 IAR Agent 提供可校验、可持久化且有明确优先级的总体提示词配置，使回复模型能够共享表达偏好，同时不破坏运行时安全规则和结构化输出协议。
 
 ## Requirements
