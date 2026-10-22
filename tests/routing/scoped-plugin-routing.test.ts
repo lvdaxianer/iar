@@ -51,7 +51,7 @@ function createHost(): PluginHost {
   return host;
 }
 
-test('PluginHost exposes one bounded Plugin descriptor and scoped Function tools', () => {
+test('PluginHost exposes bounded Plugin descriptors and keeps flat Function tools scoped for compatibility', () => {
   const host = createHost();
   const descriptors = host.pluginDescriptors();
   assert.deepEqual(descriptors.map((descriptor) => descriptor.pluginId), ['knowledge-a', 'knowledge-b', 'report-c']);
