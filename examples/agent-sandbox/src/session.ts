@@ -1,9 +1,4 @@
-/** 公开会话对话和确认入口。
- * 路由、回复、流式组件共享 core 中唯一的事件、投影、工作流和待确认状态。
- * HTTP 会话管理器负责入口串行及独立会话的 actionId 校验。
- * @author lvdaxianer@yeah.net
- * @date 2026-10-18
- */
+/** 公开会话入口；路由、回复、流式组件共享 core 中唯一的会话状态。 */
 import { ModelResponseLimitError, trackModelResponseLimit } from './models/model-transport.js';
 import { resolveSandboxTraceId } from './safe-log.js';
 import { SandboxSessionStreamTurn } from './session-stream-turn.js';
@@ -20,10 +15,7 @@ import { finishConfirmedAction, recordAgentExchange, rejectSelection, resolveNoM
 import { withConfirmReplySource, withReplySource, type CompactResult, type ConfirmResult, type ExecuteTurnOutcome, type ExtractFrameOutcome, type RouteEvidence, type StreamEvent, type TurnResult } from './session-types.js';
 import type { TurnTimingTracker } from './turn-timing.js';
 export type { CompactResult, ConfirmResult, PendingActionSummary, ReplySource, RouteEvidence, SandboxDecisionBackend, SandboxMode, SandboxState, StreamEvent, TurnResult, TurnStage } from './session-types.js';
-/** 公开会话对话和确认入口。
- * @author lvdaxianer@yeah.net
- * @date 2026-10-18
- */
+/** 公开会话对话和确认入口。 */
 export class IarSandboxSession extends SandboxSessionCore {
   /** 路由和执行操作访问宿主共享状态。 */
   private readonly routing = this.createRouting();
@@ -33,11 +25,7 @@ export class IarSandboxSession extends SandboxSessionCore {
   private readonly streaming = this.createStreaming();
   /** 普通与 bridge 入口共用同一套计时和轮次编排。 */
   private readonly turnRunner = this.createTurnRunner();
-  /** 绑定路由依赖和可变状态，重置不会留下过期引用。
-   * @returns 使用当前会话状态的路由组件
-   * @author lvdaxianer@yeah.net
-   * @date 2026-10-19
-   */
+  /** 绑定路由依赖和可变状态，重置不会留下过期引用。 */
   private createRouting(): SandboxSessionRouting {
     const session = this;
     return new SandboxSessionRouting({

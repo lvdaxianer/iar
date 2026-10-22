@@ -32,8 +32,8 @@
 
 ## 7. 集成验证
 
-- [ ] 7.1 运行受影响包的 build、lint、单元测试、集成测试和 OpenSpec strict validation；验证 JEV 已配置、JEV 未配置、Intent fallback、provider 超时、确认恢复和 session follow-up 场景。
-- [ ] 7.2 完成全量回归、计划一致性审计、code-review-spec、logging-boundaries 和 backend-reliability 检查，并归档 OpenSpec 变更；验证 `master` 包含所有任务提交且工作树干净。
+- [x] 7.1 运行受影响包的 build、lint、单元测试、集成测试和 OpenSpec strict validation；验证 JEV 已配置、JEV 未配置、Intent fallback、provider 超时、确认恢复和 session follow-up 场景。
+- [x] 7.2 完成全量回归、计划一致性审计、code-review-spec、logging-boundaries 和 backend-reliability 检查，并归档 OpenSpec 变更；验证 `master` 包含所有任务提交且工作树干净。
 
 ## Workflow follow-up
 

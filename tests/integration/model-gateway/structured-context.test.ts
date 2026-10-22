@@ -213,7 +213,7 @@ test('normal and streaming session calls use the live structured context after a
   process.env.IAR_LLM_API_KEY = 'test-key';
   process.env.IAR_LLM_BASE_URL = 'http://127.0.0.1:1';
   globalThis.fetch = async (_url, options) => {
-    const payload = JSON.parse(String(options?.body)) as { stream?: boolean; messages?: Array<{ role: string; content: string }> };
+    const payload = JSON.parse(String(options?.body)) as { stream?: boolean; messages?: Array<{ role: string; content: string }>; tools?: Array<{ function?: { name?: string; parameters?: { properties?: { functionId?: { enum?: unknown[] }; operation?: { enum?: unknown[] } } } } }> };
     const userPrompt = payload.messages?.[1]?.content ?? '';
     prompts.push(userPrompt);
     const semantic = payload.messages?.[0]?.content.includes('Semantic Extractor') === true;
@@ -222,6 +222,10 @@ test('normal and streaming session calls use the live structured context after a
         ? { schemaVersion: 'iar.semantic-frame/v1', intent: 'ticket.create', action: 'create', slots: { operation: 'create' }, references: [], confidence: 0.99 }
         : { schemaVersion: 'iar.semantic-frame/v1', intent: 'unknown', slots: {}, references: [], confidence: 0.2 };
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(frame) } }] }), { status: 200 });
+    }
+    const nestedTool = payload.tools?.find((tool) => tool.function?.parameters?.properties?.functionId?.enum?.includes('ticket.create'))?.function;
+    if (nestedTool) {
+      return new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ type: 'function', function: { name: nestedTool.name, arguments: JSON.stringify({ functionId: 'ticket.create', operation: 'create', arguments: { operation: 'create', query: '帮我创建工单，网络很慢' } }) } }] } }] }), { status: 200 });
     }
     if (payload.stream === true) {
       const content = JSON.stringify({ schemaVersion: 'iar.response/v1', text: '请告诉我你要查询哪一个对象。', clarification: { kind: 'selection', status: 'required', options: [{ key: '1', label: '第一个对象' }, { key: '2', label: '第二个对象' }] } });

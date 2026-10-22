@@ -53,8 +53,8 @@ function oversizedStream(state: { isCancelled: boolean }): Response {
  */
 function installOversizedModel(state: { isCancelled: boolean }): void {
   globalThis.fetch = async (_url, options) => {
-    const payload = JSON.parse(String(options?.body)) as { stream?: boolean; messages?: Array<{ content: string }>; tools?: Array<{ function?: { name?: string } }> };
-    if (payload.messages?.[0]?.content.includes('Function Caller')) return scriptedFunctionCallResponse(payload.tools);
+    const payload = JSON.parse(String(options?.body)) as { stream?: boolean; messages?: Array<{ content: string }>; tools?: Array<{ function?: { name?: string; parameters?: { properties?: { functionId?: { enum?: unknown[] }; operation?: { enum?: unknown[] } } } } }> };
+    if (payload.messages?.[0]?.content.includes('Function Caller')) return scriptedFunctionCallResponse(payload);
     if (payload.stream) return oversizedStream(state);
     // 语义模型按已有方式回退，回复模型返回超限响应。
     if (payload.messages?.[0]?.content.includes('iar.semantic-frame')) return new Response('', { status: 503 });
@@ -63,10 +63,27 @@ function installOversizedModel(state: { isCancelled: boolean }): void {
 }
 
 /** 为新的 Plugin → Function Calling 主路径提供确定性工具调用，避免响应超限夹具误伤执行阶段。 */
-function scriptedFunctionCallResponse(tools: Array<{ function?: { name?: string } }> | undefined): Response {
-  const name = tools?.[0]?.function?.name ?? 'unknown.read';
-  const operation = name.split('.').at(-1) ?? 'read';
-  return new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ type: 'function', function: { name, arguments: JSON.stringify({ operation, query: '列出今天的集成任务' }) } }] } }] }), { status: 200 });
+function scriptedFunctionCallResponse(payload: { messages?: Array<{ content: string }>; tools?: Array<{ function?: { name?: string; parameters?: { properties?: { functionId?: { enum?: unknown[] }; operation?: { enum?: unknown[] } } } } }> }): Response {
+  let semanticIntent: string | undefined;
+  let semanticOperation: string | undefined;
+  try {
+    const input = JSON.parse(payload.messages?.[1]?.content ?? '{}') as { semantic?: { intent?: unknown; slots?: { operation?: unknown } } };
+    if (typeof input.semantic?.intent === 'string') semanticIntent = input.semantic.intent;
+    if (typeof input.semantic?.slots?.operation === 'string') semanticOperation = input.semantic.slots.operation;
+  } catch { /* 测试替身输入不完整时继续选第一个合法候选。 */ }
+  const tools = payload.tools ?? [];
+  const tool = tools.find((item) => {
+    const ids = item.function?.parameters?.properties?.functionId?.enum;
+    return semanticIntent !== undefined && ids?.includes(semanticIntent);
+  })?.function ?? tools[0]?.function;
+  const name = tool?.name ?? 'unknown.read';
+  const functionIds = tool?.parameters?.properties?.functionId?.enum ?? [];
+  const operations = tool?.parameters?.properties?.operation?.enum ?? [];
+  const functionId = typeof semanticIntent === 'string' && functionIds.includes(semanticIntent) ? semanticIntent : (typeof functionIds[0] === 'string' ? functionIds[0] : undefined);
+  const operation = typeof semanticOperation === 'string' && operations.includes(semanticOperation) ? semanticOperation : (typeof operations[0] === 'string' ? operations[0] : name.split('.').at(-1) ?? 'read');
+  const argumentsValue = { operation, query: '列出今天的集成任务' };
+  const argumentsPayload = functionId === undefined ? argumentsValue : { functionId, operation, arguments: argumentsValue };
+  return new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ type: 'function', function: { name, arguments: JSON.stringify(argumentsPayload) } }] } }] }), { status: 200 });
 }
 
 /** 未执行动作时，超限必须返回失败且 done 事件不能伪装为完整回复。
@@ -146,8 +163,8 @@ test('模型响应超限时普通和流式会话明确失败，不保存截断�
  * @date 2026-10-18
  */
 async function timeoutFetch(_url: string | URL | Request, options?: RequestInit): Promise<Response> {
-  const payload = JSON.parse(String(options?.body)) as { stream?: boolean; messages?: Array<{ content: string }>; tools?: Array<{ function?: { name?: string } }> };
-  if (payload.messages?.[0]?.content.includes('Function Caller')) return scriptedFunctionCallResponse(payload.tools);
+  const payload = JSON.parse(String(options?.body)) as { stream?: boolean; messages?: Array<{ content: string }>; tools?: Array<{ function?: { name?: string; parameters?: { properties?: { functionId?: { enum?: unknown[] }; operation?: { enum?: unknown[] } } } } }> };
+  if (payload.messages?.[0]?.content.includes('Function Caller')) return scriptedFunctionCallResponse(payload);
   // 非流式失败让会话继续进入流式兜底。
   if (!payload.stream) return new Response('response-private', { status: 503 });
   return await new Promise((_resolve, reject) => {
