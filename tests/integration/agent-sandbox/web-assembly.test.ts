@@ -66,6 +66,15 @@ test('Markdown 安全子集保留代码块、列表和转义行为', () => {
   assert.equal(render('<img onerror="x">'), '<p>&lt;img onerror=&quot;x&quot;&gt;</p>');
 });
 
+/* 模型常用的 GFM 表格必须生成语义化表格，单元格仍沿用安全行内渲染。 */
+test('Markdown 安全子集渲染 GFM 表格并转义单元格 HTML', () => {
+  const source = readFileSync('examples/agent-sandbox/web/markdown.fragment.js', 'utf8');
+  const helpers = readFileSync('examples/agent-sandbox/web/markdown-lines.fragment.js', 'utf8');
+  const render = runInNewContext(`${source}\n${helpers}\nrenderMarkdown`) as (text: string) => string;
+  const html = render('| 工单号 | 状态 |\n| --- | --- |\n| `ticket-1` | <img onerror="x"> |');
+  assert.match(html, /^<div class="md-table"><table><thead><tr><th>工单号<\/th><th>状态<\/th><\/tr><\/thead><tbody><tr><td><code>ticket-1<\/code><\/td><td>&lt;img onerror=&quot;x&quot;&gt;<\/td><\/tr><\/tbody><\/table><\/div>$/);
+});
+
 /* 渲染入口委托行解析，保持独立职责和可审阅的方法体。
  * 缺失方法先触发断言，避免正则找不到时错误地认为满足上限。
  * 转义正确性由上一个行为测试检查，不由行数代替。
