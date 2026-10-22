@@ -8,7 +8,7 @@
 
 ### Requirement: Plugin scope precedes action filtering
 
-The primary Agent routing path SHALL first give the semantic model only bounded Plugin-level descriptions and accept at most an untrusted Plugin proposal. After runtime filtering and revalidation, the Function stage SHALL receive only the selected Plugin's current Function definitions and input Schemas. The primary path SHALL NOT expose a cross-Plugin flattened Function list to the first model call.
+The primary Agent routing path SHALL expose only bounded Plugin-level tools or descriptions, with each selected Plugin carrying its own current Function and Operation candidates as nested data. After runtime filtering and revalidation, the primary path SHALL NOT expose a cross-Plugin flattened Function list or require a separate Plugin-selection model call.
 
 #### Scenario: First stage sees Plugin descriptions only
 
@@ -25,6 +25,11 @@ The primary Agent routing path SHALL first give the semantic model only bounded 
 - **WHEN** the semantic model returns an unknown, disabled, unauthorized or action-incompatible Plugin ID
 - **THEN** the runtime rejects or falls back to a bounded response path and does not load or execute a Function from that proposal
 
+#### Scenario: Invalid nested proposal is non-authoritative
+
+- **WHEN** the model returns an unknown, disabled, unauthorized or action-incompatible Plugin, Function or Operation
+- **THEN** the runtime rejects or falls back to a bounded response path and does not load or execute the proposed registration
+
 #### Scenario: Query does not load every Plugin query Function
 
 - **WHEN** ten Plugin packages each expose a `query`-compatible Function and the current input has no active Function scope
@@ -39,6 +44,16 @@ The primary Agent routing path SHALL first give the semantic model only bounded 
 
 - **WHEN** an Agent creation configuration disables a Plugin that would otherwise match the current input
 - **THEN** that Plugin and its Functions are absent from semantic/routing candidates, model context and self-introduction metadata and cannot be selected by a model
+
+#### Scenario: Complete proposal is resolved by runtime
+
+- **WHEN** the model proposes a Plugin tool, nested Function/Operation and named arguments
+- **THEN** the runtime revalidates the Plugin and resolves only the matching installed Function registration
+
+#### Scenario: Query does not create an unbounded flat candidate list
+
+- **WHEN** ten Plugin packages each expose a query-compatible Function
+- **THEN** the route request contains ten bounded Plugin tools with nested candidates, and no separately flattened cross-Plugin Function list
 
 ### Requirement: Function manifests declare fixed action types
 
@@ -84,12 +99,12 @@ Plugin and action decisions SHALL remain finite model recommendations; final reg
 
 ### Requirement: Plugin packages own Function scope
 
-The runtime SHALL derive every Function tool and execution candidate from the selected Plugin package's validated nested registrations. Legacy Function-first decision adapters MAY remain available for compatibility but SHALL NOT widen the new Plugin-first path.
+The runtime SHALL derive every Function and Operation candidate from the selected Plugin package's validated nested registrations. Legacy Function-first decision adapters MAY remain available for compatibility but SHALL NOT widen the new Plugin-first path.
 
 #### Scenario: Function routing uses package registrations
 
 - **WHEN** a Plugin package exposes `knowledge.query` and `report.center`
-- **THEN** both Function candidates are derived from that package and Plugin selection for either candidate is restricted to the package's matching registration
+- **THEN** both Function candidates are nested under that package's Plugin tool and Plugin selection for either candidate is restricted to the package's matching registration
 
 #### Scenario: Multiple providers share a Function
 
@@ -98,7 +113,12 @@ The runtime SHALL derive every Function tool and execution candidate from the se
 
 ### Requirement: The primary route uses bounded model stages
 
-The primary route SHALL use one semantic/Plugin proposal call, at most one Function-call proposal call, and one response generation call when a model response is required. It SHALL NOT call a separate Plugin selection model after the semantic proposal.
+The primary nested route SHALL use at most one model proposal call and one response generation call when a model response is required. Legacy compatibility routes MAY use one semantic/Plugin proposal call, one Function-call proposal call, and one response generation call. Neither path SHALL call a separate Plugin-selection model after the proposal.
+
+#### Scenario: Normal nested query has two model stages
+
+- **WHEN** a user asks for a query handled by an enabled Plugin and the Function result uses `model` response mode
+- **THEN** the runtime performs one nested Plugin/Function proposal and one `response.generate` call in that order
 
 #### Scenario: Normal query has three model stages
 

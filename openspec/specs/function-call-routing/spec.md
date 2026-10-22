@@ -15,6 +15,16 @@ The runtime SHALL expose a versioned `iar.function-call/v1` proposal containing 
 - **WHEN** the Function-call model returns a tool call whose name belongs to the finite tool set and whose arguments are a JSON object
 - **THEN** the adapter returns a validated `iar.function-call/v1` proposal with the selected Function and parsed arguments
 
+#### Scenario: Valid nested tool call is normalized
+
+- **WHEN** the model returns a tool call whose name belongs to the finite Plugin tool set and whose arguments contain a valid nested Function/Operation and JSON object parameters
+- **THEN** the adapter returns a validated `iar.function-call/v1` proposal with Plugin ownership and parsed named arguments
+
+#### Scenario: Unknown nested identity is rejected
+
+- **WHEN** the model returns an unknown tool, Function or Operation identity
+- **THEN** the runtime returns a stable rejected result and does not construct or execute an Action
+
 #### Scenario: Unknown tool is rejected
 
 - **WHEN** the model returns a tool name that is not in the selected Plugin's finite Function tool set
@@ -22,7 +32,7 @@ The runtime SHALL expose a versioned `iar.function-call/v1` proposal containing 
 
 ### Requirement: Function calls are restricted to the selected Plugin
 
-The runtime SHALL build Function tools only from the current enabled Plugin record and SHALL reject a proposal whose Plugin or Function ownership does not match that record.
+The runtime SHALL build nested Function/Operation candidates only from the current enabled Plugin registration and SHALL reject a proposal whose Plugin, Function or Operation ownership does not match that registration.
 
 #### Scenario: Cross-Plugin Function proposal is rejected
 
@@ -48,6 +58,11 @@ The runtime SHALL validate Function-call arguments against the installed Functio
 - **WHEN** required arguments are missing, types are invalid, or additional properties are present
 - **THEN** the runtime returns a bounded clarification or stable validation failure and does not execute the Function
 
+#### Scenario: Invalid or misplaced arguments require clarification
+
+- **WHEN** required arguments are missing, types are invalid, additional properties are present, or values are assigned to the wrong named field
+- **THEN** the runtime returns a bounded clarification or stable validation failure and does not execute the Function
+
 ### Requirement: Function calling never grants execution authority
 
 The runtime SHALL perform authorization, capability, policy, confirmation and idempotency checks after validating a Function-call proposal. A tool call response SHALL never directly execute a Function.
@@ -55,6 +70,11 @@ The runtime SHALL perform authorization, capability, policy, confirmation and id
 #### Scenario: High-risk tool call waits for confirmation
 
 - **WHEN** a valid Function-call proposal targets an operation requiring confirmation
+- **THEN** the runtime stores the validated pending Action and does not invoke the Handler or response model until confirmation
+
+#### Scenario: High-risk nested tool call waits for confirmation
+
+- **WHEN** a valid nested proposal targets an operation requiring confirmation
 - **THEN** the runtime stores the validated pending Action and does not invoke the Handler or response model until confirmation
 
 #### Scenario: Query tool result is summarized
