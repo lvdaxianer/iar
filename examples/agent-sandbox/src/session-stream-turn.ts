@@ -2,7 +2,7 @@ import { ModelResponseLimitError, trackModelResponseLimit } from './models/model
 import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
-import { applyRouteDiagnostic, canPassThrough, gateIncompleteSemanticFrame, resolveNoMatchTurn, runPiAgentDelegate } from './session-turn-helpers.js';
+import { applyRouteDiagnostic, canPassThrough, gateIncompleteSemanticFrame, resolveNoMatchTurn, runPiAgentDelegate, semanticIncompleteClarification } from './session-turn-helpers.js';
 import type { ActionDefinition, ActionResult, BehaviorContext, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
@@ -147,7 +147,7 @@ export class SandboxSessionStreamTurn {
     if (!references.ok) return this.finishStreamFallback({ userText, traceId, emit, behaviorContext, timing, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: frame.intent, semanticConfidence: frame.confidence }, ...(references.pendingReference === undefined ? {} : { pendingReference: references.pendingReference }), ...(references.candidates === undefined ? {} : { referenceCandidates: references.candidates }) });
     if (behaviorContext.pendingReference !== undefined) await this.context.resetClarification();
     const routeContext = this.context.currentBehaviorContext();
-    const incomplete = gateIncompleteSemanticFrame(frame, traceId, timing);
+    const incomplete = gateIncompleteSemanticFrame(frame, traceId, timing, userText);
     if (incomplete) {
       const bridgeResult = bridgeMode ? await resolveNoMatchTurn({ piAgent: undefined, pushMessages: this.context.pushMessages, passThroughOnNoMatch: true, userText, evidence: incomplete, behaviorContext: routeContext, selectedDescriptor, functionDescriptors: this.context.functionDescriptors }) : undefined;
       if (bridgeResult) return bridgeResult;
@@ -214,6 +214,12 @@ export class SandboxSessionStreamTurn {
     const { userText, traceId, emit, behaviorContext, timing, evidence, resolvedReferences, pendingReference, referenceCandidates } = context;
     if (!(evidence.semanticIntent === 'unknown' && evidence.reasonCode !== 'reference_unresolved' && (behaviorContext.factHistory?.records.length ?? 0) > 0) && !(behaviorContext.pending.status === 'required' && behaviorContext.pending.options?.some((option) => option.key === userText.trim()) === true)) await this.context.markUnresolved(evidence.reasonCode, pendingReference);
     const currentBehaviorContext = this.context.currentBehaviorContext();
+    const deterministicReply = semanticIncompleteClarification(evidence);
+    if (deterministicReply !== undefined) {
+      timing.skip('response.generate');
+      this.context.pushMessages(userText, deterministicReply);
+      return { status: 'clarification', reply: deterministicReply, route: evidence, reasonCode: evidence.reasonCode };
+    }
     let reasoningStarted = false;
     timing.start('response.generate');
     const reply = await trackModelResponseLimit(() => this.context.fallbackReplyStreamed({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: currentBehaviorContext, recentMessages: this.context.recentMessages, functionDescriptors: this.context.functionDescriptors, reasonCode: evidence.reasonCode, ...(resolvedReferences === undefined ? {} : { resolvedReferences }), ...(referenceCandidates === undefined ? {} : { referenceCandidates }) }, (delta) => { timing.firstToken('response.generate'); emit({ type: 'delta', text: delta }); }, (delta) => {

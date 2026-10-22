@@ -11,7 +11,7 @@ import { confirmationScopeHash } from '@iar/runtime';
 import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, sandboxOperationKind, summarizeAction } from './session-helpers.js';
 import { createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
-import { applyRouteDiagnostic, finishConfirmedAction, gateIncompleteSemanticFrame, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection } from './session-turn-helpers.js';
+import { applyRouteDiagnostic, finishConfirmedAction, gateIncompleteSemanticFrame, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection, semanticIncompleteClarification } from './session-turn-helpers.js';
 import { withConfirmReplySource, withReplySource, type CompactResult, type ConfirmResult, type ExecuteTurnOutcome, type ExtractFrameOutcome, type RouteEvidence, type StreamEvent, type TurnResult } from './session-types.js';
 import type { TurnTimingTracker } from './turn-timing.js';
 export type { CompactResult, ConfirmResult, PendingActionSummary, ReplySource, RouteEvidence, SandboxDecisionBackend, SandboxMode, SandboxState, StreamEvent, TurnResult, TurnStage } from './session-types.js';
@@ -171,7 +171,7 @@ export class IarSandboxSession extends SandboxSessionCore {
     if (!references.ok) return this.finishNormalFallback({ userText, traceId, behaviorContext, timing, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: extracted.frame.intent, semanticConfidence: extracted.frame.confidence }, ...(references.pendingReference === undefined ? {} : { pendingReference: references.pendingReference }), ...(references.candidates === undefined ? {} : { referenceCandidates: references.candidates }) });
     if (behaviorContext.pendingReference !== undefined) await this.resetClarification();
     const routeContext = this.projector.current();
-    const incomplete = gateIncompleteSemanticFrame(extracted.frame, traceId, timing);
+    const incomplete = gateIncompleteSemanticFrame(extracted.frame, traceId, timing, userText);
     if (incomplete) {
       const resolved = await resolveNoMatchTurn({ piAgent: this.piAgent, pushMessages: this.replies.pushMessages.bind(this.replies), passThroughOnNoMatch, userText, evidence: incomplete, behaviorContext: routeContext, selectedDescriptor, functionDescriptors: this.pluginHost.descriptors() });
       return resolved ?? this.finishNormalFallback({ userText, traceId, behaviorContext: routeContext, timing, evidence: incomplete, resolvedReferences: references.references });
@@ -213,6 +213,12 @@ export class IarSandboxSession extends SandboxSessionCore {
     const { userText, traceId, behaviorContext, timing, evidence, resolvedReferences, pendingReference, referenceCandidates } = context;
     if (!hasVerifiedFactsForFollowUp(behaviorContext, evidence) && !matchesPendingOption(behaviorContext, userText)) await this.markUnresolved(evidence.reasonCode, pendingReference);
     const currentBehaviorContext = this.projector.current();
+    const deterministicReply = semanticIncompleteClarification(evidence);
+    if (deterministicReply !== undefined) {
+      timing.skip('response.generate');
+      this.replies.pushMessages(userText, deterministicReply);
+      return { status: 'clarification', reply: deterministicReply, route: evidence, reasonCode: evidence.reasonCode };
+    }
     // 未命中功能时只允许生成澄清回复，不能在兜底阶段隐式执行插件。
     timing.start('response.generate');
     const reply = await trackModelResponseLimit(() => this.replies.fallbackReply({ traceId, runId: SESSION_RUN_ID, userText, behaviorContext: currentBehaviorContext, recentMessages: this.recentMessages, functionDescriptors: this.pluginHost.descriptors(), reasonCode: evidence.reasonCode, ...(resolvedReferences === undefined ? {} : { resolvedReferences }), ...(referenceCandidates === undefined ? {} : { referenceCandidates }) })).catch((error: unknown) => {
