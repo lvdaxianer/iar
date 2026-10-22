@@ -156,7 +156,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     const input = asRecord(request.input);
     if (request.profile.role === 'function.call' || request.profile.role === 'route.propose') return Array.isArray(input.nestedTools) ? buildNestedFunctionPrompt(input) : buildFunctionPrompt(input);
     if (request.profile.role === 'semantic.extract') {
-      return { system: SEMANTIC_SYSTEM_PROMPT, user: buildSemanticUserPrompt(input) };
+      return { system: SEMANTIC_SYSTEM_PROMPT, user: buildSemanticUserPrompt(input), thinking: { type: 'disabled' } };
     }
     if (request.profile.role === 'context.compact') {
       return { system: COMPACT_SYSTEM_PROMPT, user: buildCompactionUserPrompt(input) };
@@ -418,7 +418,8 @@ export class IntentModelProvider extends OpenAICompatibleModelProvider {
     if (request.profile.role === 'function.call') return super.buildPrompt(request);
     return {
       system: `${INTENT_DECISION_SYSTEM_PROMPT}\nPrompt version: ${INTENT_DECISION_PROMPT_VERSION}`,
-      user: JSON.stringify({ promptVersion: INTENT_DECISION_PROMPT_VERSION, input: request.input })
+      user: JSON.stringify({ promptVersion: INTENT_DECISION_PROMPT_VERSION, input: request.input }),
+      thinking: { type: 'disabled' }
     };
   }
 }
@@ -432,6 +433,7 @@ function buildFunctionPrompt(input: Record<string, unknown>): FunctionPrompt {
   return {
     system: FUNCTION_CALL_SYSTEM_PROMPT,
     user: JSON.stringify({ currentMessage: input.currentMessage ?? '', semantic: input.semantic ?? {}, behaviorContext: input.behaviorContext ?? {}, recentMessages: input.recentMessages ?? [] }),
+    thinking: { type: 'disabled' },
     ...(tools.length > 0 ? { tools, toolChoice: tools.length === 1 ? { type: 'function', function: { name: tools[0]!.function.name } } : 'auto', allowToolCalls: true } : {})
   };
 }
@@ -442,7 +444,8 @@ function buildNestedFunctionPrompt(input: Record<string, unknown>): FunctionProm
   return {
     system: FUNCTION_CALL_SYSTEM_PROMPT,
     user: JSON.stringify({ currentMessage: input.currentMessage ?? '', semantic: input.semantic ?? {}, behaviorContext: input.behaviorContext ?? {}, recentMessages: input.recentMessages ?? [] }),
-    ...(tools.length > 0 ? { tools, toolChoice: 'auto' as const, allowToolCalls: true, thinking: { type: 'disabled' as const } } : {})
+    thinking: { type: 'disabled' as const },
+    ...(tools.length > 0 ? { tools, toolChoice: 'auto' as const, allowToolCalls: true } : {})
   };
 }
 
