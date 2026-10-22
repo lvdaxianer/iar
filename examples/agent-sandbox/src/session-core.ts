@@ -13,7 +13,7 @@ import { ModelGateway, ModelProfileRegistry, type IarRuntimeConfiguration, type 
 import { PersistenceSubscriptionBridge } from '@iar/storage';
 import type { SessionMessage, SessionPersistenceProvider } from '@iar/storage';
 import { PluginHost } from '@iar/plugins';
-import { BehaviorContextProjector, type AsyncDecisionAdapter } from '@iar/runtime';
+import { BehaviorContextProjector, type AsyncDecisionAdapter, type AsyncFunctionCallAdapter } from '@iar/runtime';
 import { SubscriptionDispatcher, SubscriptionRegistry, type DispatchEvent } from '@iar/subscriptions';
 import { InMemoryEventStore, type SnapshotStore } from '@iar/storage';
 import { LocalWorkflow, WorkflowEventLog, type ActionExecutor } from '@iar/runtime';
@@ -124,6 +124,7 @@ export class SandboxSessionCore {
   /** Function 与 Plugin 路由分别使用对应决策角色。 */
   protected readonly functionDecisionAdapter: AsyncDecisionAdapter;
   protected readonly pluginDecisionAdapter: AsyncDecisionAdapter;
+  protected readonly functionCallAdapter: AsyncFunctionCallAdapter;
   /** 线程属于该会话，构造失败、过期或服务关闭时释放。 */
   protected readonly bridge = new SyncPluginBridge();
   /** 工作流日志与投影按当前会话隔离，重置时一起替换。 */
@@ -170,7 +171,7 @@ export class SandboxSessionCore {
       this.pluginHost = runtime.pluginHost;
       this.configuration = runtime.configuration;
       this.brainProvider = models.brain; this.registry = models.registry; this.gateway = models.gateway;
-      this.functionDecisionAdapter = models.functionAdapter; this.pluginDecisionAdapter = models.pluginAdapter;
+      this.functionDecisionAdapter = models.functionAdapter; this.pluginDecisionAdapter = models.pluginAdapter; this.functionCallAdapter = models.functionCallAdapter;
       this.workflow = this.createWorkflow();
       this.restoration = this.initializePersistence(options.persistenceProviderOpened === true);
     } catch (error) {

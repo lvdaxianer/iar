@@ -7,9 +7,9 @@
  */
 import { randomUUID } from 'node:crypto';
 import { SCHEMA_VERSIONS, type ActionDefinition, type ActionType, type BehaviorContext, type EventEnvelope, type JsonValue, type PendingReference, type PluginOperation, type PluginPolicyMetadata, type RuleExpression, type VerifiedFactRecord } from '@iar/contracts';
-import { SELF_INTRODUCTION_FUNCTION_ID, type PluginDescriptor, type PluginHost } from '@iar/plugins';
+import { SELF_INTRODUCTION_FUNCTION_ID, type PluginDescriptor, type PluginHost, type PluginScopeDescriptor } from '@iar/plugins';
 import { ModelGateway, SemanticExtractorAdapter, type HistoricalSemanticReference, type ModelGatewayResult, type ModelProfileRegistry, type SemanticFrame } from '@iar/runtime';
-import { PluginFirstRouter, resolveFactRelationCandidates, type AsyncDecisionAdapter, type FactRelationCandidateReference, type RouteResult } from '@iar/runtime';
+import { PluginFirstRouter, resolveFactRelationCandidates, type AsyncDecisionAdapter, type AsyncFunctionCallAdapter, type FactRelationCandidateReference, type RouteResult } from '@iar/runtime';
 import type { FunctionRule, IarRuntimeConfiguration, PluginRule } from '@iar/runtime';
 import type { ActionExecutor, LocalWorkflow } from '@iar/runtime';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
@@ -32,6 +32,7 @@ export type SessionRoutingContext = Pick<CompactionContext, 'eventStore' | 'proj
   /** 两阶段决策各自使用对应适配器。 */
   functionDecisionAdapter: AsyncDecisionAdapter;
   pluginDecisionAdapter: AsyncDecisionAdapter;
+  functionCallAdapter: AsyncFunctionCallAdapter;
   /** 计数器影响动作标识和事件记录，必须反映宿主最新值。 */
   turnCount: number;
   decisionEventCount: number;
@@ -69,8 +70,8 @@ export class SandboxSessionRouting {
    * @date 2026-10-18
    */
   public async extractFrame(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages = this.context.recentMessages, selectedDescriptor?: PluginDescriptor): Promise<ExtractFrameOutcome> {
-    const descriptors = selectedDescriptor ? [selectedDescriptor] : this.context.pluginHost.descriptors();
-    const extracted = await new SemanticExtractorAdapter(this.context.gateway).extract({ traceId, runId, input: { text: userText, behaviorContext, recentMessages, functionDescriptors: descriptors } });
+    const descriptors = selectedDescriptor ? this.context.pluginHost.pluginDescriptors().filter((descriptor) => descriptor.pluginId === selectedDescriptor.pluginId) : this.context.pluginHost.pluginDescriptors();
+    const extracted = await new SemanticExtractorAdapter(this.context.gateway).extract({ traceId, runId, input: { text: userText, behaviorContext, recentMessages, pluginDescriptors: descriptors } });
     if (extracted.ok) return { ok: true, frame: selectedDescriptor ? constrainFrame(extracted.value, selectedDescriptor) : extracted.value, semanticFallback: false };
     if (this.context.mode === 'brain') {
       // 真实 LLM 抽取失败时降级到离线关键词抽取，保证链路可以继续。
@@ -95,9 +96,9 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected async retrySemanticWithScripted(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>, functionDescriptors: PluginDescriptor[]): Promise<ModelGatewayResult<SemanticFrame>> {
+  protected async retrySemanticWithScripted(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>, pluginDescriptors: PluginScopeDescriptor[]): Promise<ModelGatewayResult<SemanticFrame>> {
     const fallbackGateway = new ModelGateway({ registry: this.context.registry, providers: { brain: new ScriptedModelProvider() } });
-    return new SemanticExtractorAdapter(fallbackGateway).extract({ traceId, runId, input: { text: userText, behaviorContext, recentMessages, functionDescriptors } });
+    return new SemanticExtractorAdapter(fallbackGateway).extract({ traceId, runId, input: { text: userText, behaviorContext, recentMessages, pluginDescriptors } });
   }
 
 
@@ -129,6 +130,7 @@ export class SandboxSessionRouting {
       pluginHost: this.context.pluginHost,
       functionDecisionAdapter: this.context.functionDecisionAdapter,
       pluginDecisionAdapter: this.context.pluginDecisionAdapter,
+      functionCallAdapter: this.context.functionCallAdapter,
       authorizePlugin: () => true
     });
   }

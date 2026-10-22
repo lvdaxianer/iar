@@ -16,7 +16,7 @@ import {
 import { buildIntentDecisionInput, type DecisionRequest } from '@iar/runtime';
 import { defineFunction } from '@iar/plugin';
 import { PluginHost } from '@iar/plugins';
-import { BehaviorContextProjector, createInitialContext, PluginFirstRouter, type AsyncDecisionAdapter } from '@iar/runtime';
+import { BehaviorContextProjector, createInitialContext, PluginFirstRouter, type AsyncDecisionAdapter, type AsyncFunctionCallAdapter } from '@iar/runtime';
 import { facts } from './rule-engine-fixtures.js';
 import { pluginPackage } from '../contract/fixtures/plugin-package.js';
 
@@ -51,6 +51,18 @@ function createHost(): PluginHost {
   return host;
 }
 
+test('PluginHost exposes one bounded Plugin descriptor and scoped Function tools', () => {
+  const host = createHost();
+  const descriptors = host.pluginDescriptors();
+  assert.deepEqual(descriptors.map((descriptor) => descriptor.pluginId), ['knowledge-a', 'knowledge-b', 'report-c']);
+  assert.equal(descriptors.every((descriptor) => !Object.hasOwn(descriptor, 'functionId')), true);
+  const tools = host.functionTools('knowledge-b');
+  assert.equal(tools.length > 0, true);
+  assert.equal(tools.every((tool) => tool.pluginId === 'knowledge-b'), true);
+  assert.equal(tools.every((tool) => tool.functionId === 'knowledge.query'), true);
+  assert.equal(host.functionTools('report-c').every((tool) => tool.pluginId === 'report-c'), true);
+});
+
 function transferRule() {
   return {
     pluginId: 'human-transfer',
@@ -74,6 +86,15 @@ function decisionAdapter(calls: DecisionRequest[], choice?: string, status: 'cho
         reasonCode: 'test.choice',
         candidateIds: request.candidates.map((candidate) => candidate.candidateId)
       }, audit: [], events: [] };
+    }
+  };
+}
+
+function functionCallAdapter(calls: Array<{ pluginId: string; functionId: string; tools: string[] }>): AsyncFunctionCallAdapter {
+  return {
+    call: async ({ tools }) => {
+      calls.push({ pluginId: tools[0]?.pluginId ?? '', functionId: tools[0]?.functionId ?? '', tools: tools.map((tool) => tool.name) });
+      return { ok: true, value: { schemaVersion: 'iar.function-call/v1', pluginId: 'knowledge-b', functionId: 'knowledge.query', operation: tools[0]?.operation ?? 'read', arguments: {}, confidence: 0.99 }, audit: [], events: [] };
     }
   };
 }
@@ -127,6 +148,21 @@ test('Plugin-first routing sends bounded Plugin descriptions and only selected P
     actionTypes: ['query'],
     continuation: 'replace'
   });
+});
+
+test('Plugin proposal path skips legacy selection models and calls Function Calling inside the selected Plugin', async () => {
+  const { routerRequest, functionCalls, pluginCalls } = request();
+  const functionCallCalls: Array<{ pluginId: string; functionId: string; tools: string[] }> = [];
+  routerRequest.facts = { ...routerRequest.facts, semantic: { intent: 'knowledge.query', action: 'query', pluginId: 'knowledge-b' } };
+  routerRequest.functionCallAdapter = functionCallAdapter(functionCallCalls);
+  const result = await new PluginFirstRouter().routeAsync(routerRequest);
+
+  assert.equal(result.status, 'matched');
+  assert.equal(result.pluginId, 'knowledge-b');
+  assert.equal(result.functionId, 'knowledge.query');
+  assert.equal(pluginCalls.length, 0);
+  assert.equal(functionCalls.length, 0);
+  assert.deepEqual(functionCallCalls[0]?.tools, ['knowledge.query.execute']);
 });
 
 test('Plugin-first routing excludes Plugins that do not support the semantic action type', async () => {

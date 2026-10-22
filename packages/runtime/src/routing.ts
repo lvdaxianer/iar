@@ -10,8 +10,8 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { ACTION_TYPES, ERROR_CODES, MAX_ROUTING_SCOPE_PLUGINS, type ActionType, type BehaviorContext, type DecisionResult, type RoutingScope } from '@iar/contracts';
-import { providerFailureResult, type DecisionCandidate, type DecisionProvider, type DecisionRequest, type ModelGatewayResult } from './intent/decision/index.js';
+import { ACTION_TYPES, ERROR_CODES, MAX_ROUTING_SCOPE_PLUGINS, SCHEMA_VERSIONS, type ActionType, type BehaviorContext, type DecisionResult, type JsonValue, type RoutingScope } from '@iar/contracts';
+import { providerFailureResult, type DecisionCandidate, type DecisionProvider, type DecisionRequest, type FunctionCallProposal, type FunctionToolDefinition, type ModelGatewayResult } from './intent/decision/index.js';
 import type { FunctionRule, PluginCandidate, PluginRule, RuleEvaluationFacts, RuleEvaluationResult } from './intent/rules/index.js';
 import { RuleEngine } from './intent/rules/index.js';
 import type { PluginHost, PluginRecord } from '@iar/plugins';
@@ -35,6 +35,11 @@ type MatchedRouteInput = RouteEvidence & { pluginId: string; routingScope?: Rout
 export type AsyncDecisionAdapter = {
   /** 使用 trace/run 和有限候选执行一次模型决策。 */
   decide(invocation: { traceId: string; runId: string; request: DecisionRequest; behaviorContext?: BehaviorContext; recentMessages?: Array<{ role: string; text: string }> }): Promise<ModelGatewayResult<DecisionResult>>;
+};
+
+/** 已选 Plugin 内部的 Function Calling 适配器。 */
+export type AsyncFunctionCallAdapter = {
+  call(invocation: { traceId: string; runId: string; input: JsonValue; tools: readonly FunctionToolDefinition[] }): Promise<ModelGatewayResult<FunctionCallProposal>>;
 };
 
 /** 授权回调当前正在验证的阶段和不可变宿主记录。 */
@@ -91,6 +96,8 @@ export type AsyncRouteRequest = Omit<RouteRequest, 'functionProvider' | 'pluginP
   functionDecisionAdapter: AsyncDecisionAdapter;
   /** Plugin 阶段统一模型适配器。 */
   pluginDecisionAdapter: AsyncDecisionAdapter;
+  /** 存在时启用新的 Plugin proposal → scoped Function Calling 路径。 */
+  functionCallAdapter?: AsyncFunctionCallAdapter;
 };
 
 /** 两阶段路由结果，永远不代表已执行插件。 */
@@ -111,6 +118,8 @@ export type RouteResult = {
   functionDecision?: DecisionResult;
   /** Plugin provider 的受控输出。 */
   pluginDecision?: DecisionResult;
+  /** Function Calling 的受控提案证据。 */
+  functionCallProposal?: FunctionCallProposal;
   /** 供下一轮意图识别使用的有界 Plugin/Action 范围。 */
   routingScope?: RoutingScope;
 };
@@ -210,6 +219,9 @@ export class PluginFirstRouter {
 
   /** 执行 Plugin-first → Function-secondary 的异步路由。 */
   public async routeAsync(request: AsyncRouteRequest): Promise<RouteResult> {
+    // 只有 semantic.extract 已提出经过校验前仍不可信的 Plugin proposal 时，才进入新链路；
+    // 旧帧没有 pluginId 时保留兼容路径，避免把历史调用方静默改成无路由。
+    if (request.functionCallAdapter && semanticPluginId(request.facts)) return this.routePluginProposalAsync(request);
     const records = filterRecordsByActionType(request.pluginHost.businessCandidates(), request.facts);
     const functionIdsByPlugin = new Map(records.map((record) => [record.manifest.pluginId, functionIdsForAction(record, request.facts)]));
     const authorized = authorizeCandidates(request, records, (record) => selectPluginRuleFunction(record, request.pluginRules) ?? functionIdsByPlugin.get(record.manifest.pluginId)?.[0] ?? '');
@@ -255,6 +267,43 @@ export class PluginFirstRouter {
     const routingScope = buildRoutingScope(pluginEvaluation, selected, request.behaviorContext, selectedFunctionId);
     return finalizePluginRoute({ request, functionId: selectedFunctionId, functionEvaluation, functionDecision, pluginEvaluation, pluginDecision, routingScope });
   }
+
+  /** 使用 semantic.extract 提出的 Plugin，并仅在该 Plugin 内调用一次 Function Calling。 */
+  private async routePluginProposalAsync(request: AsyncRouteRequest): Promise<RouteResult> {
+    const proposedPluginId = semanticPluginId(request.facts);
+    const records = filterRecordsByActionType(request.pluginHost.businessCandidates(), request.facts);
+    const selected = proposedPluginId ? records.find((record) => record.manifest.pluginId === proposedPluginId) : undefined;
+    if (!selected) return evaluationResult('plugin', evaluatePluginScope(this.engine, request.facts, [], request.pluginRules));
+
+    const functionIds = functionIdsForAction(selected, request.facts);
+    const authorized = authorizeCandidates(request, [selected], () => functionIds[0] ?? '');
+    const pluginEvaluation = evaluatePluginScope(this.engine, request.facts, authorized, request.pluginRules);
+    if (pluginEvaluation.status !== 'matched' || pluginEvaluation.candidates.length === 0) return evaluationResult('plugin', pluginEvaluation);
+    if (!request.functionCallAdapter) return evaluationResult('plugin', pluginEvaluation);
+
+    const tools = request.pluginHost.functionTools(selected.manifest.pluginId) as readonly FunctionToolDefinition[];
+    if (tools.length === 0) return rejectedResult({ functionId: '', functionEvaluation: emptyFunctionEvaluation(), functionDecision: emptyFunctionDecision(''), pluginEvaluation, pluginDecision: emptyPluginDecision(selected.manifest.pluginId), reasonCode: 'function_tools_unavailable' });
+    const functionCall = await safeFunctionCall(request.functionCallAdapter, request.traceId, request.runId, {
+      currentMessage: request.currentMessage ?? '',
+      behaviorContext: request.behaviorContext ?? null,
+      recentMessages: request.recentMessages ?? []
+    }, tools);
+    if (!functionCall) return rejectedResult({ functionId: '', functionEvaluation: emptyFunctionEvaluation(), functionDecision: emptyFunctionDecision(''), pluginEvaluation, pluginDecision: emptyPluginDecision(selected.manifest.pluginId), reasonCode: 'function_call_failed' });
+    if (functionCall.pluginId !== selected.manifest.pluginId || !tools.some((tool) => tool.functionId === functionCall.functionId && (tool.operation === undefined || tool.operation === functionCall.operation))) {
+      return rejectedResult({ functionId: functionCall.functionId, functionEvaluation: functionSelectionEvaluation(functionIds), functionDecision: functionDecisionFromCall(functionCall), pluginEvaluation, pluginDecision: emptyPluginDecision(selected.manifest.pluginId), reasonCode: 'function_call_out_of_scope' });
+    }
+    const selectedFunction = selected.functions.get(functionCall.functionId);
+    if (!selectedFunction || !functionIds.includes(functionCall.functionId)) {
+      return rejectedResult({ functionId: functionCall.functionId, functionEvaluation: functionSelectionEvaluation(functionIds), functionDecision: functionDecisionFromCall(functionCall), pluginEvaluation, pluginDecision: emptyPluginDecision(selected.manifest.pluginId), reasonCode: 'function_call_out_of_scope' });
+    }
+    const finalPluginEvaluation = this.engine.evaluatePlugins({ facts: request.facts, functionId: functionCall.functionId, candidates: authorized.map((candidate) => ({ ...candidate, functionId: functionCall.functionId })), rules: request.pluginRules.filter((rule) => rule.pluginId === selected.manifest.pluginId && rule.functionId === functionCall.functionId) });
+    const pluginDecision = pluginDecisionFromProposal(selected.manifest.pluginId, pluginEvaluation);
+    const functionEvaluation = functionSelectionEvaluation([functionCall.functionId]);
+    const functionDecision = functionDecisionFromCall(functionCall);
+    const routingScope = buildRoutingScope(finalPluginEvaluation, selected, request.behaviorContext, functionCall.functionId);
+    const result = finalizePluginRoute({ request, functionId: functionCall.functionId, functionEvaluation, functionDecision, pluginEvaluation: finalPluginEvaluation, pluginDecision, routingScope });
+    return { ...result, functionCallProposal: functionCall };
+  }
 }
 
 /**
@@ -266,6 +315,17 @@ function filterRecordsByActionType(records: readonly PluginRecord[], facts: Rule
   const action = typeof semantic === 'object' && semantic !== null && !Array.isArray(semantic) ? (semantic as Record<string, unknown>).action : undefined;
   if (!isActionType(action)) return [];
   return records.filter((record) => record.manifest.pluginKind === 'business' && pluginFunctionIds(record).some((functionId) => record.functions.get(functionId)?.definition.actionTypes.includes(action)));
+}
+
+/** 读取 semantic.extract 的不可信 Plugin proposal。 */
+function semanticPluginId(facts: RuleEvaluationFacts): string | undefined {
+  const semantic = facts.semantic;
+  if (!isRecord(semantic) || typeof semantic.pluginId !== 'string' || semantic.pluginId.length === 0) return undefined;
+  return semantic.pluginId;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** 返回 Plugin 内支持当前语义动作的 Function，保持注册顺序稳定。 */
@@ -397,6 +457,28 @@ async function safeAsyncDecision(adapter: AsyncDecisionAdapter, traceId: string,
     // 适配器异常不能绕过路由的 DecisionResult 边界或进入公开错误正文。
     return providerFailureResult(request);
   }
+}
+
+/** 调用 Function Calling 并把 provider 失败收敛为路由内的稳定空结果。 */
+async function safeFunctionCall(adapter: AsyncFunctionCallAdapter, traceId: string, runId: string, input: JsonValue, tools: readonly FunctionToolDefinition[]): Promise<FunctionCallProposal | undefined> {
+  try {
+    const result = await adapter.call({ traceId, runId, input, tools });
+    return result.ok ? result.value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function functionDecisionFromCall(proposal: FunctionCallProposal): DecisionResult {
+  return { schemaVersion: SCHEMA_VERSIONS.decision, decisionType: 'function.select', decisionVersion: DECISION_VERSION, status: 'choice', choice: proposal.functionId, score: proposal.confidence, reasonCode: 'function_call.choice', candidateIds: [proposal.functionId] };
+}
+
+function pluginDecisionFromProposal(pluginId: string, evaluation: RuleEvaluationResult): DecisionResult {
+  return { schemaVersion: SCHEMA_VERSIONS.decision, decisionType: 'plugin.select', decisionVersion: DECISION_VERSION, status: 'choice', choice: pluginId, score: 1, reasonCode: 'semantic.plugin.choice', candidateIds: evaluation.candidates.map((candidate) => candidate.candidateId) };
+}
+
+function emptyPluginDecision(pluginId: string): DecisionResult {
+  return { schemaVersion: SCHEMA_VERSIONS.decision, decisionType: 'plugin.select', decisionVersion: DECISION_VERSION, status: 'rejected', reasonCode: 'plugin_unavailable', candidateIds: [pluginId] };
 }
 
 /**

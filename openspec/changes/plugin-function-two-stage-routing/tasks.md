@@ -8,9 +8,9 @@
 
 ## 2. Plugin-first 候选与两阶段路由
 
-- [ ] 2.1 增加 Plugin 级候选描述与 Function 工具描述投影，保证禁用/系统 Plugin 不进入候选。
-- [ ] 2.2 扩展 semantic frame 的 Plugin proposal，并移除新主路径第一阶段的全量 Function 描述。
-- [ ] 2.3 改造 `PluginFirstRouter`：验证 Plugin proposal，加载选中 Plugin 的 Function 集合，执行 `function.call`，并复用 ownership/authorization/capability 门禁。
+- [x] 2.1 增加 Plugin 级候选描述与 Function 工具描述投影，保证禁用/系统 Plugin 不进入候选。
+- [x] 2.2 扩展 semantic frame 的 Plugin proposal，并移除新主路径第一阶段的全量 Function 描述。
+- [x] 2.3 改造 `PluginFirstRouter`：验证 Plugin proposal，加载选中 Plugin 的 Function 集合，执行 `function.call`，并复用 ownership/authorization/capability 门禁。
 
 ## 3. Sandbox 执行与回复集成
 

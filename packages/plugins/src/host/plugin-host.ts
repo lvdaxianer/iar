@@ -9,6 +9,7 @@ import {
   MAX_ROUTING_SCOPE_PLUGINS,
   type ContractErrorResult,
   type EventEnvelope,
+  type JsonValue,
   type PluginManifest
 } from '@iar/contracts';
 import type { PluginPackage } from '../sdk/index.js';
@@ -18,7 +19,7 @@ import { PluginEventLog } from './plugin-events.js';
 import { createRecord, pluginIdOf, prepareInstall, validateInstallSet, type InstallPreparation } from './plugin-installation.js';
 import { canTransition, findActiveDependent, findDependent, findUnavailableDependency } from './plugin-lifecycle.js';
 import { cloneManifest, cloneRecord, hostError } from './plugin-host-support.js';
-import type { PluginDescriptor, PluginDescriptorOptions, PluginHostResult, PluginRecord } from './types.js';
+import type { PluginDescriptor, PluginDescriptorOptions, PluginFunctionToolDescriptor, PluginHostResult, PluginRecord, PluginScopeDescriptor } from './types.js';
 /**
  * 管理当前插件能力和不可变生命周期事件。
  *
@@ -236,6 +237,29 @@ export class PluginHost {
     return this.allDescriptors(options).slice(0, MAX_ROUTING_SCOPE_PLUGINS);
   }
 
+  /** 投影第一阶段可见的 Plugin 级能力范围，不包含 Function 或参数 Schema。 */
+  public pluginDescriptors(options: PluginDescriptorOptions = {}): PluginScopeDescriptor[] {
+    const authorize = options.authorize ?? (() => true);
+    return this.businessCandidates()
+      .filter((record) => authorize(record))
+      .map(pluginScopeDescriptorOf)
+      .slice(0, MAX_ROUTING_SCOPE_PLUGINS);
+  }
+
+  /** 为已选 Plugin 投影其当前 Function/Operation 工具，拒绝跨 Plugin 范围。 */
+  public functionTools(pluginId: string): PluginFunctionToolDescriptor[] {
+    const record = this.records.get(pluginId);
+    if (!record || record.state !== 'enabled' || record.manifest.pluginKind !== 'business') return [];
+    return [...record.functions.values()].flatMap((functionRecord) => functionRecord.operations.map((operation) => ({
+      name: `${functionRecord.definition.functionId}.${operation.name}`,
+      pluginId: record.manifest.pluginId,
+      functionId: functionRecord.definition.functionId,
+      description: `${functionRecord.definition.description}：${operation.description}`,
+      parameters: structuredClone(functionRecord.definition.inputSchema) as JsonValue,
+      operation: operation.name
+    })));
+  }
+
   /** 投影全部当前启用的业务 Plugin 描述，供聚合型内置能力使用。
    *
    * @param options - 可选的调用方授权过滤器
@@ -396,6 +420,26 @@ function descriptorOf(record: PluginRecord, functionId: string): PluginDescripto
       operations: [...functionRecord.operations]
     }
   };
+}
+
+/** 从一个 Plugin 的全部 Function 聚合第一阶段所需的有限描述。 */
+function pluginScopeDescriptorOf(record: PluginRecord): PluginScopeDescriptor {
+  if (record.manifest.pluginKind !== 'business') throw new Error('系统插件不能形成业务描述');
+  const functions = [...record.functions.values()];
+  return {
+    candidateKey: opaquePluginCandidateKey(record.manifest.pluginId),
+    pluginId: record.manifest.pluginId,
+    description: record.manifest.description,
+    actionTypes: [...new Set(functions.flatMap((item) => item.definition.actionTypes))],
+    capabilities: [...record.manifest.capabilities]
+  };
+}
+
+/** 生成不暴露业务 ID 的稳定 Plugin 候选键。 */
+function opaquePluginCandidateKey(pluginId: string): string {
+  let hash = 2166136261;
+  for (const char of pluginId) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+  return `plugin-${(hash >>> 0).toString(36)}`;
 }
 
 /** 生成不暴露业务 ID 的稳定候选键，重启后仍可重建同一映射。 */

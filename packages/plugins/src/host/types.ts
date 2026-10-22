@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import type { ActionType, ContractErrorResult, EventEnvelope, FunctionDefinition, PluginManifest, PluginOperation, RiskLevel } from '@iar/contracts';
+import type { ActionType, ContractErrorResult, EventEnvelope, FunctionDefinition, JsonValue, PluginManifest, PluginOperation, RiskLevel } from '@iar/contracts';
 import type { FunctionHandler, PluginPackage } from '../sdk/index.js';
 
 /**
@@ -68,6 +68,25 @@ export type PluginDescriptor = {
 /** 描述投影的授权边界。 */
 export type PluginDescriptorOptions = {
   authorize?: (record: PluginRecord) => boolean;
+};
+
+/** 提供给第一阶段语义抽取的 Plugin 级描述，不暴露 Function 级候选。 */
+export type PluginScopeDescriptor = {
+  candidateKey: string;
+  pluginId: string;
+  description: string;
+  actionTypes: ActionType[];
+  capabilities: string[];
+};
+
+/** 选中 Plugin 后投影给 Function Calling 的单个 Operation 工具。 */
+export type PluginFunctionToolDescriptor = {
+  name: string;
+  pluginId: string;
+  functionId: string;
+  description: string;
+  parameters: JsonValue;
+  operation?: string;
 };
 
 /**
