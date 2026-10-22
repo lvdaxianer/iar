@@ -111,6 +111,19 @@ test('Pi host 回复 meta 与 Timing 面板展示服务端耗时和 traceId', ()
   assert.match(page, /id="timingTraceId"/);
 });
 
+/* IAR 最终 response.generate 的 reasoning/answer 必须独立于抽取阶段，且答案首增量收起思考。 */
+test('Pi host 只展示最终回复思考并在答案开始时收起', () => {
+  const adapter = readFileSync(join(PAGE_DIR, 'pi-host.fragment.js'), 'utf8');
+  assert.match(adapter, /iarReasoningDelta/);
+  assert.match(adapter, /iarDelta/);
+  assert.match(adapter, /function appendPiHostIarReasoning\(/);
+  assert.match(adapter, /function appendPiHostIarDelta\(/);
+  assert.match(adapter, /className = 'reasoning'/);
+  assert.match(adapter, /reasoningEl\.open = false/);
+  assert.match(adapter, /event\.type === 'iarReasoningDelta'/);
+  assert.doesNotMatch(adapter, /semantic\.extract[\s\S]{0,160}reasoning/);
+});
+
 /* 与沙箱页同一展示契约：消息追加、条目渲染、确认卡片与流式气泡都要有界。 */
 test('Pi host 页面交互入口按职责拆分且有界', () => {
   const adapter = readFileSync(join(PAGE_DIR, 'pi-host.fragment.js'), 'utf8');

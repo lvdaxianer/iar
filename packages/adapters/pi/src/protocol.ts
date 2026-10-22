@@ -59,6 +59,14 @@ export type BridgeInputRequest = { text: string; requestId?: string };
 /** 输入响应。 */
 export type BridgeInputResponse = { version: typeof PI_BRIDGE_VERSION; iarSessionId: IarSessionId; disposition: BridgeDisposition; reply?: string; reasonCode?: string; route?: BridgeRouteEvidence; pending?: BridgePendingAction; capabilityContext?: BridgeCapabilityContext; replySource?: BridgeReplySource; timing?: BridgeTimingSummary };
 
+/** Bridge 输入流只允许最终回复阶段的 reasoning/answer 增量。 */
+export type BridgeInputStreamEvent =
+  | { type: 'reasoningDelta'; text: string }
+  | { type: 'delta'; text: string }
+  | { type: 'timing'; summary: BridgeTimingSummary }
+  | { type: 'done'; result: BridgeInputResponse }
+  | { type: 'error'; code: string; message: string; retryable: boolean };
+
 /** 确认或取消请求。 */
 export type BridgeConfirmRequest = { actionId: string; accepted: boolean; requestId?: string };
 

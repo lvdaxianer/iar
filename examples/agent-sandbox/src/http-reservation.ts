@@ -75,7 +75,7 @@ export function registerReservationHooks(app: FastifyInstance, state: Reservatio
 function reserveRequest(options: ReserveRequestOptions): void {
   const { state, request, reply, done } = options; const route = request.routeOptions.url ?? '';
   const deleting = request.method === 'DELETE' && route === '/api/sessions/:sessionId';
-  if (!deleting && !/^\/api(?:\/sessions\/:sessionId)?\/(?:chat|confirm|compact|state|reset)$/.test(route) && !/^\/api\/bridge\/v1\/sessions\/:sessionId\/(?:input|confirm|state)$/.test(route)) { done(); return; }
+  if (!deleting && !/^\/api(?:\/sessions\/:sessionId)?\/(?:chat|confirm|compact|state|reset)$/.test(route) && !/^\/api\/bridge\/v1\/sessions\/:sessionId\/(?:input|input\/stream|confirm|state)$/.test(route)) { done(); return; }
   try {
     const reservation = state.manager.reserve(readSessionId(request), deleting);
     state.reservations.set(request, reservation);
