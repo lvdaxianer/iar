@@ -122,8 +122,8 @@ export class FunctionCallAdapter {
 
 /** 使用一个 OpenAI nested Plugin tool 提出完整 Function/Operation 调用。 */
 export class NestedFunctionCallAdapter {
-  /** 创建绑定 backend 的 nested Function-call adapter。 */
-  public constructor(private readonly gateway: ModelGateway, private readonly backend?: 'jev' | 'intent-model') {}
+  /** 创建绑定 backend/role 的 nested Function-call adapter。 */
+  public constructor(private readonly gateway: ModelGateway, private readonly backend?: 'jev' | 'intent-model', private readonly role: 'function.call' | 'route.propose' = 'function.call') {}
 
   /** 发送当前 Plugin tools 并校验完整的 nested proposal。 */
   public call(invocation: NestedFunctionCallInvocation, profileId?: string, options?: Pick<ModelGatewayInvocationOptions, 'crossBackendFallback'>): Promise<ModelGatewayResult<NestedFunctionCallProposal>> {
@@ -131,7 +131,15 @@ export class NestedFunctionCallAdapter {
     if (!snapshot) return Promise.resolve(invalidNestedFunctionCallResult('Nested Function-call 输入无效'));
     const input = withNestedFunctionTools(snapshot.input, snapshot.tools);
     const gatewayOptions = this.backend ? decisionOptions(this.backend, profileId, options) : undefined;
-    return this.gateway.invoke('function.call', { traceId: snapshot.traceId, runId: snapshot.runId, input }, (raw) => validateNestedFunctionCallProposal(raw, snapshot.tools), gatewayOptions);
+    return this.gateway.invoke(this.role, { traceId: snapshot.traceId, runId: snapshot.runId, input }, (raw) => validateNestedFunctionCallProposal(raw, snapshot.tools), gatewayOptions);
+  }
+}
+
+/** 主路由 nested proposal：只调用普通交互模型，不参与 JEV/Intent 兼容解析。 */
+export class NestedRouteAdapter extends NestedFunctionCallAdapter {
+  /** 创建普通交互模型路由 adapter。 */
+  public constructor(gateway: ModelGateway) {
+    super(gateway, undefined, 'route.propose');
   }
 }
 

@@ -3,6 +3,33 @@
   "profiles": [
     {
       "schemaVersion": "iar.model-profile/v1",
+      "profileId": "nested-route-primary",
+      "profileVersion": "1.0.0",
+      "role": "route.propose",
+      "provider": "brain",
+      "modelId": "deepseek-v4-pro",
+      "modelVersion": "deepseek-v4-pro",
+      "environment": { "endpoint": "IAR_LLM_BASE_URL", "apiKey": "IAR_LLM_API_KEY", "modelId": "IAR_LLM_MODEL_ID" },
+      "timeoutMs": 15000,
+      "retryPolicy": { "maxAttempts": 2, "backoffMs": 200, "retryOn": ["timeout", "provider_unavailable"] },
+      "fallbackProfileId": "nested-route-fallback",
+      "structuredOutput": { "enabled": true, "schemaId": "iar.nested-function-call/v1" }
+    },
+    {
+      "schemaVersion": "iar.model-profile/v1",
+      "profileId": "nested-route-fallback",
+      "profileVersion": "1.0.0",
+      "role": "route.propose",
+      "provider": "brain",
+      "modelId": "deepseek-v4-pro",
+      "modelVersion": "deepseek-v4-pro",
+      "environment": { "endpoint": "IAR_LLM_BASE_URL", "apiKey": "IAR_LLM_API_KEY", "modelId": "IAR_LLM_MODEL_ID" },
+      "timeoutMs": 10000,
+      "retryPolicy": { "maxAttempts": 1, "backoffMs": 0, "retryOn": ["timeout"] },
+      "structuredOutput": { "enabled": true, "schemaId": "iar.nested-function-call/v1" }
+    },
+    {
+      "schemaVersion": "iar.model-profile/v1",
       "profileId": "semantic-extractor-primary",
       "profileVersion": "1.0.0",
       "role": "semantic.extract",

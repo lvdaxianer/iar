@@ -99,7 +99,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     if (!connection.apiKey || !connection.baseUrl) throw new ModelProviderError('provider_unavailable');
     const prompt = this.buildPrompt(request);
     const raw = await runWithModelLogContext(request.traceId, () => callModel({ connection, ...prompt, signal: request.signal }));
-    if (request.profile.role !== 'function.call') return raw;
+    if (request.profile.role !== 'function.call' && request.profile.role !== 'route.propose') return raw;
     const input = asRecord(request.input);
     return Array.isArray(input.nestedTools)
       ? normalizeNestedFunctionCallResult(raw, readNestedTools(input.nestedTools))
@@ -154,7 +154,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
    */
   protected buildPrompt(request: ModelProviderRequest): FunctionPrompt {
     const input = asRecord(request.input);
-    if (request.profile.role === 'function.call') return Array.isArray(input.nestedTools) ? buildNestedFunctionPrompt(input) : buildFunctionPrompt(input);
+    if (request.profile.role === 'function.call' || request.profile.role === 'route.propose') return Array.isArray(input.nestedTools) ? buildNestedFunctionPrompt(input) : buildFunctionPrompt(input);
     if (request.profile.role === 'semantic.extract') {
       return { system: SEMANTIC_SYSTEM_PROMPT, user: buildSemanticUserPrompt(input) };
     }

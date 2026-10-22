@@ -6,8 +6,8 @@
  */
 import type { JsonValue } from '@iar/contracts';
 import type { DecisionBackend } from './types.js';
-/** Phase 3.1 允许的模型角色集合。 */
-export type ModelRole = 'semantic.extract' | 'function.call' | 'function.select' | 'plugin.select' | 'context.compact' | 'response.generate';
+/** 模型角色集合；route.propose 是主链一次性 nested Plugin/Function proposal。 */
+export type ModelRole = 'semantic.extract' | 'route.propose' | 'function.call' | 'function.select' | 'plugin.select' | 'context.compact' | 'response.generate';
 
 /** ModelProfile 的字段白名单，显式保留可选的 decisionBackend 和 environment。 */
 const MODEL_PROFILE_KEYS = ['schemaVersion', 'profileId', 'profileVersion', 'role', 'decisionBackend', 'provider', 'modelId', 'modelVersion', 'timeoutMs', 'retryPolicy', 'fallbackProfileId', 'structuredOutput', 'environment'] as const;
@@ -505,7 +505,7 @@ function isEnvironmentVariableName(value: unknown): value is string {
 
 /** 判断 role 是否属于 Phase 3.1 允许集合。 @param value - 未知 role @returns 是否为 ModelRole @author lvdaxianer@yeah.net @date 2026-10-17 */
 function isModelRole(value: unknown): value is ModelRole {
-  return value === 'semantic.extract' || value === 'function.call' || value === 'function.select' || value === 'plugin.select' || value === 'context.compact' || value === 'response.generate';
+  return value === 'semantic.extract' || value === 'route.propose' || value === 'function.call' || value === 'function.select' || value === 'plugin.select' || value === 'context.compact' || value === 'response.generate';
 }
 
 /** 判断 role 是否属于决策选择角色。 @param value - 未知 role @returns 是否为选择 role @author lvdaxianer@yeah.net @date 2026-10-17 */
