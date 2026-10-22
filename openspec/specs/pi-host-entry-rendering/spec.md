@@ -11,7 +11,9 @@ envelope.
 ### Requirement: Render IAR bridge entry payloads
 
 The Pi host demo SHALL render the `data` payload of an SSE entry whose
-`customType` is `iar-bridge`, including its disposition and content.
+`customType` is `iar-bridge`, including its disposition and content. Markdown
+content SHALL support the bounded GFM table form used by response models while
+remaining HTML-escaped and safe to display.
 
 #### Scenario: Handled IAR result is visible
 
@@ -19,6 +21,19 @@ The Pi host demo SHALL render the `data` payload of an SSE entry whose
   disposition and response content
 - **THEN** the page renders the disposition and response content from the
   envelope's `data` object
+
+#### Scenario: GFM table is rendered as a table
+
+- **WHEN** response content contains a valid header row, delimiter row and
+  data rows using pipe-separated GFM table syntax
+- **THEN** the page renders a semantic table with header and body cells rather
+  than displaying the pipe syntax as separate paragraphs
+
+#### Scenario: Table content remains escaped
+
+- **WHEN** a table cell contains HTML-looking text or a script-like payload
+- **THEN** the cell displays that value as text and does not create executable
+  markup
 
 #### Scenario: Unrelated entry is ignored
 
