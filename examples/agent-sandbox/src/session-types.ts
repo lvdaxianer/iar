@@ -48,6 +48,8 @@ export type RouteEvidence = {
   pluginScore?: number;
   /** 语义抽取是否走了离线 ScriptedModelProvider 兜底重试。 */
   semanticFallback?: boolean;
+  /** 进入路由前由运行时识别出的缺失字段。 */
+  missingField?: 'intent' | 'action' | 'pluginId' | 'functionId' | 'operation' | 'parameters';
   /** 契约失败时模型期望的操作标识。 */
   expectedOperation?: string;
   /** 契约失败时模型实际返回的操作标识。 */
