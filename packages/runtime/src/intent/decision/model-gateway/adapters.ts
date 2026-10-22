@@ -21,6 +21,8 @@ export type SemanticFrame = {
   subject?: { type?: string; id?: string; source?: 'input' | 'context' | 'event' | 'plugin' };
   /** 结构化意图。 */
   intent: string;
+  /** 第一阶段提出的 Plugin 标识，运行时必须重新校验。 */
+  pluginId?: string;
   /** 结构化动作；缺失的旧模型输出会在边界归一化为 unknown。 */
   action: SemanticActionType;
   /** 只承载 JSON-safe 槽位事实。 */
@@ -297,9 +299,9 @@ export type ClarificationMetadata = {
 /** 校验 SemanticFrame 输出。 @param raw - provider 原始输出 @returns 结构化验证结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function validateSemanticFrame(raw: unknown): ModelOutputValidation<SemanticFrame> {
   // SemanticFrame 只允许抽取字段，未知字段不能进入规则引擎。
-  if (!isRecord(raw) || !hasOnlyKeys(raw, ['schemaVersion', 'subject', 'intent', 'action', 'slots', 'references', 'confidence'])) return { ok: false, message: 'SemanticFrame Schema 无效' };
+  if (!isRecord(raw) || !hasOnlyKeys(raw, ['schemaVersion', 'subject', 'intent', 'pluginId', 'action', 'slots', 'references', 'confidence'])) return { ok: false, message: 'SemanticFrame Schema 无效' };
   const schemaVersion = raw.schemaVersion;
-  if (!isSemanticFrameVersion(schemaVersion) || !isNonEmptyString(raw.intent) || !isRecord(raw.slots) || !isJsonValue(raw.slots) || !Array.isArray(raw.references) || !raw.references.every((reference) => isReference(reference, schemaVersion)) || typeof raw.confidence !== 'number' || !Number.isFinite(raw.confidence) || raw.confidence < 0 || raw.confidence > 1 || (raw.subject !== undefined && !isSubject(raw.subject)) || (raw.action !== undefined && !isSemanticActionType(raw.action))) return { ok: false, message: 'SemanticFrame Schema 无效' };
+  if (!isSemanticFrameVersion(schemaVersion) || !isNonEmptyString(raw.intent) || (raw.pluginId !== undefined && !isNonEmptyString(raw.pluginId)) || !isRecord(raw.slots) || !isJsonValue(raw.slots) || !Array.isArray(raw.references) || !raw.references.every((reference) => isReference(reference, schemaVersion)) || typeof raw.confidence !== 'number' || !Number.isFinite(raw.confidence) || raw.confidence < 0 || raw.confidence > 1 || (raw.subject !== undefined && !isSubject(raw.subject)) || (raw.action !== undefined && !isSemanticActionType(raw.action))) return { ok: false, message: 'SemanticFrame Schema 无效' };
   return { ok: true, value: { ...structuredClone(raw) as Omit<SemanticFrame, 'action'> & { action?: SemanticActionType }, action: raw.action ?? 'unknown' } };
 }
 

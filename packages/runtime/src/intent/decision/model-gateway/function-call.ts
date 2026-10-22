@@ -50,9 +50,10 @@ export type FunctionCallProposal = {
 export function validateFunctionCallProposal(raw: unknown, tools: readonly FunctionToolDefinition[] = []): ModelOutputValidation<FunctionCallProposal> {
   if (!isRecord(raw) || !hasOnlyKeys(raw, ['schemaVersion', 'pluginId', 'functionId', 'operation', 'arguments', 'confidence'])) return invalid('Function-call Schema 无效');
   if (raw.schemaVersion !== 'iar.function-call/v1' || !isNonEmptyString(raw.pluginId) || !isNonEmptyString(raw.functionId) || !isNonEmptyString(raw.operation) || !isArguments(raw.arguments) || !isConfidence(raw.confidence)) return invalid('Function-call Schema 无效');
-  const tool = tools.find((item) => item.pluginId === raw.pluginId && item.functionId === raw.functionId);
-  if (tools.length > 0 && !tool) return invalid('Function-call 工具不在当前 Plugin 范围内');
-  if (tool?.operation && tool.operation !== raw.operation) return invalid('Function-call operation 不匹配已安装工具');
+  const functionTool = tools.find((item) => item.pluginId === raw.pluginId && item.functionId === raw.functionId);
+  const tool = tools.find((item) => item.pluginId === raw.pluginId && item.functionId === raw.functionId && (item.operation === undefined || item.operation === raw.operation));
+  if (tools.length > 0 && !functionTool) return invalid('Function-call 工具不在当前 Plugin 范围内');
+  if (tools.length > 0 && !tool) return invalid('Function-call operation 不匹配已安装工具');
   return { ok: true, value: structuredClone(raw) as FunctionCallProposal };
 }
 

@@ -98,6 +98,7 @@ test('历史关系使用不透明记录并与动态能力和最近消息同时�
     recentMessages: [{ role: 'user', text: '上一条原文' }],
     resolvedReferences: [{ text: '上一个', record: context.factHistory.records[0] }],
     referenceCandidates: [context.factHistory.records[0]],
+    pluginDescriptors: [{ candidateKey: 'candidate-dynamic', pluginId: 'plugin.dynamic', description: '动态能力', actionTypes: ['query'] }],
     functionDescriptors: [{ candidateKey: 'candidate-dynamic', functionId: 'function.dynamic', pluginId: 'plugin.dynamic', description: '动态能力', actionTypes: ['query'] }]
   };
   const semantic = buildSemanticUserPrompt(input);
@@ -136,7 +137,7 @@ test('共享语义系统提示词不内置业务功能目录，描述由调用�
   const prompt = buildSemanticUserPrompt({
     text: '请帮我处理这个问题',
     behaviorContext: createInitialContext('run-descriptor'),
-    functionDescriptors: [{ candidateKey: 'candidate-opaque', functionId: 'function.visible', pluginId: 'plugin.visible', description: '动态能力描述', actionTypes: ['query'] }]
+    pluginDescriptors: [{ candidateKey: 'candidate-opaque', pluginId: 'plugin.visible', description: '动态能力描述', actionTypes: ['query'] }]
   });
   assert.match(prompt, /candidate-opaque/);
   assert.match(prompt, /动态能力描述/);
@@ -156,10 +157,10 @@ test('Response Generator 按固定顺序接收 Agent 与 Plugin 提示词，并�
 
 test('semantic prompt routes identity questions to enabled self-introduction', () => {
   assert.doesNotMatch(SEMANTIC_SYSTEM_PROMPT, /询问助手身份或纯闲聊寒暄.*intent 取 unknown/u);
-  assert.match(SEMANTIC_SYSTEM_PROMPT, /自我介绍 Function/u);
+  assert.match(SEMANTIC_SYSTEM_PROMPT, /自我介绍 Plugin/u);
   const prompt = buildSemanticUserPrompt({
     text: '介绍下自己呢',
-    functionDescriptors: [{ functionId: 'iar.self-introduction', pluginId: 'iar.self-introduction', description: '介绍当前 Agent 能力', actionTypes: ['query'] }]
+    pluginDescriptors: [{ pluginId: 'iar.self-introduction', description: '介绍当前 Agent 能力', actionTypes: ['query'] }]
   });
   assert.match(prompt, /iar\.self-introduction/u);
 });
@@ -248,7 +249,7 @@ test('normal and streaming session calls use the live structured context after a
     assert.ok(prompts.some((prompt) => prompt.includes(`<behavior_context>`) && prompt.includes(String(ticketId))));
     assert.ok(prompts.filter((prompt) => prompt.includes(String(ticketId))).every((prompt) => prompt.includes('最近有限')));
     assert.ok(prompts.filter((prompt) => prompt.includes('最近有限')).length >= 2);
-    assert.ok(prompts.some((prompt) => prompt.includes('<function_descriptors>')));
+    assert.ok(prompts.some((prompt) => prompt.includes('<plugin_descriptors>')));
     assert.ok(prompts.some((prompt) => prompt.includes('当前能力描述')));
   } finally {
     session.dispose();

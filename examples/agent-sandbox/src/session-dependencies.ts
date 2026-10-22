@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { SCHEMA_VERSIONS } from '@iar/contracts';
-import { DecisionBackendResolver, IntentModelDecisionAdapter, JevDecisionAdapter, ModelGateway, ModelProfileRegistry, UnifiedDecisionAdapter, loadModelProfiles, type AsyncDecisionAdapter, type DecisionRequest, type ModelProvider } from '@iar/runtime';
+import { DecisionBackendResolver, FunctionCallAdapter, IntentModelDecisionAdapter, JevDecisionAdapter, ModelGateway, ModelProfileRegistry, UnifiedDecisionAdapter, UnifiedFunctionCallAdapter, loadModelProfiles, type AsyncDecisionAdapter, type DecisionRequest, type ModelProvider } from '@iar/runtime';
 import { createIarAgent, type IarRuntime, type SelfIntroductionOptions } from '@iar/runtime';
 import { PluginHost } from '@iar/plugins';
 import { allSandboxPlugins, sandboxFunctionIds } from './functions/index.js';
@@ -52,7 +52,14 @@ export function createSandboxModels(options: { mode: SandboxMode; decisionBacken
   const registry = createSandboxRegistry(options.decisionBackend);
   const gateway = new ModelGateway({ registry, providers: { brain, mock: decision, 'intent-model': intent } });
   const resolver = new DecisionBackendResolver(registry);
-  return { brain, registry, gateway, functionAdapter: createAdapter(resolver, gateway, 'function.select'), pluginAdapter: createAdapter(resolver, gateway, 'plugin.select') };
+  return {
+    brain,
+    registry,
+    gateway,
+    functionAdapter: createAdapter(resolver, gateway, 'function.select'),
+    pluginAdapter: createAdapter(resolver, gateway, 'plugin.select'),
+    functionCallAdapter: new UnifiedFunctionCallAdapter(resolver, new FunctionCallAdapter(gateway, 'jev'), new FunctionCallAdapter(gateway, 'intent-model'))
+  };
 }
 
 /** 按配置选择决策后端，未指定时保留完整配置。
