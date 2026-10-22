@@ -46,7 +46,7 @@ export class IarSandboxSession extends SandboxSessionCore {
       get configuration() { return session.configuration; },
       get recentMessages() { return session.recentMessages; },
       get functionDecisionAdapter() { return session.functionDecisionAdapter; },
-      get pluginDecisionAdapter() { return session.pluginDecisionAdapter; }, get functionCallAdapter() { return session.functionCallAdapter; },
+      get pluginDecisionAdapter() { return session.pluginDecisionAdapter; }, get functionCallAdapter() { return session.functionCallAdapter; }, get nestedRouteAdapter() { return session.nestedRouteAdapter; },
       get turnCount() { return session.turnCount; },
       get decisionEventCount() { return session.decisionEventCount; }, set decisionEventCount(value) { session.decisionEventCount = value; },
       get eventStore() { return session.eventStore; }, get projector() { return session.projector; },

@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { SCHEMA_VERSIONS, validateJsonSchemaValue, type ActionDefinition, type ActionType, type BehaviorContext, type EventEnvelope, type JsonValue, type PendingReference, type PluginOperation, type PluginPolicyMetadata, type RuleExpression, type VerifiedFactRecord } from '@iar/contracts';
 import { SELF_INTRODUCTION_FUNCTION_ID, type PluginDescriptor, type PluginHost, type PluginScopeDescriptor } from '@iar/plugins';
 import { ModelGateway, SemanticExtractorAdapter, type HistoricalSemanticReference, type ModelGatewayResult, type ModelProfileRegistry, type SemanticFrame } from '@iar/runtime';
-import { PluginFirstRouter, resolveFactRelationCandidates, type AsyncDecisionAdapter, type AsyncFunctionCallAdapter, type FactRelationCandidateReference, type RouteResult } from '@iar/runtime';
+import { PluginFirstRouter, resolveFactRelationCandidates, type AsyncDecisionAdapter, type AsyncFunctionCallAdapter, type AsyncNestedRouteAdapter, type FactRelationCandidateReference, type RouteResult } from '@iar/runtime';
 import type { FunctionRule, IarRuntimeConfiguration, PluginRule } from '@iar/runtime';
 import type { ActionExecutor, LocalWorkflow } from '@iar/runtime';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
@@ -33,6 +33,8 @@ export type SessionRoutingContext = Pick<CompactionContext, 'eventStore' | 'proj
   functionDecisionAdapter: AsyncDecisionAdapter;
   pluginDecisionAdapter: AsyncDecisionAdapter;
   functionCallAdapter: AsyncFunctionCallAdapter;
+  /** 普通交互模型的一次性 nested route proposal。 */
+  nestedRouteAdapter: AsyncNestedRouteAdapter;
   /** 计数器影响动作标识和事件记录，必须反映宿主最新值。 */
   turnCount: number;
   decisionEventCount: number;
@@ -131,6 +133,7 @@ export class SandboxSessionRouting {
       functionDecisionAdapter: this.context.functionDecisionAdapter,
       pluginDecisionAdapter: this.context.pluginDecisionAdapter,
       functionCallAdapter: this.context.functionCallAdapter,
+      nestedRouteAdapter: this.context.nestedRouteAdapter,
       authorizePlugin: () => true
     });
   }

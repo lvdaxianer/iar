@@ -16,7 +16,7 @@ import {
 import { buildIntentDecisionInput, type DecisionRequest } from '@iar/runtime';
 import { defineFunction } from '@iar/plugin';
 import { PluginHost } from '@iar/plugins';
-import { BehaviorContextProjector, createInitialContext, PluginFirstRouter, type AsyncDecisionAdapter, type AsyncFunctionCallAdapter } from '@iar/runtime';
+import { BehaviorContextProjector, createInitialContext, PluginFirstRouter, type AsyncDecisionAdapter, type AsyncFunctionCallAdapter, type AsyncNestedRouteAdapter } from '@iar/runtime';
 import { facts } from './rule-engine-fixtures.js';
 import { pluginPackage } from '../contract/fixtures/plugin-package.js';
 
@@ -99,6 +99,19 @@ function functionCallAdapter(calls: Array<{ pluginId: string; functionId: string
   };
 }
 
+function nestedRouteAdapter(calls: Array<{ tools: string[] }>): AsyncNestedRouteAdapter {
+  return {
+    call: async ({ tools }) => {
+      calls.push({ tools: tools.map((tool) => tool.name) });
+      const tool = tools.find((item) => item.pluginId === 'knowledge-b');
+      const operation = tool?.candidates.find((candidate) => candidate.functionId === 'knowledge.query')?.operations[0]?.name ?? 'execute';
+      return { ok: true, value: {
+        schemaVersion: 'iar.nested-function-call/v1', pluginId: 'knowledge-b', toolName: tool?.name ?? '', functionId: 'knowledge.query', operation, arguments: { operation }, confidence: 0.99
+      }, audit: [], events: [] };
+    }
+  };
+}
+
 function request(overrides: Partial<Parameters<PluginFirstRouter['routeAsync']>[0]> = {}) {
   const functionCalls: DecisionRequest[] = [];
   const pluginCalls: DecisionRequest[] = [];
@@ -163,6 +176,22 @@ test('Plugin proposal path skips legacy selection models and calls Function Call
   assert.equal(pluginCalls.length, 0);
   assert.equal(functionCalls.length, 0);
   assert.deepEqual(functionCallCalls[0]?.tools, ['knowledge.query.execute']);
+});
+
+test('nested route proposes Plugin and Function in one normal-model call before local authorization', async () => {
+  const { routerRequest, functionCalls, pluginCalls } = request();
+  const nestedCalls: Array<{ tools: string[] }> = [];
+  routerRequest.nestedRouteAdapter = nestedRouteAdapter(nestedCalls);
+  const result = await new PluginFirstRouter().routeAsync(routerRequest);
+
+  assert.equal(result.status, 'matched');
+  assert.equal(result.pluginId, 'knowledge-b');
+  assert.equal(result.functionId, 'knowledge.query');
+  assert.equal(functionCalls.length, 0);
+  assert.equal(pluginCalls.length, 0);
+  assert.deepEqual(nestedCalls[0]?.tools, ['plugin_knowledge-a', 'plugin_knowledge-b', 'plugin_report-c']);
+  assert.equal(result.nestedFunctionCallProposal?.toolName, 'plugin_knowledge-b');
+  assert.equal(result.functionCallProposal?.operation, 'execute');
 });
 
 test('Plugin-first routing excludes Plugins that do not support the semantic action type', async () => {
