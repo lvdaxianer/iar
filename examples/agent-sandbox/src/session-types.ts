@@ -17,7 +17,7 @@ import type { TurnTimingSummary } from './turn-timing.js';
 /** sandbox 模式：brain 使用真实 LLM，scripted 使用离线假大脑。 */
 export type SandboxMode = 'brain' | 'scripted';
 
-/** sandbox 可选的决策 backend；默认保留 JEV 优先解析。 */
+/** sandbox 可选的决策 backend；未指定时 JEV 配置完整则优先 JEV，否则使用 Intent Model。 */
 export type SandboxDecisionBackend = DecisionBackend;
 
 /** 用户可观测的回复来源，值域与 Pi bridge 保持稳定。 */
