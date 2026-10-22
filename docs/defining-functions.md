@@ -8,15 +8,13 @@ Function 是 IAR 意图识别和路由的能力单元。它回答“用户想使
 
 ```text
 用户输入
-  → 意图识别得到 functionId
-  → Function 规则和模型选择
-  → 读取该 Function 的 Plugin providers
-  → Plugin 规则和模型选择
-  → ownership / capability / policy 重验证
+  → semantic.extract 输出 intent/action
+  → route.propose 以 OpenAI nested tool 一次提出 Plugin/Function/Operation/arguments
+  → Runtime ownership / capability / inputSchema / policy 重验证
   → Operation / confirmation / Handler
 ```
 
-因此新包模型是 `Plugin > Function > Operation`，但默认决策顺序仍然是 `Function → Plugin`。这是层级归属和运行时路由顺序的明确区分。
+公共包模型仍然是 `Plugin > Function > Operation`。主路由以 Plugin 作为 OpenAI tool 边界，但不把模型返回的 Plugin 或 Function 当作权限；运行时会从安装记录重新解析并校验。旧的 Function-first `function.select → plugin.select` 仅是显式兼容路径。
 
 ## 2. FunctionDefinition
 
@@ -63,7 +61,9 @@ export const supportPlugin = definePlugin({
 });
 ```
 
-安装时会拒绝同一 Plugin 内重复的 `functionId`，也会拒绝 Function capability 超出 Plugin capability 上界的情况。不同 Plugin 可以提供同一个 Function，例如两个 `knowledge.query` provider；Function 阶段看到一个有界能力，Plugin 阶段再选择具体 provider。
+安装时会拒绝同一 Plugin 内重复的 `functionId`，也会拒绝 Function capability 超出 Plugin capability 上界的情况。不同 Plugin 可以提供同一个 Function，例如两个 `knowledge.query` provider；主路由会把两个 Plugin 作为两个独立 nested tools 提供给模型，再由运行时确认所选 Plugin 确实拥有所选 Function。
+
+发送给 OpenAI-compatible provider 的工具必须使用 `{ type: 'function', function: { name, description, parameters } }` 外壳；工具名只能包含 ASCII 字母、数字、`_`、`-` 且不超过 64 个字符。IAR 私有的候选映射不放进 function 外壳，而由宿主快照保存。完整格式见[嵌套 Plugin Function Calling](./nested-plugin-function-calling.md)。
 
 ## 4. Operation 和确认策略
 

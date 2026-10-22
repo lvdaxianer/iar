@@ -1,6 +1,6 @@
 # IAR Agent Sandbox
 
-可交互的 IAR 插件沙盒示例：在网页输入一句话，后端走完「语义抽取 → 两阶段路由 → 策略/确认 → 插件执行 → 回复生成」全链路，右侧调试面板实时展示路由证据、事件流和 BehaviorContext，并支持显式触发上下文压缩。
+可交互的 IAR 插件沙盒示例：在网页输入一句话，后端走完「语义抽取 → 一次 nested Plugin tool 路由 → 策略/确认 → Function 执行 → 回复生成」全链路，右侧调试面板实时展示路由证据、事件流和 BehaviorContext，并支持显式触发上下文压缩。
 
 未命中业务路由的输入交给**进程内 Pi Agent**（[pi-agent-core](https://www.npmjs.com/package/@earendil-works/pi-agent-core)）兜底：scripted 模式用离线模板 streamFn，brain 模式用 pi-ai 真实模型（moonshotai-cn 目录）；IAR 处理的轮次以备注进入 Pi 上下文，网页里的对话在两侧都连续。
 
@@ -86,7 +86,7 @@ IAR_SANDBOX_PORT=8788 npm run demo:sandbox
 
 | 字段 | 作用 |
 | --- | --- |
-| `role` | 模型角色：`semantic.extract` / `response.generate` 使用 `deepseek-v4-pro` 普通交互模型；`context.compact` 使用普通交互模型；新主路径的 `function.call` 使用 JEV，未配置 JEV 时使用 Intent Model；旧 `function.select` / `plugin.select` profile 仅为兼容保留 |
+| `role` | 模型角色：`semantic.extract`、`route.propose`、`response.generate` 使用 `deepseek-v4-pro` 普通交互模型；`context.compact` 使用普通交互模型；`function.call`、`function.select`、`plugin.select` 仅为 JEV/Intent 兼容路径保留 |
 | `decisionBackend` | 决策 profile 的 backend：`jev` 或 `intent-model`；同时存在时 JEV 固定优先 |
 | `provider` | 用哪个 provider：`brain`（普通交互模型）、`intent-model`（Intent Model）或 `mock`（离线确定性决策） |
 | `environment` | 非敏感环境变量名映射：`endpoint` / `apiKey` / `modelId`；变量值不写入 JSON |
@@ -95,7 +95,7 @@ IAR_SANDBOX_PORT=8788 npm run demo:sandbox
 
 接口地址、密钥和可变模型名通过 `environment` 映射从环境变量读取，不进配置文件。配置文件里的其他字符串值仍支持 `"${VAR_NAME}"` 环境变量引用（由 IAR 的 `loadModelProfiles` 在加载时解析，引用的变量未设置会启动报错）；IAR 运行时的 `config/models.yaml` 同样支持该写法。
 
-普通模型、Function Calling 和 Intent Model 使用同一 OpenAI-compatible `chat/completions` JSON boundary。主路径按 `semantic.extract → Plugin proposal → function.call → Action → response.generate` 执行：语义模型只接收 Plugin 描述；Function Calling 只接收已选 Plugin 的 Function tools，并返回 `iar.function-call/v1` 的 Function、Operation 和 arguments。Intent Model 由 provider 固定注入 `iar.intent-decision-prompt/v1`；JEV 未配置时只对 `function.call` 使用 Intent Model，不会静默退回 mock。
+普通模型、Function Calling 和 Intent Model 使用同一 OpenAI-compatible `chat/completions` JSON boundary。主路径按 `semantic.extract → route.propose → Runtime 校验 → Action → response.generate` 执行：每个 Plugin 投影为一个 `type=function` tool，Function/Operation 以具名参数候选嵌套其中；模型只提出 Plugin、Function、Operation 和 arguments，运行时按安装记录重新验证并执行。Intent Model 由 provider 固定注入 `iar.intent-decision-prompt/v1`，只供旧 JEV/Intent 兼容选择路径使用，不会静默退回 mock。详见 [`nested-plugin-function-calling.md`](../../docs/nested-plugin-function-calling.md)。
 
 没有 API Key 时直接用 `npm run demo:sandbox -- --brain scripted`（或省略参数）即可离线体验。
 

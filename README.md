@@ -100,7 +100,7 @@ docs/                     # 完整架构说明与实现审计
 
 ## 设计边界
 
-- Function 决定“做什么”，Plugin 只负责已确定 Function 的具体实现。
+- 主路由把 Plugin 作为能力边界，Function/Operation 作为 Plugin 内的具体动作；模型提出候选，Runtime 负责最终所有权、授权、Schema、策略、确认和执行。
 - Policy、确认、权限和能力校验必须发生在副作用执行之前。
 - EventLog 是可恢复行为状态的事实来源；上下文压缩不能覆盖关键状态。
 - 短动作默认使用本地确定性运行时；只有明确的定时器、跨服务或补偿需求才进入 Durable Runtime。
@@ -123,7 +123,8 @@ Function 和 Plugin 决策都经过 `ModelGateway` 与 `UnifiedDecisionAdapter`�
 }
 ```
 
-- `semantic.extract` 始终使用 Intent Model；`function.select`/`plugin.select` 在 JEV 三项连接变量完整时使用 JEV，否则直接使用 Intent Model。
+- 主路由的 `semantic.extract`、`route.propose` 和 `response.generate` 使用普通交互模型；`route.propose` 一次性通过 OpenAI-compatible nested tool 提出 Plugin、Function、Operation 和具名 arguments。
+- `function.select`/`plugin.select`/旧 `function.call` 仅供显式兼容路径使用：JEV 三项连接变量完整时使用 JEV，否则使用 Intent Model。
 - Intent Model 使用固定 Prompt `iar.intent-decision-prompt/v1`，要求只返回 JSON、原样保留有序 `candidateIds`，不得新增候选、授予能力、授权动作或执行插件。
 - 低分或歧义结果仍是 `needs_clarification`，不会自动切换成另一条可执行选择。
 - backend 只提供候选选择建议；Function-first、Plugin ownership、租户/用户/环境授权、Manifest capability 和最终 Policy/Confirmation 复核仍由 Runtime 完成。
@@ -147,7 +148,7 @@ Function 和 Plugin 决策都经过 `ModelGateway` 与 `UnifiedDecisionAdapter`�
 
 普通交互模型默认使用 `IAR_LLM_BASE_URL`、`IAR_LLM_API_KEY`、`IAR_LLM_MODEL_ID`；Intent Model 默认使用独立的 `IAR_INTENT_MODEL_ENDPOINT`、`IAR_INTENT_MODEL_API_KEY`、`IAR_INTENT_MODEL_ID`。profile 映射中的非空变量值优先于 provider 默认值；模型名最终回退到 profile 的 `modelId`，endpoint/API key 缺失时 fail-closed。变量实际值不会进入 profile、审计或错误消息。
 
-agent-sandbox 根据 JEV 三项连接变量自动选择决策 backend：完整时使用 JEV，任一缺失时只使用 Intent Model；设置 `IAR_SANDBOX_DECISION_BACKEND=intent-model` 或 `jev` 可显式选择。两条路径都通过同一个 `iar.decision/v1` 返回契约，语义抽取则固定使用 Intent Model。
+agent-sandbox 的主路由使用 `route.propose` 普通模型，不读取 JEV/Intent Model 作为额外选择步骤。旧兼容路由根据 JEV 三项连接变量自动选择 backend：完整时使用 JEV，任一缺失时只使用 Intent Model；设置 `IAR_SANDBOX_DECISION_BACKEND=intent-model` 或 `jev` 可显式选择。两条兼容路径都通过同一个 `iar.decision/v1` 返回契约。
 
 ### 沙箱会话
 
@@ -213,7 +214,7 @@ Bridge 协议版本为 `iar.pi-bridge/v1`，输入处置包括：
 
 ### 通用追问与动作边界
 
-每轮请求都会把当前问题和实时 `BehaviorContext` 一起交给语义模型。模型先输出固定 `action`：`query`、`create`、`update`、`delete`、`transfer`、`execute` 或 `unknown`；运行时只按会话范围、插件状态、权限和 Plugin Manifest 的 `actionTypes` 过滤有限候选，不根据工单、人工服务或其他业务关键词写路由分支。
+每轮请求都会把当前问题和实时 `BehaviorContext` 一起交给语义模型。模型先输出固定 `action`：`query`、`create`、`update`、`delete`、`transfer`、`execute` 或 `unknown`；运行时只按会话范围、插件状态、权限和 Plugin Manifest 的 `actionTypes` 过滤有限 Plugin 候选。随后一次 `route.propose` 以 OpenAI `tools[].type=function` 格式选择 Plugin，并返回其内部 Function、Operation 和具名 arguments；运行时重新校验所有权和 Function input Schema，不根据工单、人工服务或其他业务关键词写执行分支。
 
 如果没有合适的 Plugin/Function，运行时不准备也不执行 Action，而是把当前问题、结构化上下文、`verified` facts、`pending` 和未命中原因交给 Response Model。Response Model 自己判断是基于事实直接回答，还是说明缺少信息并反问；它不能创建、确认或执行功能。明确的新动作仍然经过原有权限、策略、确认、幂等和事实投影链路。
 
@@ -221,7 +222,7 @@ Bridge 协议版本为 `iar.pi-bridge/v1`，输入处置包括：
 
 沙箱记录 HTTP 请求审计和模型调用的安全元数据，默认不输出正常模型调用的 DEBUG 日志。拥有进程信号权限的本机运维人员可以向沙箱进程发送 `SIGHUP` 切换模型 DEBUG，重复发送恢复关闭；部署环境须限制进程信号权限并确认没有其他 SIGHUP 处理约定。日志不记录模型输入、输出、请求头、凭据、URL 查询或原始异常。详见[安全与观测方案](docs/README.md#123-观测字段)。
 
-安全日志默认异步写入标准错误，宿主可注入专用输出；须独占输出或统一串行写入，共享输出无法保证跨写入者行原子性。队列有界且满时丢弃，可通过进程内只读状态查询丢弃和卡住情况；输出故障及进程退出可能造成日志丢失，轮转和持久化由宿主负责。
+安全日志默认异步写入标准错误，宿主可注入专用输出；须独占输出或统一串行写入，共享输出无法保证跨写入者行原子性。默认 `pretty` 输出中文+英文摘要，`json` 供机器解析。每轮包含总耗时、Trace ID、`semantic.extract`、`route.propose`、`route.select`、`action.execute`、`response.reasoning` 和 `response.generate` 等阶段；模型 HTTP 记录额外带受控 `modelRole` 和 timeout/slow 分类。队列有界且满时丢弃，可通过进程内只读状态查询丢弃和卡住情况；输出故障及进程退出可能造成日志丢失，轮转和持久化由宿主负责。
 
 启动成功会输出受控 `sandbox.start` 记录，包含本地监听地址的主机和端口、实际模式以及是否自动回退；不向标准输出写启动消息。
 
@@ -229,6 +230,7 @@ Bridge 协议版本为 `iar.pi-bridge/v1`，输入处置包括：
 
 - [完整架构与能力边界](docs/README.md)
 - [定义 Function](docs/defining-functions.md)：Function 契约、与 Plugin 的关系、新增 Function 的四步与检查清单
+- [Nested Plugin Function Calling](docs/nested-plugin-function-calling.md)：OpenAI tool 格式、一次路由、参数校验与自定义 Plugin 启动检查
 - [定义 Plugin](docs/defining-plugins.md)：Manifest 逐字段详解、Handler 契约、可信事实声明、从注册到执行的完整链路
 - [Agent Sandbox 上下文追问测试用例](docs/agent-sandbox-test-cases.md)
 - [Phase 1～5 最终实现审计](docs/implementation-audits/phase-1-5-final.md)

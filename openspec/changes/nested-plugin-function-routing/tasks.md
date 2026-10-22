@@ -27,8 +27,8 @@
 
 ## 6. 文档与配置迁移
 
-- [ ] 6.1 更新模型、Plugin、Function Calling 和兼容开关文档，说明 OpenAI tool 名称及 Schema 限制；验证文档命令和 `.env.example` 配置保持一致且不包含密钥。
-- [ ] 6.2 增加启动时自定义 Plugin input/output contract 检查的运维说明；验证缺少必需配置或非法契约时错误可定位且不静默回退到 mock provider。
+- [x] 6.1 更新模型、Plugin、Function Calling 和兼容开关文档，说明 OpenAI tool 名称及 Schema 限制；验证文档命令和 `.env.example` 配置保持一致且不包含密钥。
+- [x] 6.2 增加启动时自定义 Plugin input/output contract 检查的运维说明；验证缺少必需配置或非法契约时错误可定位且不静默回退到 mock provider。
 
 ## 7. 集成验证
 
