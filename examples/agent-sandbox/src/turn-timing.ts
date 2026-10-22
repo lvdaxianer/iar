@@ -75,6 +75,20 @@ export class TurnTimingTracker {
   }
 
   /**
+   * 记录一个未进入执行的阶段，避免“没有日志”被误读成“阶段不存在”。
+   *
+   * @param stage - 被门禁跳过的阶段
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  public skip(stage: TimingStage): void {
+    if (this.running.has(stage)) this.end(stage, 'failed');
+    if (this.stages.some((item) => item.stage === stage)) return;
+    this.stages.push({ stage, status: 'skipped', durationMs: 0 });
+  }
+
+  /**
    * 记录阶段首个可见 token 到达时间，只接受第一次。
    */
   public firstToken(stage: TimingStage): void {
