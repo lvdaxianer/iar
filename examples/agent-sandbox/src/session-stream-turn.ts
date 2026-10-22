@@ -2,7 +2,7 @@ import { ModelResponseLimitError, trackModelResponseLimit } from './models/model
 import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
-import { applyRouteDiagnostic, canPassThrough, resolveNoMatchTurn, runPiAgentDelegate } from './session-turn-helpers.js';
+import { applyRouteDiagnostic, canPassThrough, gateIncompleteSemanticFrame, resolveNoMatchTurn, runPiAgentDelegate } from './session-turn-helpers.js';
 import type { ActionDefinition, ActionResult, BehaviorContext, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
@@ -147,6 +147,14 @@ export class SandboxSessionStreamTurn {
     if (!references.ok) return this.finishStreamFallback({ userText, traceId, emit, behaviorContext, timing, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: frame.intent, semanticConfidence: frame.confidence }, ...(references.pendingReference === undefined ? {} : { pendingReference: references.pendingReference }), ...(references.candidates === undefined ? {} : { referenceCandidates: references.candidates }) });
     if (behaviorContext.pendingReference !== undefined) await this.context.resetClarification();
     const routeContext = this.context.currentBehaviorContext();
+    const incomplete = gateIncompleteSemanticFrame(frame, traceId, timing);
+    if (incomplete) {
+      const bridgeResult = bridgeMode ? await resolveNoMatchTurn({ piAgent: undefined, pushMessages: this.context.pushMessages, passThroughOnNoMatch: true, userText, evidence: incomplete, behaviorContext: routeContext, selectedDescriptor, functionDescriptors: this.context.functionDescriptors }) : undefined;
+      if (bridgeResult) return bridgeResult;
+      const agentResult = await this.runStreamAgent({ userText, emit, timing, evidence: incomplete, behaviorContext: routeContext, selectedDescriptor });
+      if (agentResult !== undefined) return agentResult;
+      return this.finishStreamFallback({ userText, traceId, emit, behaviorContext: routeContext, timing, evidence: incomplete, resolvedReferences: references.references });
+    }
     timing.start('route.select');
     const usesNestedRoute = frame.action !== 'unknown' && frame.intent !== 'unknown';
     if (usesNestedRoute) timing.start('route.propose');

@@ -13,6 +13,7 @@ import { PluginFirstRouter, resolveFactRelationCandidates, type AsyncDecisionAda
 import type { FunctionRule, IarRuntimeConfiguration, PluginRule } from '@iar/runtime';
 import type { ActionExecutor, LocalWorkflow } from '@iar/runtime';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
+import { logSemanticFrame, type SemanticFrameDiagnostic } from './safe-log.js';
 import { SESSION_RUN_ID, SESSION_CORRELATION_ID, TURN_DEFINITION } from './session-core.js';
 import type { CompactionContext } from './session-compaction.js';
 import { buildActionInput, buildFacts, buildFunctionCallInput, buildSelfIntroductionInput, describeAction, sandboxOperationKind, toSlotMap } from './session-helpers.js';
@@ -74,12 +75,21 @@ export class SandboxSessionRouting {
   public async extractFrame(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages = this.context.recentMessages, selectedDescriptor?: PluginDescriptor): Promise<ExtractFrameOutcome> {
     const descriptors = selectedDescriptor ? this.context.pluginHost.pluginDescriptors().filter((descriptor) => descriptor.pluginId === selectedDescriptor.pluginId) : this.context.pluginHost.pluginDescriptors();
     const extracted = await new SemanticExtractorAdapter(this.context.gateway).extract({ traceId, runId, input: { text: userText, behaviorContext, recentMessages, pluginDescriptors: descriptors } });
-    if (extracted.ok) return { ok: true, frame: selectedDescriptor ? constrainFrame(extracted.value, selectedDescriptor) : extracted.value, semanticFallback: false };
+    if (extracted.ok) {
+      const frame = selectedDescriptor ? constrainFrame(extracted.value, selectedDescriptor) : extracted.value;
+      logSemanticFrame(traceId, semanticFrameDiagnostic(frame));
+      return { ok: true, frame, semanticFallback: false };
+    }
     if (this.context.mode === 'brain') {
       // 真实 LLM 抽取失败时降级到离线关键词抽取，保证链路可以继续。
       const retried = await this.retrySemanticWithScripted(traceId, runId, userText, behaviorContext, recentMessages, descriptors);
-      if (retried.ok) return { ok: true, frame: selectedDescriptor ? constrainFrame(retried.value, selectedDescriptor) : retried.value, semanticFallback: true };
+      if (retried.ok) {
+        const frame = selectedDescriptor ? constrainFrame(retried.value, selectedDescriptor) : retried.value;
+        logSemanticFrame(traceId, semanticFrameDiagnostic(frame));
+        return { ok: true, frame, semanticFallback: true };
+      }
     }
+    logSemanticFrame(traceId, { status: 'failed', hasIntent: false, hasAction: false, nextStage: 'response.generate' });
     const route: RouteEvidence = { status: 'semantic_failed', reasonCode: extracted.error.code, semanticIntent: 'unknown', semanticConfidence: 0 };
     return { ok: false, route, reasonCode: extracted.error.code, reply: `语义抽取失败（${extracted.error.code}），请换个说法重试。` };
   }
@@ -304,6 +314,24 @@ export class SandboxSessionRouting {
     return payload;
   }
 
+}
+
+/**
+ * 将语义帧压缩为可安全记录的字段存在性诊断。
+ *
+ * @param frame - 通过模型输出 Schema 校验的语义帧
+ * @returns 不包含用户原文的语义诊断
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+function semanticFrameDiagnostic(frame: SemanticFrame): SemanticFrameDiagnostic {
+  const hasIntent = frame.intent !== 'unknown';
+  const hasAction = frame.action !== 'unknown';
+  const missingField = !hasIntent ? 'intent' : !hasAction ? 'action' : undefined;
+  return {
+    status: 'completed', semanticIntent: frame.intent, semanticAction: frame.action, hasIntent, hasAction,
+    ...(missingField === undefined ? { nextStage: 'route.propose' as const } : { missingField, nextStage: 'response.generate' as const })
+  };
 }
 
 /** 判断引用是否为新版不透明历史关系。 */

@@ -7,10 +7,34 @@ import type { ActionDefinition, ActionResult, BehaviorContext } from '@iar/contr
 import type { PluginDescriptor } from '@iar/plugins';
 import { ModelResponseLimitError, trackModelResponseLimit } from './models/model-transport.js';
 import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
-import { logRouteContractFailure, resolveSandboxTraceId, writeSafeLog } from './safe-log.js';
+import { logRouteContractFailure, logRouteDecision, resolveSandboxTraceId, writeSafeLog } from './safe-log.js';
 import type { SandboxSessionReplies } from './session-replies.js';
 import { hasVerifiedFactsForFollowUp } from './session-clarification.js';
 import type { ConfirmResult, ExecuteTurnOutcome, OperationKind, PassThroughCapabilityContext, RouteEvidence, TurnResult } from './session-types.js';
+import type { SemanticFrame } from '@iar/runtime';
+import type { TurnTimingTracker } from './turn-timing.js';
+
+/**
+ * 识别语义帧是否不足以进入业务路由，并写出每个被跳过的阶段。
+ *
+ * 这里只判断结构字段是否存在，不猜测业务含义；缺失字段交给回复模型或后续澄清流程处理。
+ * @param frame - 已通过 Schema 校验的语义帧
+ * @param traceId - 当前回合链路标识
+ * @param timing - 当前回合阶段计时器
+ * @returns 不完整时的路由证据，否则返回 undefined
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+export function gateIncompleteSemanticFrame(frame: SemanticFrame, traceId: string, timing: TurnTimingTracker): RouteEvidence | undefined {
+  const missingField = frame.intent === 'unknown' ? 'intent' : frame.action === 'unknown' ? 'action' : undefined;
+  if (missingField === undefined) return undefined;
+  const evidence: RouteEvidence = { status: 'semantic_incomplete', reasonCode: 'semantic_incomplete', semanticIntent: frame.intent, semanticConfidence: frame.confidence };
+  for (const stage of ['route.propose', 'route.select', 'action.execute'] as const) {
+    timing.skip(stage);
+    logRouteDecision(traceId, { stage, status: 'skipped', reasonCode: 'semantic_incomplete', execution: 'blocked' });
+  }
+  return evidence;
+}
 
 /** 将动作阶段的契约失败投影到公开证据并写入安全诊断日志。 */
 export function applyRouteDiagnostic(evidence: RouteEvidence, traceId: string, outcome: ExecuteTurnOutcome): void {

@@ -3,7 +3,7 @@
 ## 1. Semantic and route diagnostics
 
 - [x] 1.1 Add a failing safe-log test for trace-correlated semantic frame and route gate diagnostics, then implement bounded bilingual logging for field presence, missing-field reason, candidate count, next stage and stable route reason without raw input or model payloads.
-- [ ] 1.2 Add a failing turn test proving incomplete semantic extraction records skipped `route.propose`/`action.execute` and distinct route evidence, then wire the diagnostic at the semantic and routing boundaries; verify focused observability and Sandbox tests pass.
+- [x] 1.2 Add a failing turn test proving incomplete semantic extraction records skipped `route.propose`/`action.execute` and distinct route evidence, then wire the diagnostic at the semantic and routing boundaries; verify focused observability and Sandbox tests pass.
 
 ## 2. Deterministic recovery clarification
 
