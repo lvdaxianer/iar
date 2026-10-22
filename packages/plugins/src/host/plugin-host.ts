@@ -17,6 +17,7 @@ import { compareStableIds } from './compare-ids.js';
 import { sortPluginManifests } from './dependency-order.js';
 import { PluginEventLog } from './plugin-events.js';
 import { createRecord, pluginIdOf, prepareInstall, validateInstallSet, validatePluginToolNames, type InstallPreparation } from './plugin-installation.js';
+import { MAX_NESTED_TOOL_DESCRIPTION_LENGTH, normalizePluginToolName, validateNestedPluginTool, type NestedPluginFunctionCandidate, type NestedPluginToolBinding } from './nested-tool-contract.js';
 import { canTransition, findActiveDependent, findDependent, findUnavailableDependency } from './plugin-lifecycle.js';
 import { cloneManifest, cloneRecord, hostError } from './plugin-host-support.js';
 import type { PluginDescriptor, PluginDescriptorOptions, PluginFunctionToolDescriptor, PluginHostResult, PluginRecord, PluginScopeDescriptor } from './types.js';
@@ -266,6 +267,15 @@ export class PluginHost {
     })));
   }
 
+  /** 投影当前启用且已授权的业务 Plugin，每个 Plugin 对应一个 OpenAI tool。 */
+  public nestedTools(options: PluginDescriptorOptions = {}): NestedPluginToolBinding[] {
+    const authorize = options.authorize ?? (() => true);
+    return this.businessCandidates()
+      .filter((record) => authorize(record))
+      .map((record) => nestedToolBindingOf(record))
+      .slice(0, MAX_ROUTING_SCOPE_PLUGINS);
+  }
+
   /** 投影全部当前启用的业务 Plugin 描述，供聚合型内置能力使用。
    *
    * @param options - 可选的调用方授权过滤器
@@ -426,6 +436,59 @@ function descriptorOf(record: PluginRecord, functionId: string): PluginDescripto
       operations: [...functionRecord.operations]
     }
   };
+}
+
+/** 从一个启用 Plugin 构造 OpenAI tool 与宿主侧嵌套候选映射。 */
+function nestedToolBindingOf(record: PluginRecord): NestedPluginToolBinding {
+  if (record.manifest.pluginKind !== 'business') throw new Error('系统插件不能形成嵌套工具');
+  const candidates = [...record.functions.values()].map((functionRecord): NestedPluginFunctionCandidate => ({
+    pluginId: record.manifest.pluginId,
+    functionId: functionRecord.definition.functionId,
+    description: functionRecord.definition.description,
+    actionTypes: [...functionRecord.definition.actionTypes],
+    inputSchema: structuredClone(functionRecord.definition.inputSchema),
+    riskLevel: functionRecord.definition.riskLevel,
+    requiresConfirmation: record.manifest.policy.requiresConfirmation,
+    operations: structuredClone(functionRecord.operations) as NestedPluginFunctionCandidate['operations']
+  }));
+  const toolName = normalizePluginToolName(record.manifest.pluginId);
+  const tool = {
+    type: 'function' as const,
+    function: {
+      name: toolName,
+      description: boundedToolDescription(record.manifest.description, candidates),
+      parameters: nestedParametersOf(candidates)
+    }
+  };
+  const validated = validateNestedPluginTool(tool);
+  if (!validated.ok) throw new Error(`Plugin 嵌套工具投影失败: ${validated.issues.map((item) => item.path).join(',')}`);
+  return { pluginId: record.manifest.pluginId, toolName, tool: validated.value, candidates };
+}
+
+/** 构造兼容供应商的嵌套 JSON Schema，不使用 oneOf 等高风险关键字。 */
+function nestedParametersOf(candidates: NestedPluginFunctionCandidate[]): Record<string, unknown> {
+  const functionIds = candidates.map((candidate) => candidate.functionId);
+  const operationNames = [...new Set(candidates.flatMap((candidate) => candidate.operations.map((operation) => operation.name)))];
+  return {
+    type: 'object',
+    properties: {
+      functionId: { type: 'string', enum: functionIds },
+      operation: { type: 'string', enum: operationNames },
+      arguments: { type: 'object', additionalProperties: true, description: '必须符合所选 Function 的 inputSchema' }
+    },
+    required: ['functionId', 'operation', 'arguments'],
+    additionalProperties: false
+  };
+}
+
+/** 将 Function/Operation 目录压缩进工具描述，保持传输格式仍为 OpenAI tool。 */
+function boundedToolDescription(pluginDescription: string, candidates: NestedPluginFunctionCandidate[]): string {
+  const lines = [pluginDescription, '可用 Function/Operation：'];
+  for (const candidate of candidates) {
+    const operations = candidate.operations.map((operation) => `${operation.name}(${operation.kind})：${operation.description}`).join('；');
+    lines.push(`- ${candidate.functionId}：${candidate.description}；${operations}；inputSchema=${JSON.stringify(candidate.inputSchema)}`);
+  }
+  return Array.from(lines.join('\n')).slice(0, MAX_NESTED_TOOL_DESCRIPTION_LENGTH).join('');
 }
 
 /** 从一个 Plugin 的全部 Function 聚合第一阶段所需的有限描述。 */

@@ -7,7 +7,7 @@
 
 ## 2. 嵌套 Plugin 工具投影
 
-- [ ] 2.1 将每个启用 Plugin 投影为一个符合 OpenAI `tools` 约束的工具，并以嵌套结构携带当前 Function/Operation 候选；验证禁用 Plugin 不进入工具、重复归一化名称被拒绝、10 Plugin/28 Operation 映射完整。
+- [x] 2.1 将每个启用 Plugin 投影为一个符合 OpenAI `tools` 约束的工具，并以嵌套结构携带当前 Function/Operation 候选；验证禁用 Plugin 不进入工具、重复归一化名称被拒绝、10 Plugin/28 Operation 映射完整。
 - [ ] 2.2 保留旧平面 `functionTools(pluginId)` 兼容接口并标记迁移边界；验证现有 PluginHost 和 scoped routing 测试不回归。
 
 ## 3. 一次模型调用与 Function Calling 传输
