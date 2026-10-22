@@ -125,6 +125,41 @@ test('nested Function-call proposal preserves Plugin ownership and named argumen
   assert.equal(unknownOperation.ok, false);
 });
 
+test('nested Function-call proposal rejects duplicate Function identities in one Plugin tool', () => {
+  const duplicateTool = {
+    ...nestedTool,
+    candidates: [
+      ...nestedTool.candidates,
+      { pluginId: 'ticket-plugin', functionId: 'ticket.query', operations: [{ name: 'query' }] }
+    ]
+  };
+  const result = validateNestedFunctionCallProposal({
+    schemaVersion: 'iar.nested-function-call/v1',
+    pluginId: 'ticket-plugin',
+    toolName: 'plugin_ticket',
+    functionId: 'ticket.query',
+    operation: 'query',
+    arguments: { ticketId: 'ticket-1' },
+    confidence: 0.97
+  }, [duplicateTool]);
+
+  assert.equal(result.ok, false);
+});
+
+test('nested Function-call proposal rejects non-object named arguments', () => {
+  const result = validateNestedFunctionCallProposal({
+    schemaVersion: 'iar.nested-function-call/v1',
+    pluginId: 'ticket-plugin',
+    toolName: 'plugin_ticket',
+    functionId: 'ticket.query',
+    operation: 'query',
+    arguments: ['ticket-1'],
+    confidence: 0.97
+  }, [nestedTool]);
+
+  assert.equal(result.ok, false);
+});
+
 test('function.call model profile uses JEV first and Intent Model only when JEV is absent', () => {
   const jevFirst = new ModelProfileRegistry([profile('function.call', 'jev'), profile('function.call', 'intent-model')]);
   assert.deepEqual(new DecisionBackendResolver(jevFirst).resolve('function.call'), {
@@ -239,6 +274,9 @@ test('nested Function-call transport sends OpenAI tools with thinking disabled',
     });
     assert.deepEqual(body?.thinking, { type: 'disabled' });
     assert.deepEqual(body?.tools, [{ type: 'function', function: { name: 'plugin_ticket', description: '工单 Plugin，支持查询工单', parameters: nestedTool.parameters } }]);
+    const systemMessage = (Array.isArray(body?.messages) ? body.messages : []).find((message) => (message as { role?: string }).role === 'system') as { content?: string } | undefined;
+    assert.match(systemMessage?.content ?? '', /逐字复制工具提供的 pluginId、functionId 和 operation/u);
+    assert.match(systemMessage?.content ?? '', /不要使用位置参数/u);
   } finally {
     globalThis.fetch = previousFetch;
     restoreEnvironment('IAR_TEST_ENDPOINT', previousEndpoint);
