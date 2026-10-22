@@ -8,6 +8,15 @@
 
 **Tech Stack:** TypeScript、Node.js、OpenAI-compatible Function Calling、PluginHost、RuleEngine、JEV/Intent Model Decision Adapter、Node test runner、OpenSpec。
 
+## Implementation status
+
+- 已完成规范 Plugin/Function/Operation ID 的嵌套提案校验、命名参数校验和重复 Function 身份校验。
+- 已完成运行时规范身份视图：规则评估使用模型已校验的 ID，原始自然语言语义保持不变。
+- 已完成 Plugin 所有权、Function/Operation、授权、关闭状态和稳定错误分类回归测试。
+- 已完成查询、动作确认、direct/none 的回复分流回归测试。
+- 已完成本地确定性规模基准：1/5/10/20/40 个 Plugin、请求体规模、TTFB、总耗时和 20 次命名参数稳定性。
+- 仍待在配置真实模型凭据的环境执行真实模型 P50/P95；当前工作区没有可用运行时凭据，不伪造该结果。
+
 ---
 
 ## 文件地图
@@ -24,8 +33,8 @@
 
 ### Step 1：添加失败测试
 
-- [ ] 在现有嵌套 Function Calling 测试中加入自然语言 `semantic.intent = "创建工单"`、模型返回 `function_id = "ticket.create"` 的用例。
-- [ ] 断言测试输入包含 `plugin_id`、`function_id`、`operation` 和命名 `arguments`，且自然语言字段不参与 Function 所有权判断。
+- [x] 在现有嵌套路由测试中覆盖自然语言 `semantic.intent` 与模型返回规范 Function ID 分离的用例。
+- [x] 断言测试输入包含 Plugin、Function、Operation 和命名 `arguments`，且自然语言字段不参与 Function 所有权判断。
 
 ### Step 2：确认 RED
 
@@ -36,7 +45,7 @@ npm run build
 node --test dist/tests/routing/nested-plugin-function-routing.test.js
 ```
 
-预期：新增用例在修复前因 `plugin_rule_not_matched` 失败。
+预期：新增用例在修复前因 `plugin_rule_not_matched` 失败。该 RED 已在实现前复现。
 
 ### Step 3：实现最小契约修复
 
@@ -46,7 +55,7 @@ node --test dist/tests/routing/nested-plugin-function-routing.test.js
 
 ### Step 4：确认 GREEN
 
-运行同一 focused test，预期新增和既有测试全部通过。
+运行同一 focused test，新增和既有测试均已通过。
 
 ## Task 2：修复运行时身份和规则匹配
 
@@ -149,4 +158,4 @@ npm test
 - 动作 Function 仍经过确认、授权、Policy 和幂等门禁。
 - 无合法 ID 时才进入澄清或兜底回答。
 - UI 能显示真实 Plugin、Function、Operation、失败类型、总耗时和 Trace ID。
-- 全量测试、OpenSpec 严格校验和性能基线均有可复现证据。
+- 全量测试和 OpenSpec 严格校验有可复现证据；本地确定性规模基准有可复现证据，真实模型 P50/P95 需在配置实际凭据的环境补测。

@@ -90,6 +90,7 @@ export function validateNestedFunctionCallProposal(raw: unknown, tools: readonly
   if (raw.schemaVersion !== 'iar.nested-function-call/v1' || !isNonEmptyString(raw.pluginId) || !isNonEmptyString(raw.toolName) || !isNonEmptyString(raw.functionId) || !isNonEmptyString(raw.operation) || !isArguments(raw.arguments) || !isConfidence(raw.confidence)) return invalidNested('Nested Function-call Schema 无效');
   const tool = tools.find((item) => item.name === raw.toolName);
   if (!tool || tool.pluginId !== raw.pluginId) return invalidNested('Nested tool 不在当前 Plugin 范围内');
+  if (new Set(tool.candidates.map((item) => `${item.pluginId}\u0000${item.functionId}`)).size !== tool.candidates.length) return invalidNested('Nested tool 的 Function 标识必须唯一');
   const candidate = tool.candidates.find((item) => item.pluginId === raw.pluginId && item.functionId === raw.functionId);
   if (!candidate || !candidate.operations.some((operation) => operation.name === raw.operation)) return invalidNested('Nested Function/Operation 不属于当前 Plugin tool');
   return { ok: true, value: structuredClone(raw) as NestedFunctionCallProposal };

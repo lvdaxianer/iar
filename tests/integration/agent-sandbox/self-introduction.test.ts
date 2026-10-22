@@ -44,7 +44,9 @@ test('self-introduction Plugin is enabled by default but can be disabled at Agen
     try {
       const disabledResult = await disabled.turn('介绍下自己呢');
       assert.notEqual(disabledResult.status, 'executed');
-      assert.notEqual(disabledResult.route?.functionId, SELF_INTRODUCTION_FUNCTION_ID);
+      assert.equal(disabledResult.route?.reasonCode, 'plugin_unavailable');
+      assert.equal(disabledResult.route?.pluginId, SELF_INTRODUCTION_PLUGIN_ID);
+      assert.equal(disabledResult.route?.functionId, SELF_INTRODUCTION_FUNCTION_ID);
       const descriptors = (disabled as unknown as { pluginHost: { descriptors: () => Array<{ functionId: string }> } }).pluginHost.descriptors();
       assert.equal(descriptors.some((descriptor) => descriptor.functionId === SELF_INTRODUCTION_FUNCTION_ID), false);
     } finally {

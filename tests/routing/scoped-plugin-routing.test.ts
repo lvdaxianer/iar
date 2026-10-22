@@ -194,6 +194,105 @@ test('nested route proposes Plugin and Function in one normal-model call before 
   assert.equal(result.functionCallProposal?.operation, 'execute');
 });
 
+test('nested route evaluates Plugin rules with the proposed canonical Function ID', async () => {
+  const { routerRequest } = request({
+    facts: { ...facts, semantic: { intent: '查询知识库', action: 'query' } }
+  });
+  const nestedCalls: Array<{ tools: string[] }> = [];
+  routerRequest.nestedRouteAdapter = nestedRouteAdapter(nestedCalls);
+
+  const result = await new PluginFirstRouter().routeAsync(routerRequest);
+
+  assert.equal(result.status, 'matched');
+  assert.equal(result.reasonCode, 'route_matched');
+  assert.equal(result.pluginId, 'knowledge-b');
+  assert.equal(result.functionId, 'knowledge.query');
+  assert.equal((routerRequest.facts.semantic as { intent?: string }).intent, '查询知识库');
+});
+
+test('nested route rejection preserves the attempted Plugin and Function IDs', async () => {
+  const { routerRequest } = request({
+    facts: { ...facts, semantic: { intent: '查询知识库', action: 'query' } },
+    pluginRules: []
+  });
+  routerRequest.nestedRouteAdapter = {
+    call: async ({ tools }) => ({ ok: true, value: {
+      schemaVersion: 'iar.nested-function-call/v1',
+      pluginId: 'knowledge-b',
+      toolName: tools.find((tool) => tool.pluginId === 'knowledge-b')?.name ?? '',
+      functionId: 'knowledge.query',
+      operation: 'execute',
+      arguments: {},
+      confidence: 0.99
+    }, audit: [], events: [] })
+  };
+
+  const result = await new PluginFirstRouter().routeAsync(routerRequest);
+
+  assert.equal(result.status, 'rejected');
+  assert.equal(result.reasonCode, 'plugin_rule_not_matched');
+  assert.equal(result.pluginId, 'knowledge-b');
+  assert.equal(result.functionId, 'knowledge.query');
+  assert.equal(result.nestedFunctionCallProposal?.operation, 'execute');
+});
+
+test('nested route classifies an unknown Function without dropping Plugin evidence', async () => {
+  const { routerRequest } = request();
+  routerRequest.nestedRouteAdapter = {
+    call: async ({ tools }) => ({ ok: true, value: {
+      schemaVersion: 'iar.nested-function-call/v1',
+      pluginId: 'knowledge-b',
+      toolName: tools.find((tool) => tool.pluginId === 'knowledge-b')?.name ?? '',
+      functionId: 'ticket.create',
+      operation: 'create',
+      arguments: {},
+      confidence: 0.99
+    }, audit: [], events: [] })
+  };
+
+  const result = await new PluginFirstRouter().routeAsync(routerRequest);
+
+  assert.equal(result.status, 'rejected');
+  assert.equal(result.reasonCode, 'function_unknown');
+  assert.equal(result.pluginId, 'knowledge-b');
+  assert.equal(result.functionId, 'ticket.create');
+});
+
+test('nested route classifies an unknown Operation without dropping Function evidence', async () => {
+  const { routerRequest } = request();
+  routerRequest.nestedRouteAdapter = {
+    call: async ({ tools }) => ({ ok: true, value: {
+      schemaVersion: 'iar.nested-function-call/v1',
+      pluginId: 'knowledge-b',
+      toolName: tools.find((tool) => tool.pluginId === 'knowledge-b')?.name ?? '',
+      functionId: 'knowledge.query',
+      operation: 'delete',
+      arguments: {},
+      confidence: 0.99
+    }, audit: [], events: [] })
+  };
+
+  const result = await new PluginFirstRouter().routeAsync(routerRequest);
+
+  assert.equal(result.status, 'rejected');
+  assert.equal(result.reasonCode, 'operation_unknown');
+  assert.equal(result.pluginId, 'knowledge-b');
+  assert.equal(result.functionId, 'knowledge.query');
+  assert.equal(result.nestedFunctionCallProposal?.operation, 'delete');
+});
+
+test('nested route exposes model timeout as a stable route reason', async () => {
+  const { routerRequest } = request();
+  routerRequest.nestedRouteAdapter = {
+    call: async () => ({ ok: false, error: { code: 'model.timeout', message: '模型调用超时', retryable: true, details: {} }, audit: [], events: [] })
+  };
+
+  const result = await new PluginFirstRouter().routeAsync(routerRequest);
+
+  assert.equal(result.status, 'rejected');
+  assert.equal(result.reasonCode, 'model_timeout');
+});
+
 test('Plugin-first routing excludes Plugins that do not support the semantic action type', async () => {
   const { routerRequest, pluginCalls } = request();
   const transfer = manifest('human-transfer', 'human.transfer', ['transfer']);
