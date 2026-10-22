@@ -6,6 +6,7 @@ import {
   ModelProfileRegistry,
   ModelGateway,
   NestedFunctionCallAdapter,
+  NestedRouteAdapter,
   UnifiedFunctionCallAdapter,
   validateFunctionCallProposal,
   validateNestedFunctionCallProposal,
@@ -41,7 +42,7 @@ const nestedTool: NestedFunctionToolDefinition = {
   candidates: [{ pluginId: 'ticket-plugin', functionId: 'ticket.query', operations: [{ name: 'query' }] }]
 };
 
-function profile(role: 'function.call', backend?: 'jev' | 'intent-model', timeoutMs = 1_000) {
+function profile(role: 'function.call' | 'route.propose', backend?: 'jev' | 'intent-model', timeoutMs = 1_000) {
   return {
     schemaVersion: 'iar.model-profile/v1' as const,
     profileId: `${backend ?? 'brain'}-function-call`,
@@ -53,16 +54,16 @@ function profile(role: 'function.call', backend?: 'jev' | 'intent-model', timeou
     modelVersion: 'test',
     timeoutMs,
     retryPolicy: { maxAttempts: 1, backoffMs: 0, retryOn: ['provider_failed'] },
-    structuredOutput: { enabled: true, schemaId: 'iar.function-call/v1' },
+    structuredOutput: { enabled: true, schemaId: role === 'route.propose' ? 'iar.nested-function-call/v1' : 'iar.function-call/v1' },
     environment: { endpoint: 'IAR_TEST_ENDPOINT', apiKey: 'IAR_TEST_API_KEY', modelId: 'IAR_TEST_MODEL' }
   };
 }
 
-function providerRequest(input: JsonValue): ModelProviderRequest {
+function providerRequest(input: JsonValue, role: 'function.call' | 'route.propose' = 'function.call'): ModelProviderRequest {
   return {
     traceId: 'trace-function-call',
     runId: 'run-function-call',
-    profile: profile('function.call'),
+    profile: profile(role),
     input,
     attempt: 1,
     signal: new AbortController().signal
@@ -138,6 +139,26 @@ test('function.call model profile uses JEV first and Intent Model only when JEV 
     backend: 'intent-model',
     profileId: 'intent-model-function-call'
   });
+});
+
+test('route.propose uses the normal interaction model once and never resolves JEV/Intent compatibility backends', async () => {
+  const calls: string[] = [];
+  const profiles = new ModelProfileRegistry([
+    profile('route.propose'),
+    profile('function.call', 'jev'),
+    profile('function.call', 'intent-model')
+  ]);
+  const gateway = new ModelGateway({
+    registry: profiles,
+    providers: {
+      brain: { complete: async (request) => { calls.push(`${request.profile.role}:${request.profile.provider}`); return { schemaVersion: 'iar.nested-function-call/v1', pluginId: 'ticket-plugin', toolName: 'plugin_ticket', functionId: 'ticket.query', operation: 'query', arguments: { ticketId: 'ticket-1' }, confidence: 1 }; } },
+      'jev-provider': { complete: async () => { throw new Error('JEV compatibility backend must not run'); } },
+      'intent-provider': { complete: async () => { throw new Error('Intent compatibility backend must not run'); } }
+    }
+  });
+  const result = await new NestedRouteAdapter(gateway).call({ traceId: 'trace-route-propose', runId: 'run-route-propose', input: { currentMessage: '查 ticket-1' }, tools: [nestedTool] });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, ['route.propose:brain']);
 });
 
 test('unified Function-call adapter sends only the selected Plugin tools to the selected backend', async () => {
@@ -216,6 +237,32 @@ test('nested Function-call transport sends OpenAI tools with thinking disabled',
       arguments: { ticketId: 'ticket-1' },
       confidence: 1
     });
+    assert.deepEqual(body?.thinking, { type: 'disabled' });
+    assert.deepEqual(body?.tools, [{ type: 'function', function: { name: 'plugin_ticket', description: '工单 Plugin，支持查询工单', parameters: nestedTool.parameters } }]);
+  } finally {
+    globalThis.fetch = previousFetch;
+    restoreEnvironment('IAR_TEST_ENDPOINT', previousEndpoint);
+    restoreEnvironment('IAR_TEST_API_KEY', previousApiKey);
+    restoreEnvironment('IAR_TEST_MODEL', previousModel);
+  }
+});
+
+test('route.propose transport uses the same OpenAI nested tool contract', async () => {
+  const previousFetch = globalThis.fetch;
+  const previousEndpoint = process.env.IAR_TEST_ENDPOINT;
+  const previousApiKey = process.env.IAR_TEST_API_KEY;
+  const previousModel = process.env.IAR_TEST_MODEL;
+  process.env.IAR_TEST_ENDPOINT = 'https://model.example/v1';
+  process.env.IAR_TEST_API_KEY = 'test-secret';
+  process.env.IAR_TEST_MODEL = 'test-route-model';
+  let body: Record<string, unknown> | undefined;
+  globalThis.fetch = async (_input, init) => {
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ type: 'function', function: { name: 'plugin_ticket', arguments: '{"functionId":"ticket.query","operation":"query","arguments":{"ticketId":"ticket-1"}}' } }] } }] }), { status: 200 });
+  };
+  try {
+    const result = await new BrainModelProvider().complete(providerRequest({ currentMessage: '查 ticket-1', nestedTools: [nestedTool] } as unknown as JsonValue, 'route.propose'));
+    assert.equal((result as { schemaVersion: string }).schemaVersion, 'iar.nested-function-call/v1');
     assert.deepEqual(body?.thinking, { type: 'disabled' });
     assert.deepEqual(body?.tools, [{ type: 'function', function: { name: 'plugin_ticket', description: '工单 Plugin，支持查询工单', parameters: nestedTool.parameters } }]);
   } finally {
