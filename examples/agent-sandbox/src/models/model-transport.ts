@@ -21,6 +21,8 @@ export type ModelTransportRequest = {
   toolChoice?: JsonValue;
   /** 是否允许响应使用原生 tool_calls。 */
   allowToolCalls?: boolean;
+  /** Nested tool route explicitly disables provider reasoning mode. */
+  thinking?: { type: 'disabled' };
 };
 /** 响应内容的最小形状。 */
 type CompletionResponse = { choices?: Array<{ message?: { content?: unknown; tool_calls?: unknown } }> };
@@ -131,6 +133,7 @@ function createFetchOptions(request: ModelTransportRequest, isStream: boolean): 
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${request.connection.apiKey}` },
     body: JSON.stringify({ model: request.connection.model, temperature: TEMPERATURE,
       ...(isStream ? { stream: true } : request.allowToolCalls ? {} : { response_format: { type: 'json_object' } }),
+      ...(request.thinking ? { thinking: request.thinking } : {}),
       ...(request.tools ? { tools: request.tools } : {}), ...(request.toolChoice ? { tool_choice: request.toolChoice } : {}),
       messages: [{ role: 'system', content: request.system }, { role: 'user', content: request.user }] }) };
 }

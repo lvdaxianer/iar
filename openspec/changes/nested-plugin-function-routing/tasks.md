@@ -12,7 +12,7 @@
 
 ## 3. 一次模型调用与 Function Calling 传输
 
-- [ ] 3.1 增加 nested tool adapter，将模型 tool call 解析为 Plugin、Function、Operation 和命名 JSON 参数，并使用 `thinking.type=disabled`；验证正常 provider、无 tool call、非法 JSON、未知工具和超时均有稳定结果。
+- [x] 3.1 增加 nested tool adapter，将模型 tool call 解析为 Plugin、Function、Operation 和命名 JSON 参数，并使用 `thinking.type=disabled`；验证正常 provider、无 tool call、非法 JSON、未知工具和超时均有稳定结果。
 - [ ] 3.2 让模型网关按统一 normal interaction model 发送一次 nested proposal，保留 JEV/Intent Model 显式兼容回退；验证一次请求不会重复调用 Plugin/Function 选择模型，并记录模型角色和耗时。
 
 ## 4. Sandbox 主路由与运行时执行
