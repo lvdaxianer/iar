@@ -26,6 +26,8 @@ export const ERROR_CODES = {
   PLUGIN_DEPENDENCY_UNAVAILABLE: 'plugin.dependency_unavailable',
   // 批量安装中出现重复插件标识时使用该错误。
   PLUGIN_DUPLICATE_ID: 'plugin.duplicate_id',
+  // Plugin ID 归一化为 OpenAI 工具名后发生冲突时使用该错误。
+  PLUGIN_TOOL_NAME_CONFLICT: 'plugin.tool_name_conflict',
   // 批量安装超过宿主资源边界时使用该错误。
   PLUGIN_INSTALL_BATCH_TOO_LARGE: 'plugin.install_batch_too_large',
   // Manifest 引用不存在的 Function 时使用该错误。

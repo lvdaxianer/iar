@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { ERROR_CODES, type BusinessPluginManifest, type PluginManifest } from '@iar/contracts';
-import { PluginHost } from '@iar/plugins';
+import { normalizePluginToolName, PluginHost } from '@iar/plugins';
 import { loadBusinessManifest, pluginPackage } from './fixtures/plugin-package.js';
 
 /*
@@ -200,6 +200,42 @@ test('invalid install is atomic and emits rejection history', () => {
     assert.equal(rejection.payload.pluginId, 'broken-install-v1');
     assert.equal(rejection.payload.reasonCode, ERROR_CODES.CONTRACT_VALIDATION_FAILED);
   }
+});
+
+test('custom Function input and output Schema are rejected before registration', () => {
+  const invalidInput = pluginPackage(loadBusinessManifest(), 'schema.input.v1', { inputSchema: { type: 'not-a-json-schema-type' } });
+  invalidInput.manifest = { ...invalidInput.manifest, pluginId: 'invalid-input-schema-v1' };
+  const inputHost = new PluginHost();
+  const inputResult = inputHost.install(invalidInput);
+  assert.equal(inputResult.ok, false);
+  if (!inputResult.ok) assert.equal(inputResult.error.code, ERROR_CODES.INVALID_EMBEDDED_SCHEMA);
+  assert.equal(inputHost.get('invalid-input-schema-v1'), undefined);
+
+  const invalidOutput = pluginPackage(loadBusinessManifest(), 'schema.output.v1', { outputSchema: { type: 'not-a-json-schema-type' } });
+  invalidOutput.manifest = { ...invalidOutput.manifest, pluginId: 'invalid-output-schema-v1' };
+  const outputHost = new PluginHost();
+  const outputResult = outputHost.install(invalidOutput);
+  assert.equal(outputResult.ok, false);
+  if (!outputResult.ok) assert.equal(outputResult.error.code, ERROR_CODES.INVALID_EMBEDDED_SCHEMA);
+  assert.equal(outputHost.get('invalid-output-schema-v1'), undefined);
+});
+
+test('PluginHost rejects normalized OpenAI tool name collisions', () => {
+  const first = manifestWith({ pluginId: 'api.gateway/order' });
+  const second = manifestWith({ pluginId: 'api_u2e_gateway_u2f_order' });
+  assert.equal(normalizePluginToolName(first.manifest.pluginId), normalizePluginToolName(second.manifest.pluginId));
+
+  const host = new PluginHost();
+  const batchResult = host.installAll([first, second]);
+  assert.equal(batchResult.ok, false);
+  if (!batchResult.ok) assert.equal(batchResult.error.code, ERROR_CODES.PLUGIN_TOOL_NAME_CONFLICT);
+  assert.equal(host.get(first.manifest.pluginId), undefined);
+  assert.equal(host.get(second.manifest.pluginId), undefined);
+
+  assert.equal(host.install(first).ok, true);
+  const existingResult = host.install(second);
+  assert.equal(existingResult.ok, false);
+  if (!existingResult.ok) assert.equal(existingResult.error.code, ERROR_CODES.PLUGIN_TOOL_NAME_CONFLICT);
 });
 
 /**

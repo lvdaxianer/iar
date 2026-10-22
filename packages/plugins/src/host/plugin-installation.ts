@@ -15,6 +15,7 @@ import {
   type PluginOperation
 } from '@iar/contracts';
 import type { FunctionRegistration, PluginPackage } from '../sdk/index.js';
+import { normalizePluginToolName } from './nested-tool-contract.js';
 import type { PluginHostResult, PluginFunctionRecord, PluginRecord } from './types.js';
 
 /** 单次安装允许的最大 Plugin 包数量。 */
@@ -117,7 +118,32 @@ export function prepareInstall(inputs: unknown[]): PluginHostResult<InstallPrepa
     if (!result.ok) return result;
     packages.push(result.value);
   }
+  const toolNames = validatePluginToolNames(packages);
+  if (!toolNames.ok) return toolNames;
   return { ok: true, value: { packages, manifests: packages.map((item) => item.manifest) } };
+}
+
+/** 校验当前批次和已有注册记录之间的 OpenAI 工具名归一化冲突。 */
+export function validatePluginToolNames(packages: readonly PluginPackage[], existingPluginIds: Iterable<string> = []): PluginHostResult<readonly PluginPackage[]> {
+  const owners = new Map<string, string>();
+  for (const pluginId of existingPluginIds) owners.set(normalizePluginToolName(pluginId), pluginId);
+  for (const plugin of packages.filter((item) => item.manifest.pluginKind === 'business')) {
+    const pluginId = plugin.manifest.pluginId;
+    const toolName = normalizePluginToolName(pluginId);
+    const owner = owners.get(toolName);
+    if (owner !== undefined && owner !== pluginId) {
+      return {
+        ok: false,
+        error: installationError(ERROR_CODES.PLUGIN_TOOL_NAME_CONFLICT, 'Plugin 工具名称冲突', {
+          pluginId,
+          conflictingPluginId: owner,
+          toolName
+        })
+      };
+    }
+    owners.set(toolName, pluginId);
+  }
+  return { ok: true, value: packages };
 }
 
 /** 校验排序后的 Manifest 不会破坏当前注册表。 */

@@ -3,7 +3,7 @@
 ## 1. 路由契约与工具校验
 
 - [x] 1.1 定义 `iar.nested-function-call/v1` 内部提案、嵌套 Plugin tool、Function/Operation 候选和具名 `arguments` 类型，并为合法工具名、描述长度和 Schema 子集增加失败优先测试；验证 `npm test -- --runInBand tests/routing/nested-plugin-function-routing.test.ts` 通过。
-- [ ] 1.2 在 PluginHost 注册边界校验 Plugin、Function、Operation 的所有权、输入/输出 Schema 和工具名称冲突；验证自定义 Plugin 的非法输入/输出在启动校验中被拒绝，合法注册可生成稳定映射。
+- [x] 1.2 在 PluginHost 注册边界校验 Plugin、Function、Operation 的所有权、输入/输出 Schema 和工具名称冲突；验证自定义 Plugin 的非法输入/输出在启动校验中被拒绝，合法注册可生成稳定映射。
 
 ## 2. 嵌套 Plugin 工具投影
 
