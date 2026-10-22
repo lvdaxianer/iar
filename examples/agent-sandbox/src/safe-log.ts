@@ -32,21 +32,26 @@ const CONTRACT_MESSAGES: Readonly<Record<string, { zh: string; en: string }>> = 
 const SAFE_CONTRACT_IDENTIFIERS = /^[A-Za-z0-9_.|:-]{1,256}$/;
 /** 日志中允许出现的枚举字符串。 */
 const SAFE_VALUES: Readonly<Record<string, readonly string[]>> = {
-  level: ['trace', 'info', 'warn', 'error', 'debug'], event: ['http.request.start', 'http.request.end', 'http.stream', 'model.http', 'iar.turn.stage', 'iar.turn.completed', 'iar.route.contract', 'model.reasoning', 'sandbox.start', 'sandbox.start_failed', 'sandbox.shutdown_failed', 'sandbox.snapshot'],
+  level: ['trace', 'info', 'warn', 'error', 'debug'], event: ['http.request.start', 'http.request.end', 'http.stream', 'model.http', 'iar.turn.stage', 'iar.turn.completed', 'iar.route.contract', 'iar.semantic.frame', 'iar.route.decision', 'model.reasoning', 'sandbox.start', 'sandbox.start_failed', 'sandbox.shutdown_failed', 'sandbox.snapshot'],
   outcome: ['network_error', 'http_error', 'invalid_response', 'timeout', 'aborted', 'slow', 'success', 'stream_failed', 'stream_write_failed', 'startup_failed', 'port_in_use', 'shutdown_failed', 'invalid_mode', 'missing_api_key', 'snapshot_failed', 'contract_violation'],
-  reasonCode: Object.keys(CONTRACT_MESSAGES),
+  reasonCode: [...Object.keys(CONTRACT_MESSAGES), 'semantic_incomplete', 'route_not_proposed', 'candidate_empty', 'route_contract_invalid', 'bridge_timeout', 'bridge_unavailable'],
   target: ['model.chat.completions', 'model.jev.systemone'], method: ['GET', 'POST', 'HEAD', 'OPTIONS', 'PUT', 'PATCH', 'DELETE', 'OTHER'],
   path: ['/', '/api/chat', '/api/confirm', '/api/compact', '/api/state', '/api/reset', 'unknown',
     '/api/sessions', '/api/sessions/:sessionId', '/api/sessions/:sessionId/chat', '/api/sessions/:sessionId/confirm',
     '/api/sessions/:sessionId/compact', '/api/sessions/:sessionId/state', '/api/sessions/:sessionId/reset', '/api/sessions/:sessionId/resume',
     '/api/bridge/v1/sessions', '/api/bridge/v1/sessions/:sessionId/input', '/api/bridge/v1/sessions/:sessionId/input/stream', '/api/bridge/v1/sessions/:sessionId/confirm', '/api/bridge/v1/sessions/:sessionId/state'],
-  stage: ['semantic.extract', 'route.propose', 'route.select', 'action.execute', 'response.reasoning', 'response.generate'],
+  stage: ['semantic.extract', 'route.propose', 'route.select', 'action.execute', 'response.reasoning', 'response.generate'], nextStage: ['route.propose', 'route.select', 'action.execute', 'response.generate'],
+  missingField: ['intent', 'action', 'pluginId', 'functionId', 'operation', 'parameters'], semanticAction: ['query', 'create', 'update', 'delete', 'transfer', 'execute', 'unknown'], execution: ['allowed', 'blocked', 'skipped'],
   status: ['completed', 'failed', 'skipped'],
   modelRole: ['semantic.extract', 'route.propose', 'function.call', 'function.select', 'plugin.select', 'context.compact', 'response.generate'],
   host: ['127.0.0.1'], mode: ['brain', 'scripted'], selection: ['explicit', 'configured', 'fallback']
 };
 /** 允许输出的数字字段。 */
-const SAFE_NUMBERS = new Set(['startTime', 'endTime', 'durationMs', 'firstTokenMs', 'status']);
+const SAFE_NUMBERS = new Set(['startTime', 'endTime', 'durationMs', 'firstTokenMs', 'status', 'candidateCount', 'allowedValueCount']);
+/** 只允许输出有限的布尔诊断字段。 */
+const SAFE_BOOLEAN_KEYS = new Set(['hasIntent', 'hasAction', 'hasPluginId', 'hasFunctionId', 'hasOperation']);
+/** 语义模型输出中的稳定标识符仅允许受控字符，不输出自然语言正文。 */
+const SAFE_IDENTIFIER_KEYS = new Set(['semanticIntent', 'semanticPluginId', 'semanticFunctionId', 'pluginId', 'functionId']);
 /** HTTP 状态码的合法范围。 */
 const MIN_HTTP_STATUS = 100;
 const MAX_HTTP_STATUS = 599;
@@ -96,8 +101,10 @@ function isSafeEntry([key, value]: [string, unknown]): boolean {
   if (key === 'port') return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 65535;
   // 时间和耗时只接受非负安全整数。
   if (SAFE_NUMBERS.has(key)) return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+  if (SAFE_BOOLEAN_KEYS.has(key)) return typeof value === 'boolean' || (typeof value === 'string' && (value === 'true' || value === 'false'));
   // 链路标识只接受固定 UUID 格式。
   if (SAFE_IDS.has(key)) return typeof value === 'string' && UUID_PATTERN.test(value);
+  if (SAFE_IDENTIFIER_KEYS.has(key)) return typeof value === 'string' && SAFE_CONTRACT_IDENTIFIERS.test(value);
   if (key === 'expectedOperation' || key === 'actualOperation') return typeof value === 'string' && SAFE_CONTRACT_IDENTIFIERS.test(value);
   if (key === 'messageZh') return typeof value === 'string' && Object.values(CONTRACT_MESSAGES).some((message) => message.zh === value);
   if (key === 'messageEn') return typeof value === 'string' && Object.values(CONTRACT_MESSAGES).some((message) => message.en === value);
@@ -268,7 +275,7 @@ export function writeSafeLog(record: Record<string, unknown>): void {
 export function formatBilingualLogLine(record: Record<string, unknown>): string {
   const safe = Object.fromEntries(Object.entries(record).filter(isSafeEntry));
   const event = typeof safe.event === 'string' ? safe.event : 'iar.observability';
-  const label = event === 'iar.turn.stage' ? '阶段耗时 / Stage timing' : event === 'iar.turn.completed' ? '轮次完成 / Turn completed' : event === 'iar.route.contract' ? '路由契约失败 / Route contract failure' : event === 'model.reasoning' ? '模型思考 / Model reasoning' : '运行事件 / Runtime event';
+  const label = event === 'iar.turn.stage' ? '阶段耗时 / Stage timing' : event === 'iar.turn.completed' ? '轮次完成 / Turn completed' : event === 'iar.route.contract' ? '路由契约失败 / Route contract failure' : event === 'iar.semantic.frame' ? '语义抽取 / Semantic extraction' : event === 'iar.route.decision' ? '路由决策 / Route decision' : event === 'model.reasoning' ? '模型思考 / Model reasoning' : '运行事件 / Runtime event';
   const stage = typeof safe.stage === 'string' ? ` stage=${safe.stage}` : '';
   const modelRole = typeof safe.modelRole === 'string' ? ` modelRole=${safe.modelRole}` : '';
   const outcome = typeof safe.outcome === 'string' ? ` outcome=${safe.outcome}` : '';
@@ -280,9 +287,74 @@ export function formatBilingualLogLine(record: Record<string, unknown>): string 
   const reasonCode = typeof safe.reasonCode === 'string' ? ` reasonCode=${safe.reasonCode}` : '';
   const expectedOperation = typeof safe.expectedOperation === 'string' ? ` expectedOperation=${safe.expectedOperation}` : '';
   const actualOperation = typeof safe.actualOperation === 'string' ? ` actualOperation=${safe.actualOperation}` : '';
+  const semanticIntent = typeof safe.semanticIntent === 'string' ? ` semanticIntent=${safe.semanticIntent}` : '';
+  const semanticAction = typeof safe.semanticAction === 'string' ? ` semanticAction=${safe.semanticAction}` : '';
+  const missingField = typeof safe.missingField === 'string' ? ` missingField=${safe.missingField}` : '';
+  const nextStage = typeof safe.nextStage === 'string' ? ` nextStage=${safe.nextStage}` : '';
+  const candidateCount = typeof safe.candidateCount === 'number' ? ` candidateCount=${safe.candidateCount}` : '';
+  const allowedValueCount = typeof safe.allowedValueCount === 'number' ? ` allowedValueCount=${safe.allowedValueCount}` : '';
+  const execution = typeof safe.execution === 'string' ? ` execution=${safe.execution}` : '';
+  const hasFields = ['hasIntent', 'hasAction', 'hasPluginId', 'hasFunctionId', 'hasOperation'].filter((key) => safe[key] !== undefined).map((key) => `${key}=${String(safe[key])}`).join(' ');
   const messageZh = typeof safe.messageZh === 'string' ? ` messageZh=${safe.messageZh}` : '';
   const messageEn = typeof safe.messageEn === 'string' ? ` messageEn=${safe.messageEn}` : '';
-  return `${level} ${label}${stage}${modelRole}${status}${outcome}${reasonCode}${expectedOperation}${actualOperation}${duration}${firstToken}${trace}${messageZh}${messageEn}`;
+  return `${level} ${label}${stage}${modelRole}${status}${outcome}${reasonCode}${semanticIntent}${semanticAction}${hasFields.length === 0 ? '' : ` ${hasFields}`}${missingField}${nextStage}${candidateCount}${allowedValueCount}${execution}${expectedOperation}${actualOperation}${duration}${firstToken}${trace}${messageZh}${messageEn}`;
+}
+
+/** 语义抽取阶段的安全诊断字段。 */
+export type SemanticFrameDiagnostic = {
+  status: 'completed' | 'failed';
+  semanticIntent?: string;
+  semanticAction?: string;
+  hasIntent: boolean;
+  hasAction: boolean;
+  missingField?: 'intent' | 'action' | 'pluginId' | 'functionId' | 'operation' | 'parameters';
+  nextStage?: 'route.propose' | 'route.select' | 'action.execute' | 'response.generate';
+  durationMs?: number;
+};
+
+/** 路由门禁阶段的安全诊断字段。 */
+export type RouteDecisionDiagnostic = {
+  stage: 'route.propose' | 'route.select' | 'action.execute';
+  status: 'completed' | 'failed' | 'skipped';
+  reasonCode: string;
+  candidateCount?: number;
+  allowedValueCount?: number;
+  execution?: 'allowed' | 'blocked' | 'skipped';
+  pluginId?: string;
+  functionId?: string;
+  durationMs?: number;
+};
+
+/**
+ * 记录语义抽取的字段状态，不记录用户原文和模型原始响应。
+ * @param traceId - 当前轮次链路标识
+ * @param diagnostic - 受控语义帧摘要
+ * @returns 无返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+export function logSemanticFrame(traceId: string, diagnostic: SemanticFrameDiagnostic): void {
+  const context = contexts.getStore();
+  writeSafeLog({
+    level: diagnostic.status === 'failed' ? 'warn' : 'info', event: 'iar.semantic.frame', traceId: context?.origin === 'http' ? context.traceId : safeModelTraceId(traceId),
+    ...diagnostic
+  });
+}
+
+/**
+ * 记录路由门禁和执行阻断原因，不记录模型提案原文。
+ * @param traceId - 当前轮次链路标识
+ * @param diagnostic - 受控路由摘要
+ * @returns 无返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+export function logRouteDecision(traceId: string, diagnostic: RouteDecisionDiagnostic): void {
+  const context = contexts.getStore();
+  writeSafeLog({
+    level: diagnostic.status === 'failed' || diagnostic.execution === 'blocked' ? 'warn' : 'info', event: 'iar.route.decision', traceId: context?.origin === 'http' ? context.traceId : safeModelTraceId(traceId),
+    ...diagnostic
+  });
 }
 
 /** 路由契约失败的安全诊断输入；只接受固定原因码和有限标识。 */

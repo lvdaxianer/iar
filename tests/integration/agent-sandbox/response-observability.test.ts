@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { callModelStream } from '../../../examples/agent-sandbox/src/models/model-stream-transport.js';
-import { createBilingualLogWriter, createSafeLogSink, formatBilingualLogLine, logRouteContractFailure } from '../../../examples/agent-sandbox/src/safe-log.js';
+import { createBilingualLogWriter, createSafeLogSink, formatBilingualLogLine, logRouteContractFailure, logRouteDecision, logSemanticFrame } from '../../../examples/agent-sandbox/src/safe-log.js';
 import { TurnTimingTracker } from '../../../examples/agent-sandbox/src/turn-timing.js';
 
 test('计时追踪器记录总耗时、阶段耗时和首 token 耗时', () => {
@@ -47,6 +47,76 @@ test('双语日志格式只展示受控摘要，不包含请求正文', () => {
   assert.match(line, /status=completed/);
   assert.match(line, /42ms/);
   assert.doesNotMatch(line, /不要输出我/);
+});
+
+test('语义抽取诊断输出字段状态、缺失原因和下一阶段，并保留双语标签', () => {
+  const line = formatBilingualLogLine({
+    level: 'warn',
+    event: 'iar.semantic.frame',
+    traceId: '123e4567-e89b-12d3-a456-426614174000',
+    status: 'completed',
+    semanticIntent: 'gateway.control',
+    semanticAction: 'unknown',
+    hasIntent: 'true',
+    hasAction: 'false',
+    missingField: 'action',
+    nextStage: 'route.propose',
+    rawUserText: '执行这个 200 次/秒',
+  });
+
+  assert.match(line, /语义抽取 \/ Semantic extraction/);
+  assert.match(line, /semanticAction=unknown/);
+  assert.match(line, /missingField=action/);
+  assert.match(line, /nextStage=route\.propose/);
+  assert.doesNotMatch(line, /执行这个 200 次\/秒/);
+});
+
+test('路由诊断区分抽取不完整、候选为空和执行阻断', () => {
+  const line = formatBilingualLogLine({
+    level: 'warn',
+    event: 'iar.route.decision',
+    traceId: '123e4567-e89b-12d3-a456-426614174000',
+    stage: 'route.select',
+    status: 'skipped',
+    reasonCode: 'semantic_incomplete',
+    nextStage: 'response.generate',
+    candidateCount: 0,
+    execution: 'blocked',
+    modelRole: 'route.propose',
+    rawModelResponse: '{"choice":"ticket.create"}',
+  });
+
+  assert.match(line, /路由决策 \/ Route decision/);
+  assert.match(line, /reasonCode=semantic_incomplete/);
+  assert.match(line, /candidateCount=0/);
+  assert.match(line, /execution=blocked/);
+  assert.doesNotMatch(line, /ticket\.create/);
+});
+
+test('语义与路由诊断入口写入同一安全 trace 并丢弃原文', async () => {
+  let output = '';
+  const restore = (await import('../../../examples/agent-sandbox/src/safe-log.js')).setSafeLogWriterForTesting((buffer, done) => { output += buffer.toString('utf8'); done(null, buffer.length); });
+  try {
+    logSemanticFrame('123e4567-e89b-12d3-a456-426614174000', {
+      status: 'completed', semanticIntent: 'gateway.control', semanticAction: 'unknown', hasIntent: true, hasAction: false,
+      missingField: 'action', nextStage: 'route.propose'
+    });
+    logRouteDecision('123e4567-e89b-12d3-a456-426614174000', Object.assign({
+      stage: 'route.propose', status: 'skipped', reasonCode: 'semantic_incomplete', candidateCount: 0, execution: 'blocked', rawModelResponse: '不要写入日志'
+    }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  } finally {
+    restore();
+  }
+  const records = output.trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
+  assert.equal(records.length, 2);
+  assert.equal(records[0]?.event, 'iar.semantic.frame');
+  assert.equal(records[1]?.event, 'iar.route.decision');
+  assert.equal(records[0]?.traceId, records[1]?.traceId);
+  assert.equal(records[1]?.candidateCount, 0);
+  assert.equal(records[1]?.execution, 'blocked');
+  assert.doesNotMatch(output, /不要写入日志/);
 });
 
 test('双语日志写入器将结构化 JSON 转成可读单行', async () => {
