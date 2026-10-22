@@ -90,7 +90,17 @@ The system SHALL persist accepted messages and structured context through the co
 
 ### Requirement: Model calls receive structured conversational context
 
-The system SHALL provide applicable model calls with current routing scope, verified facts, pending clarification, bounded untrusted recent messages, the current user message, and enabled/authorized capability descriptions. Only validated `model` results enter response generation; read/query results use that path by default, while `direct`/`none` retain non-model boundaries. Self-introduction receives bounded capabilities and its supplementary prompt; compaction excludes raw history.
+The runtime SHALL provide `semantic.extract` with current user text, bounded recent messages, verified structured context, and enabled/authorized Plugin-level capability descriptions. The `function.call` stage SHALL receive the same relevant context plus only the selected Plugin's Function tools and input Schemas. Neither model call SHALL receive authority-bearing secrets or a cross-Plugin executable Function list.
+
+#### Scenario: Plugin proposal input is bounded
+
+- **WHEN** semantic extraction runs
+- **THEN** its capability context contains Plugin IDs, descriptions and bounded action summaries, but no Function input/output Schema or execution permission
+
+#### Scenario: Function call input is scoped
+
+- **WHEN** Function Calling runs after Plugin selection
+- **THEN** its tool set contains only current Functions owned by that Plugin and the runtime still treats the model output as untrusted data
 
 #### Scenario: Read query result is summarized
 
@@ -266,7 +276,17 @@ The system SHALL use validated successful compaction results while retaining tru
 
 ### Requirement: Existing decision contracts remain authoritative
 
-The system SHALL preserve JEV priority, the shared validated decision result, finite candidates, authorization and policy checks when structured context is introduced. Missing, invalid or uncertain decisions SHALL NOT silently authorize a side-effecting action.
+The runtime SHALL preserve the existing JEV priority and Intent Model fallback policy for the Function-call stage, while `semantic.extract` and `response.generate` use the configured normal interaction model. Missing JEV SHALL select the configured Intent Model and SHALL NOT silently select a mock provider.
+
+#### Scenario: JEV is available
+
+- **WHEN** a valid JEV `function.call` profile exists
+- **THEN** the Function-call stage uses JEV and records its profile/backend without invoking Intent Model for the same attempt
+
+#### Scenario: JEV is not configured
+
+- **WHEN** no valid JEV `function.call` profile exists but the Intent Model profile is configured
+- **THEN** the Function-call stage uses Intent Model through the same validated proposal boundary
 
 #### Scenario: A decision backend selects a candidate
 

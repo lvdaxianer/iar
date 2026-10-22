@@ -8,16 +8,31 @@
 
 ### Requirement: Plugin scope precedes action filtering
 
-The registration model SHALL derive every routable Function scope from an installed Plugin package, while the existing routing protocol SHALL first select a finite Function and then select a Plugin implementation within that Function. An `actionType` SHALL only filter Functions and Plugin candidates inside the current finite routing scope, and an Agent-level disabled Plugin set SHALL be applied before semantic/routing candidates, model context and self-introduction metadata are constructed.
+The primary Agent routing path SHALL first give the semantic model only bounded Plugin-level descriptions and accept at most an untrusted Plugin proposal. After runtime filtering and revalidation, the Function stage SHALL receive only the selected Plugin's current Function definitions and input Schemas. The primary path SHALL NOT expose a cross-Plugin flattened Function list to the first model call.
+
+#### Scenario: First stage sees Plugin descriptions only
+
+- **WHEN** an Agent has multiple enabled business Plugins with one or more Functions each
+- **THEN** `semantic.extract` receives one bounded description per Plugin and does not receive Function input/output Schemas or a cross-Plugin Function candidate list
+
+#### Scenario: Selected Plugin narrows Function candidates
+
+- **WHEN** semantic extraction proposes an enabled authorized Plugin
+- **THEN** the runtime revalidates that Plugin and provides only its current Functions to `function.call`
+
+#### Scenario: Invalid Plugin proposal is non-authoritative
+
+- **WHEN** the semantic model returns an unknown, disabled, unauthorized or action-incompatible Plugin ID
+- **THEN** the runtime rejects or falls back to a bounded response path and does not load or execute a Function from that proposal
 
 #### Scenario: Query does not load every Plugin query Function
 
 - **WHEN** ten Plugin packages each expose a `query`-compatible Function and the current input has no active Function scope
-- **THEN** the first decision receives the same finite Function candidates derived from registered packages, and no Plugin implementation is selected before the Function decision succeeds
+- **THEN** the first semantic decision receives only bounded Plugin descriptions, and no Function implementation is loaded before Plugin validation succeeds
 
 #### Scenario: Unknown domain is clarified
 
-- **WHEN** the current input does not identify a Function and no active scope exists
+- **WHEN** the current input does not identify a Plugin and no active scope exists
 - **THEN** the runtime asks a clarification question without selecting a Plugin or expanding executable candidates from unrelated packages
 
 #### Scenario: Agent-disabled Plugin is excluded before routing
@@ -69,7 +84,7 @@ Plugin and action decisions SHALL remain finite model recommendations; final reg
 
 ### Requirement: Plugin packages own Function scope
 
-The runtime SHALL derive Function ownership and Plugin candidate relationships from validated nested registrations rather than from a separate caller-maintained Function ownership list.
+The runtime SHALL derive every Function tool and execution candidate from the selected Plugin package's validated nested registrations. Legacy Function-first decision adapters MAY remain available for compatibility but SHALL NOT widen the new Plugin-first path.
 
 #### Scenario: Function routing uses package registrations
 
@@ -80,3 +95,26 @@ The runtime SHALL derive Function ownership and Plugin candidate relationships f
 
 - **WHEN** two enabled Plugin packages expose `ticket.query`
 - **THEN** the Function stage retains one bounded Function identity and the Plugin stage receives only those two matching providers
+
+### Requirement: The primary route uses bounded model stages
+
+The primary route SHALL use one semantic/Plugin proposal call, at most one Function-call proposal call, and one response generation call when a model response is required. It SHALL NOT call a separate Plugin selection model after the semantic proposal.
+
+#### Scenario: Normal query has three model stages
+
+- **WHEN** a user asks for a query handled by an enabled Plugin and the Function result uses `model` response mode
+- **THEN** the runtime performs `semantic.extract`, `function.call`, and `response.generate` in that order
+
+#### Scenario: Direct or none result skips response generation
+
+- **WHEN** the selected Function returns a validated `direct` or `none` result for an allowed non-query operation
+- **THEN** the runtime does not call `response.generate`
+
+### Requirement: Agent-disabled Plugins are excluded before both stages
+
+The Agent-level disabled Plugin set SHALL be applied before Plugin descriptions, semantic model context, Function tools, self-introduction metadata and fallback capability context are built.
+
+#### Scenario: Disabled Plugin cannot be reintroduced
+
+- **WHEN** a disabled Plugin is named by semantic extraction or Function Calling
+- **THEN** the runtime rejects it using the current registry state and does not execute or describe it as available

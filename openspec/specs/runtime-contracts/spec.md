@@ -8,7 +8,12 @@
 
 ### Requirement: Runtime contracts are versioned and schema-validated
 
-IAR SHALL expose versioned contracts for Plugin packages, nested Function registrations, Function input/output and response results, Rule, Workflow, Action, Decision and related error results, and SHALL reject payloads that fail the declared schema before any Plugin, Function or Handler enters runtime state or any unvalidated Handler result reaches a user or model.
+IAR SHALL validate the new `iar.function-call/v1` proposal, its bounded tool descriptors and Function arguments before any unvalidated proposal reaches Action construction, authorization, confirmation or a Handler. Existing Plugin, Function input/output and `iar.decision/v1` contracts remain authoritative for legacy adapters.
+
+#### Scenario: Malformed Function-call proposal fails closed
+
+- **WHEN** a provider returns missing Plugin/Function identifiers, non-object arguments, an invalid confidence or unknown fields
+- **THEN** the runtime returns a stable schema error and does not execute or expose the raw provider output
 
 #### Scenario: Handler output is validated before reply generation
 
@@ -22,7 +27,12 @@ IAR SHALL expose versioned contracts for Plugin packages, nested Function regist
 
 ### Requirement: Function plugins declare an auditable ownership boundary
 
-Every business Plugin package SHALL declare Plugin-level metadata and a bounded list of Function definitions; every Function definition SHALL declare its own `functionId`, fixed version, input and output schemas, capabilities, risk level, operations, and fixed action types. A Function SHALL be routable only through a Plugin package that contains that exact registration.
+Every Function tool exposed to a model SHALL be derived from the installed Function definition and selected Plugin ownership. A model-provided tool schema, capability list or Plugin ID SHALL not replace the installed contract.
+
+#### Scenario: Model cannot change input Schema
+
+- **WHEN** a Function-call response includes a custom Schema, capability or operation not present in the installed Function record
+- **THEN** the runtime ignores/rejects the extra data and validates against the installed record
 
 #### Scenario: Unknown action type is rejected
 

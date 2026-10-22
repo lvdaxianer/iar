@@ -7,7 +7,17 @@
 
 ### Requirement: Model connection settings support independent environment overrides
 
-The runtime SHALL allow normal interaction profiles and Intent Model profiles to declare independent environment variable names for endpoint, API key, and model ID. A non-empty environment override SHALL take precedence over the profile default. Resolved secrets SHALL NOT be stored in profiles, audit metadata, stable errors, or logs.
+The runtime SHALL allow independent profiles for `semantic.extract`, `function.call`, and `response.generate`. `semantic.extract` and `response.generate` use the normal interaction model environment mapping; `function.call` resolves JEV first and uses the Intent Model environment mapping only when no valid JEV primary profile is configured. Resolved secrets remain absent from profiles, audit metadata, stable errors and logs.
+
+#### Scenario: Function-call stage falls back when JEV is absent
+
+- **WHEN** no valid JEV `function.call` profile exists and the Intent Model endpoint/key/model variables are configured
+- **THEN** the runtime invokes the Intent Model and preserves the same validated function-call output contract
+
+#### Scenario: Missing both Function-call backends fails safely
+
+- **WHEN** neither JEV nor Intent Model has a valid `function.call` profile
+- **THEN** the runtime returns a stable model configuration failure without invoking a mock or executing a Function
 
 #### Scenario: Normal interaction model uses its environment overrides
 
