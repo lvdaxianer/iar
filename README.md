@@ -125,6 +125,7 @@ Function 和 Plugin 决策都经过 `ModelGateway` 与 `UnifiedDecisionAdapter`�
 
 - 主路由的 `semantic.extract`、`route.propose` 和 `response.generate` 使用普通交互模型；`route.propose` 一次性通过 OpenAI-compatible nested tool 提出 Plugin、Function、Operation 和具名 arguments。
 - `function.select`/`plugin.select`/旧 `function.call` 仅供显式兼容路径使用：JEV 三项连接变量完整时使用 JEV，否则使用 Intent Model。
+- JEV 配置完整时，兼容路径通过 `jev` provider 调用 JEV System One 的 typed `choice` 接口并归一化为 `iar.decision/v1`；`mock` 只用于 scripted/test 离线模式，不会冒充真实 JEV。
 - Intent Model 使用固定 Prompt `iar.intent-decision-prompt/v1`，要求只返回 JSON、原样保留有序 `candidateIds`，不得新增候选、授予能力、授权动作或执行插件。
 - 低分或歧义结果仍是 `needs_clarification`，不会自动切换成另一条可执行选择。
 - backend 只提供候选选择建议；Function-first、Plugin ownership、租户/用户/环境授权、Manifest capability 和最终 Policy/Confirmation 复核仍由 Runtime 完成。

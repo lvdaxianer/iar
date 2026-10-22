@@ -27,14 +27,14 @@ const MAX_LOG_WRITE_MS = 1000;
 const SAFE_VALUES: Readonly<Record<string, readonly string[]>> = {
   level: ['trace', 'info', 'warn', 'error', 'debug'], event: ['http.request.start', 'http.request.end', 'http.stream', 'model.http', 'iar.turn.stage', 'iar.turn.completed', 'model.reasoning', 'sandbox.start', 'sandbox.start_failed', 'sandbox.shutdown_failed', 'sandbox.snapshot'],
   outcome: ['network_error', 'http_error', 'invalid_response', 'timeout', 'aborted', 'slow', 'success', 'stream_failed', 'stream_write_failed', 'startup_failed', 'port_in_use', 'shutdown_failed', 'invalid_mode', 'missing_api_key', 'snapshot_failed'],
-  target: ['model.chat.completions'], method: ['GET', 'POST', 'HEAD', 'OPTIONS', 'PUT', 'PATCH', 'DELETE', 'OTHER'],
+  target: ['model.chat.completions', 'model.jev.systemone'], method: ['GET', 'POST', 'HEAD', 'OPTIONS', 'PUT', 'PATCH', 'DELETE', 'OTHER'],
   path: ['/', '/api/chat', '/api/confirm', '/api/compact', '/api/state', '/api/reset', 'unknown',
     '/api/sessions', '/api/sessions/:sessionId', '/api/sessions/:sessionId/chat', '/api/sessions/:sessionId/confirm',
     '/api/sessions/:sessionId/compact', '/api/sessions/:sessionId/state', '/api/sessions/:sessionId/reset', '/api/sessions/:sessionId/resume',
     '/api/bridge/v1/sessions', '/api/bridge/v1/sessions/:sessionId/input', '/api/bridge/v1/sessions/:sessionId/confirm', '/api/bridge/v1/sessions/:sessionId/state'],
   stage: ['semantic.extract', 'route.propose', 'route.select', 'action.execute', 'response.reasoning', 'response.generate'],
   status: ['completed', 'failed', 'skipped'],
-  modelRole: ['semantic.extract', 'route.propose', 'function.call', 'context.compact', 'response.generate'],
+  modelRole: ['semantic.extract', 'route.propose', 'function.call', 'function.select', 'plugin.select', 'context.compact', 'response.generate'],
   host: ['127.0.0.1'], mode: ['brain', 'scripted'], selection: ['explicit', 'configured', 'fallback']
 };
 /** 允许输出的数字字段。 */
@@ -336,18 +336,20 @@ export function registerDebugSignal(): () => void {
  *
  * @param startTime - 请求开始时间
  * @param status - HTTP 状态码
+ * @param modelRole - 当前模型调用角色
+ * @param target - 当前模型上游协议目标
  * @returns 无返回值
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function logModelSuccess(startTime: number, status: number, modelRole?: string): void {
+export function logModelSuccess(startTime: number, status: number, modelRole?: string, target: 'model.chat.completions' | 'model.jev.systemone' = 'model.chat.completions'): void {
   const endTime = Date.now();
   const isSlow = endTime - startTime >= MODEL_SLOW_MS;
   // 未开启调试且调用不慢时无需输出。
   if (!isDebugEnabled && !isSlow) return;
   const context = contexts.getStore() ?? { traceId: randomUUID() };
   writeSafeLog({ level: isSlow ? 'warn' : 'debug', event: 'model.http', outcome: isSlow ? 'slow' : 'success', ...(modelRole === undefined ? {} : { modelRole }), ...context,
-    target: 'model.chat.completions', startTime, endTime, durationMs: endTime - startTime, status });
+    target, startTime, endTime, durationMs: endTime - startTime, status });
 }
 
 /**
@@ -368,14 +370,16 @@ export function runWithLogContext(context: LogContext, next: () => void): void {
  *
  * @param startTime - 请求开始时间
  * @param signal - 调用取消信号
+ * @param modelRole - 当前模型调用角色
+ * @param target - 当前模型上游协议目标
  * @returns 无返回值
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function logModelNetworkFailure(startTime: number, signal: AbortSignal, modelRole?: string): void {
+export function logModelNetworkFailure(startTime: number, signal: AbortSignal, modelRole?: string, target: 'model.chat.completions' | 'model.jev.systemone' = 'model.chat.completions'): void {
   const isTimeout = signal.aborted && signal.reason instanceof DOMException && signal.reason.name === 'TimeoutError';
   const outcome = isTimeout ? 'timeout' : signal.aborted ? 'aborted' : 'network_error';
-  writeModelFailure(startTime, outcome, undefined, modelRole);
+  writeModelFailure(startTime, outcome, undefined, modelRole, target);
 }
 
 /**
@@ -383,12 +387,14 @@ export function logModelNetworkFailure(startTime: number, signal: AbortSignal, m
  *
  * @param startTime - 请求开始时间
  * @param status - HTTP 状态码
+ * @param modelRole - 当前模型调用角色
+ * @param target - 当前模型上游协议目标
  * @returns 无返回值
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function logModelHttpFailure(startTime: number, status: number, modelRole?: string): void {
-  writeModelFailure(startTime, 'http_error', status, modelRole);
+export function logModelHttpFailure(startTime: number, status: number, modelRole?: string, target: 'model.chat.completions' | 'model.jev.systemone' = 'model.chat.completions'): void {
+  writeModelFailure(startTime, 'http_error', status, modelRole, target);
 }
 
 /**
@@ -396,12 +402,14 @@ export function logModelHttpFailure(startTime: number, status: number, modelRole
  *
  * @param startTime - 请求开始时间
  * @param status - HTTP 状态码
+ * @param modelRole - 当前模型调用角色
+ * @param target - 当前模型上游协议目标
  * @returns 无返回值
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function logModelInvalidResponse(startTime: number, status: number, modelRole?: string): void {
-  writeModelFailure(startTime, 'invalid_response', status, modelRole);
+export function logModelInvalidResponse(startTime: number, status: number, modelRole?: string, target: 'model.chat.completions' | 'model.jev.systemone' = 'model.chat.completions'): void {
+  writeModelFailure(startTime, 'invalid_response', status, modelRole, target);
 }
 
 /**
@@ -409,13 +417,15 @@ export function logModelInvalidResponse(startTime: number, status: number, model
  * @param startTime - 模型调用开始时间
  * @param outcome - 安全失败分类
  * @param status - 可选的 HTTP 状态码
+ * @param modelRole - 当前模型调用角色
+ * @param target - 当前模型上游协议目标
  * @returns 无返回值
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-function writeModelFailure(startTime: number, outcome: 'timeout' | 'aborted' | 'network_error' | 'http_error' | 'invalid_response', status?: number, modelRole?: string): void {
+function writeModelFailure(startTime: number, outcome: 'timeout' | 'aborted' | 'network_error' | 'http_error' | 'invalid_response', status?: number, modelRole?: string, target: 'model.chat.completions' | 'model.jev.systemone' = 'model.chat.completions'): void {
   const endTime = Date.now();
   const context = contexts.getStore() ?? { traceId: randomUUID() };
-  writeSafeLog({ level: 'warn', event: 'model.http', outcome, ...(modelRole === undefined ? {} : { modelRole }), ...context, target: 'model.chat.completions',
+  writeSafeLog({ level: 'warn', event: 'model.http', outcome, ...(modelRole === undefined ? {} : { modelRole }), ...context, target,
     startTime, endTime, durationMs: endTime - startTime, status });
 }

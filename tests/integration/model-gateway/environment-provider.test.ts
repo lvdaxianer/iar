@@ -6,7 +6,8 @@ import {
 } from '@iar/runtime';
 import {
   BrainModelProvider,
-  IntentModelProvider
+  IntentModelProvider,
+  JevModelProvider
 } from '../../../examples/agent-sandbox/src/models/llm-provider.js';
 
 const ENV_KEYS = [
@@ -22,7 +23,10 @@ const ENV_KEYS = [
   'IAR_TEST_INTENT_MODEL',
   'IAR_INTENT_MODEL_ENDPOINT',
   'IAR_INTENT_MODEL_API_KEY',
-  'IAR_INTENT_MODEL_ID'
+  'IAR_INTENT_MODEL_ID',
+  'IAR_TEST_JEV_ENDPOINT',
+  'IAR_TEST_JEV_API_KEY',
+  'IAR_TEST_JEV_MODEL'
 ] as const;
 
 type CapturedRequest = {
@@ -79,6 +83,28 @@ function intentProfile(overrides: Partial<ModelProviderRequest['profile']> = {})
       endpoint: 'IAR_TEST_INTENT_ENDPOINT',
       apiKey: 'IAR_TEST_INTENT_API_KEY',
       modelId: 'IAR_TEST_INTENT_MODEL'
+    },
+    ...overrides
+  };
+}
+
+function jevProfile(overrides: Partial<ModelProviderRequest['profile']> = {}): ModelProviderRequest['profile'] {
+  return {
+    schemaVersion: 'iar.model-profile/v1',
+    profileId: 'jev-provider-test',
+    profileVersion: '1.0.0',
+    role: 'function.select',
+    decisionBackend: 'jev',
+    provider: 'jev',
+    modelId: 'profile-jev-model',
+    modelVersion: 'test',
+    timeoutMs: 1_000,
+    retryPolicy: { maxAttempts: 1, backoffMs: 0, retryOn: [] },
+    structuredOutput: { enabled: true, schemaId: 'iar.decision/v1' },
+    environment: {
+      endpoint: 'IAR_TEST_JEV_ENDPOINT',
+      apiKey: 'IAR_TEST_JEV_API_KEY',
+      modelId: 'IAR_TEST_JEV_MODEL'
     },
     ...overrides
   };
@@ -153,6 +179,75 @@ test('Intent Model provider uses independent mappings and fixed decision prompt'
     assert.equal(body.model, 'intent-env-model');
     assert.deepEqual(body.response_format, { type: 'json_object' });
     assert.match(body.messages[0]?.content ?? '', /iar\.intent-decision-prompt\/v1/);
+  } finally {
+    fetchStub.restore();
+    restoreEnvironment();
+  }
+});
+
+test('JEV provider sends bounded choice questions and normalizes the typed answer', async () => {
+  const restoreEnvironment = setEnvironment({
+    IAR_TEST_JEV_ENDPOINT: 'https://jev.example/v1',
+    IAR_TEST_JEV_API_KEY: 'jev-secret',
+    IAR_TEST_JEV_MODEL: 'jev-env-model'
+  });
+  const fetchStub = installFetch({ answers: { route: { type: 'choice', choice: 'ticket.create', confidence: 0.93 } } });
+  try {
+    const result = await new JevModelProvider().complete({
+      ...request(jevProfile()),
+      input: {
+        decisionType: 'function.select',
+        decisionVersion: 'iar.decision/v1',
+        threshold: 0.8,
+        candidates: [
+          { candidateId: 'ticket.create', priority: 2, specificity: 1, description: '创建工单' },
+          { candidateId: 'knowledge.query', priority: 1, specificity: 1, description: '查询知识库' }
+        ],
+        currentMessage: '帮我创建一个工单'
+      }
+    });
+    assert.deepEqual(result, {
+      schemaVersion: 'iar.decision/v1',
+      decisionType: 'function.select',
+      decisionVersion: 'iar.decision/v1',
+      status: 'choice',
+      choice: 'ticket.create',
+      score: 0.93,
+      reasonCode: 'jev.choice',
+      candidateIds: ['ticket.create', 'knowledge.query']
+    });
+    assert.equal(fetchStub.requests[0]?.url, 'https://jev.example/v1/systemone');
+    const body = JSON.parse(String(fetchStub.requests[0]?.init?.body)) as { model: string; state: Record<string, unknown>; questions: Record<string, { type: string; criteria: Record<string, string> }> };
+    const routeQuestion = body.questions.route;
+    assert.ok(routeQuestion);
+    assert.equal(body.model, 'jev-env-model');
+    assert.equal(body.state.currentMessage, '帮我创建一个工单');
+    assert.equal(routeQuestion.type, 'choice');
+    assert.deepEqual(routeQuestion.criteria, { 'ticket.create': '创建工单', 'knowledge.query': '查询知识库' });
+  } finally {
+    fetchStub.restore();
+    restoreEnvironment();
+  }
+});
+
+test('JEV provider rejects a malformed typed response without exposing upstream content', async () => {
+  const restoreEnvironment = setEnvironment({
+    IAR_TEST_JEV_ENDPOINT: 'https://jev.example/v1',
+    IAR_TEST_JEV_API_KEY: 'jev-secret',
+    IAR_TEST_JEV_MODEL: 'jev-env-model'
+  });
+  const fetchStub = installFetch({ answers: { route: { type: 'score', score: 0.5 } } });
+  try {
+    await assert.rejects(
+      () => new JevModelProvider().complete({
+        ...request(jevProfile()),
+        input: {
+          decisionType: 'function.select', decisionVersion: 'iar.decision/v1', threshold: 0.8,
+          candidates: [{ candidateId: 'ticket.create', priority: 1, specificity: 1, description: '创建工单' }]
+        }
+      }),
+      (error: unknown) => error instanceof ModelProviderError && error.kind === 'provider_failed'
+    );
   } finally {
     fetchStub.restore();
     restoreEnvironment();

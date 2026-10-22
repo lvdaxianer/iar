@@ -65,6 +65,8 @@
 
 沙箱兼容路径默认读取 `IAR_JEV_ENDPOINT`、`IAR_JEV_API_KEY` 和 `IAR_JEV_MODEL_ID` 三项配置：三项完整时选择 JEV，任一缺失或为占位值时只保留 Intent Model profile。显式指定 `IAR_SANDBOX_DECISION_BACKEND=jev` 但配置不完整时直接拒绝启动，避免把 mock provider 误当成真实 JEV；显式选择 `intent-model` 始终只保留 Intent Model profile。通用 `DecisionBackendResolver` 仍保持 JEV 优先语义，由沙箱 registry 在进入 resolver 前完成环境选择。
 
+JEV profile 的 `provider` 必须解析到真实 JEV provider。真实 JEV 调用使用 profile 映射的 endpoint、API key 和 model ID，并复用 `DecisionResult` 的严格校验、超时、有限重试、脱敏日志和审计边界。`mock` provider 仅保留给离线 scripted/test 依赖注入；brain 模式在 JEV 配置完整时不得把它注册为 JEV profile 的实际 provider。
+
 ## Risks / Trade-offs
 
 - [模型返回合法 ID 但语义选择错误] → 维持有限工具集合、置信度、澄清阈值和程序侧最终门禁。
