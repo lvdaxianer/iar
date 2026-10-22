@@ -6,7 +6,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-22
  */
-import type { ContractIssue, JsonSchema, JsonValue } from '@iar/contracts';
+import type { ActionType, ContractIssue, JsonSchema, JsonValue, PluginOperation, RiskLevel } from '@iar/contracts';
 
 /** OpenAI-compatible 工具名称的字符约束。 */
 export const OPENAI_TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
@@ -43,6 +43,26 @@ export type NestedPluginTool = {
     description: string;
     parameters: JsonSchema;
   };
+};
+
+/** Plugin 工具内部的 Function 候选，保留运行时所有权和输入边界。 */
+export type NestedPluginFunctionCandidate = {
+  pluginId: string;
+  functionId: string;
+  description: string;
+  actionTypes: ActionType[];
+  inputSchema: JsonSchema;
+  riskLevel: RiskLevel;
+  requiresConfirmation: boolean;
+  operations: PluginOperation[];
+};
+
+/** 模型工具与宿主侧候选映射的绑定快照。 */
+export type NestedPluginToolBinding = {
+  pluginId: string;
+  toolName: string;
+  tool: NestedPluginTool;
+  candidates: NestedPluginFunctionCandidate[];
 };
 
 /** 解析后的嵌套 Function Calling 提案。 */
