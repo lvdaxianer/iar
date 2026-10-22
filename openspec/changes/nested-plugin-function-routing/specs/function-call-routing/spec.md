@@ -1,0 +1,74 @@
+# Spec Delta
+
+## MODIFIED Requirements
+
+### Requirement: Function call output is versioned and bounded
+
+The runtime SHALL expose a versioned `iar.function-call/v1` proposal containing exactly the selected Plugin, Function, Operation, JSON object arguments and bounded confidence metadata. The proposal SHALL be validated before it reaches Action construction or a Handler, regardless of whether it came from a nested Plugin tool or a legacy adapter.
+
+#### Scenario: Valid nested tool call is normalized
+
+- **WHEN** the model returns a tool call whose name belongs to the finite Plugin tool set and whose arguments contain a valid nested Function/Operation and JSON object parameters
+- **THEN** the adapter returns a validated `iar.function-call/v1` proposal with Plugin ownership and parsed named arguments
+
+#### Scenario: Valid tool call is normalized
+
+- **WHEN** the Function-call model returns a tool call whose name belongs to the finite tool set and whose arguments are a JSON object
+- **THEN** the adapter returns a validated `iar.function-call/v1` proposal with the selected Function and parsed arguments
+
+#### Scenario: Unknown nested identity is rejected
+
+- **WHEN** the model returns an unknown tool, Function or Operation identity
+- **THEN** the runtime returns a stable rejected result and does not construct or execute an Action
+
+#### Scenario: Unknown tool is rejected
+
+- **WHEN** the model returns a tool name that is not in the selected Plugin's finite Function tool set
+- **THEN** the runtime returns a stable rejected result and does not construct or execute an Action
+
+### Requirement: Function calls are restricted to the selected Plugin
+
+The runtime SHALL build nested Function/Operation candidates only from the current enabled Plugin registration and SHALL reject a proposal whose Plugin, Function or Operation ownership does not match that registration.
+
+#### Scenario: Cross-Plugin Function proposal is rejected
+
+- **WHEN** the model proposes a Function owned by a Plugin different from the called Plugin tool
+- **THEN** the runtime rejects the proposal before parameter validation and execution
+
+#### Scenario: Plugin changes between stages
+
+- **WHEN** the proposed Plugin is disabled, unloaded or no longer authorized before validation completes
+- **THEN** the runtime re-resolves the current registry and returns a stable unavailable or unauthorized result without invoking the Handler
+
+### Requirement: Function-call arguments use the installed input Schema
+
+The runtime SHALL validate named Function-call arguments against the installed Function input Schema, reject missing or unknown fields, and SHALL NOT accept model-supplied schema or capability changes.
+
+#### Scenario: Valid arguments become Action input
+
+- **WHEN** the proposal names an owned Function/Operation and its named arguments satisfy the installed input Schema
+- **THEN** those validated arguments are the only input used to construct the Action
+
+#### Scenario: Invalid or misplaced arguments require clarification
+
+- **WHEN** required arguments are missing, types are invalid, additional properties are present, or values are assigned to the wrong named field
+- **THEN** the runtime returns a bounded clarification or stable validation failure and does not execute the Function
+
+#### Scenario: Invalid arguments require clarification
+
+- **WHEN** required arguments are missing, types are invalid, or additional properties are present
+- **THEN** the runtime returns a bounded clarification or stable validation failure and does not execute the Function
+
+### Requirement: Function calling never grants execution authority
+
+The runtime SHALL perform authorization, capability, policy, confirmation and idempotency checks after validating a nested Function-call proposal. A tool call response SHALL never directly execute a Function.
+
+#### Scenario: High-risk tool call waits for confirmation
+
+- **WHEN** a valid nested proposal targets an operation requiring confirmation
+- **THEN** the runtime stores the validated pending Action and does not invoke the Handler or response model until confirmation
+
+#### Scenario: Query tool result is summarized
+
+- **WHEN** a valid read/query Function-call proposal executes successfully with response mode `model`
+- **THEN** the bounded Function result is passed to `response.generate` and the raw tool result is not presented as the final chat response
