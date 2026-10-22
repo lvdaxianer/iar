@@ -11,7 +11,7 @@ function isBusiness(text: string): boolean {
 }
 
 function businessRoute(): BridgeRouteEvidence {
-  return { status: 'matched', reasonCode: 'none', semanticIntent: 'api.gateway', semanticConfidence: 0.92, functionId: 'api.gateway', pluginId: 'api-gateway-v1' };
+  return { status: 'matched', reasonCode: 'none', semanticIntent: 'api.gateway', semanticConfidence: 0.92, functionId: 'api.gateway', pluginId: 'api-gateway-v1', expectedOperation: 'limit|stats', actualOperation: 'limit' };
 }
 
 function makeFakeBridge(overrides: { input?: (text: string) => BridgeInputResponse; onConfirm?: (actionId: string, accepted: boolean) => void; failOpen?: boolean } = {}): IarBridgeClientLike {
@@ -75,6 +75,8 @@ test('Pi host session routes business input to IAR and blocks the Pi Agent', asy
   assert.equal(probe.routes[0]?.functionId, 'api.gateway');
   assert.equal(probe.routes[0]?.disposition, 'handled');
   assert.equal(probe.routes[0]?.replySource, 'response_model');
+  assert.equal(probe.routes[0]?.expectedOperation, 'limit|stats');
+  assert.equal(probe.routes[0]?.actualOperation, 'limit');
   // handled 轮次以备注进入 Pi 侧 transcript，后续追问才有上下文。
   assert.deepEqual(probe.recorded, [{ userText: '把订单接口的限流阈值调到每秒 50 次', reply: '已受理：把订单接口的限流阈值调到每秒 50 次' }]);
 });

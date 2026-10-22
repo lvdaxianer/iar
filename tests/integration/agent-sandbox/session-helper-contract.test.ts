@@ -7,7 +7,7 @@ const limitOperation: PluginOperation = { name: 'limit', kind: 'action', descrip
 
 test('action input reports a stable operation_missing reason when the model frame omits operation', () => {
   const result = buildActionInput('api.gateway', { target: 'order-center' }, '把订单接口限流调到 50 次', 'update', undefined, [limitOperation]);
-  assert.deepEqual(result, { missing: ['operation'], reasonCode: 'operation_missing' });
+  assert.deepEqual(result, { missing: ['operation'], reasonCode: 'operation_missing', expectedOperation: 'limit', actualOperation: 'missing' });
 });
 
 test('function-call input reports operation_conflict instead of pretending operation is missing', () => {

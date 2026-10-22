@@ -48,6 +48,17 @@ export type RouteEvidence = {
   pluginScore?: number;
   /** 语义抽取是否走了离线 ScriptedModelProvider 兜底重试。 */
   semanticFallback?: boolean;
+  /** 契约失败时模型期望的操作标识。 */
+  expectedOperation?: string;
+  /** 契约失败时模型实际返回的操作标识。 */
+  actualOperation?: string;
+};
+
+/** 路由契约失败的安全诊断摘要。 */
+export type RouteDiagnostic = {
+  reasonCode: string;
+  expectedOperation?: string;
+  actualOperation?: string;
 };
 
 /** pass-through 交给 Pi Host 的当前能力目录。 */
@@ -117,8 +128,8 @@ export type ReferenceResolution =
 export type ExecuteTurnOutcome =
   | { status: 'executed'; action: ActionDefinition; actionResult: ActionResult; operationKind: OperationKind }
   | { status: 'awaiting_confirmation'; action: ActionDefinition; reply: string; operationKind: OperationKind }
-  | { status: 'clarification'; reply: string; reasonCode: string }
-  | { status: 'failed'; reply: string; reasonCode: string };
+  | { status: 'clarification'; reply: string; reasonCode: string; diagnostic?: RouteDiagnostic }
+  | { status: 'failed'; reply: string; reasonCode: string; diagnostic?: RouteDiagnostic };
 
 /** 确认操作结果联合。 */
 export type ConfirmResult =

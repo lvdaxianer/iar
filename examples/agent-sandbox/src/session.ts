@@ -11,7 +11,7 @@ import { confirmationScopeHash } from '@iar/runtime';
 import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, sandboxOperationKind, summarizeAction } from './session-helpers.js';
 import { createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
-import { finishConfirmedAction, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection } from './session-turn-helpers.js';
+import { applyRouteDiagnostic, finishConfirmedAction, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection } from './session-turn-helpers.js';
 import { withConfirmReplySource, withReplySource, type CompactResult, type ConfirmResult, type ExecuteTurnOutcome, type ExtractFrameOutcome, type RouteEvidence, type StreamEvent, type TurnResult } from './session-types.js';
 import type { TurnTimingTracker } from './turn-timing.js';
 export type { CompactResult, ConfirmResult, PendingActionSummary, ReplySource, RouteEvidence, SandboxDecisionBackend, SandboxMode, SandboxState, StreamEvent, TurnResult, TurnStage } from './session-types.js';
@@ -191,6 +191,7 @@ export class IarSandboxSession extends SandboxSessionCore {
     timing.start('action.execute');
     const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame: extracted.frame, route, behaviorContext: routeContext });
     timing.end('action.execute');
+    applyRouteDiagnostic(evidence, traceId, outcome);
     return this.finishNormalOutcome({ userText, traceId, timing, evidence, outcome });
   }
   /**

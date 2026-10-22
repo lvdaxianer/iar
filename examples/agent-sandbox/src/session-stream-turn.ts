@@ -2,7 +2,7 @@ import { ModelResponseLimitError, trackModelResponseLimit } from './models/model
 import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
-import { canPassThrough, runPiAgentDelegate } from './session-turn-helpers.js';
+import { applyRouteDiagnostic, canPassThrough, runPiAgentDelegate } from './session-turn-helpers.js';
 import type { ActionDefinition, ActionResult, BehaviorContext, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
@@ -170,6 +170,7 @@ export class SandboxSessionStreamTurn {
     timing.start('action.execute');
     const outcome = await this.context.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame, route, behaviorContext: routeContext });
     timing.end('action.execute');
+    applyRouteDiagnostic(evidence, traceId, outcome);
     return this.finishStreamOutcome({ userText, traceId, emit, timing, evidence, outcome });
   }
 

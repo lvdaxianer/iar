@@ -84,7 +84,7 @@ export function buildEvidence(route: RouteResult, frame: SemanticFrame): RouteEv
  */
 export type ActionInputBuildResult =
   | { input: JsonValue }
-  | { missing: string[]; reasonCode: 'function_missing' | 'action_type_missing' | 'operation_missing' | 'query_missing' }
+  | { missing: string[]; reasonCode: 'function_missing' | 'action_type_missing' | 'operation_missing' | 'query_missing'; expectedOperation?: string; actualOperation?: string }
   | { reasonCode: 'operation_conflict'; expectedOperation: string; actualOperation: string };
 
 export function buildActionInput(functionId: string, slots: Record<string, JsonValue>, userText: string, actionType: SemanticActionType = 'unknown', behaviorContext?: BehaviorContext, operations: readonly PluginOperation[] = []): ActionInputBuildResult {
@@ -95,7 +95,7 @@ export function buildActionInput(functionId: string, slots: Record<string, JsonV
   const expectedKind = actionType === 'query' ? 'read' : 'action';
   const operation = chooseCompatibleOperation(operations, rawOperation, expectedKind);
   const params = inheritFactParams(functionId, paramsSlot(slots), behaviorContext);
-  if (!operation) return { missing: ['operation'], reasonCode: 'operation_missing' };
+  if (!operation) return { missing: ['operation'], reasonCode: 'operation_missing', expectedOperation: (operations.filter((item) => item.kind === expectedKind).map((item) => item.name).join('|') || 'unknown').slice(0, 256), actualOperation: 'missing' };
   if (operation === 'search' && !query) return { missing: ['query'], reasonCode: 'query_missing' };
   const input: Record<string, JsonValue> = {};
   input.operation = operation.slice(0, 60);
@@ -108,7 +108,7 @@ export function buildActionInput(functionId: string, slots: Record<string, JsonV
 export function buildFunctionCallInput(proposal: FunctionCallProposal): ActionInputBuildResult {
   const input = structuredClone(proposal.arguments) as Record<string, JsonValue>;
   const declaredOperation = input.operation;
-  if (declaredOperation !== undefined && declaredOperation !== proposal.operation) return { reasonCode: 'operation_conflict', expectedOperation: proposal.operation, actualOperation: String(declaredOperation) };
+  if (declaredOperation !== undefined && declaredOperation !== proposal.operation) return { reasonCode: 'operation_conflict', expectedOperation: proposal.operation.slice(0, 256), actualOperation: String(declaredOperation).slice(0, 256) };
   input.operation = proposal.operation;
   return { input };
 }

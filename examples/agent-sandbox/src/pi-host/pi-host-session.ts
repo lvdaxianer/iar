@@ -10,7 +10,7 @@ import { createPiAgentDelegate, type PiAgentDelegate } from '../models/pi-agent-
 import type { SandboxMode } from '../session-types.js';
 
 /** 单次 IAR 路由的公开摘要，用于页面展示拦截证据。 */
-export type PiHostRouteInfo = { disposition: string; reasonCode: string; semanticIntent: string; semanticConfidence: number; functionId?: string; pluginId?: string; operationKind?: 'read' | 'action'; replySource?: BridgeReplySource };
+export type PiHostRouteInfo = { disposition: string; reasonCode: string; semanticIntent: string; semanticConfidence: number; functionId?: string; pluginId?: string; operationKind?: 'read' | 'action'; expectedOperation?: string; actualOperation?: string; replySource?: BridgeReplySource };
 
 /** 会话对外事件；全部由 PiHostSession 在确定性时机触发。 */
 export type PiHostSessionEvents = {
@@ -169,6 +169,8 @@ export class PiHostSession {
       ...(route?.functionId === undefined ? {} : { functionId: route.functionId }),
       ...(route?.pluginId === undefined ? {} : { pluginId: route.pluginId }),
       ...(route?.operationKind === undefined ? {} : { operationKind: route.operationKind }),
+      ...(route?.expectedOperation === undefined ? {} : { expectedOperation: route.expectedOperation }),
+      ...(route?.actualOperation === undefined ? {} : { actualOperation: route.actualOperation }),
       ...(response.replySource === undefined ? {} : { replySource: response.replySource })
     });
   }

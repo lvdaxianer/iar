@@ -23,10 +23,18 @@ const MODEL_SLOW_MS = 500;
 /** 安全日志最多等待的记录数与单条写入期限。 */
 const MAX_LOG_QUEUE = 128;
 const MAX_LOG_WRITE_MS = 1000;
+const CONTRACT_MESSAGES: Readonly<Record<string, { zh: string; en: string }>> = {
+  operation_missing: { zh: '缺少操作标识', en: 'Operation identifier is missing' },
+  operation_conflict: { zh: '操作信息冲突', en: 'Operation information conflicts' },
+  operation_not_allowed: { zh: '操作不在 Function 契约内', en: 'Operation is not allowed by the Function contract' },
+  function_arguments_invalid: { zh: 'Function 参数不符合输入契约', en: 'Function arguments violate the input contract' }
+};
+const SAFE_CONTRACT_IDENTIFIERS = /^[A-Za-z0-9_.|:-]{1,256}$/;
 /** 日志中允许出现的枚举字符串。 */
 const SAFE_VALUES: Readonly<Record<string, readonly string[]>> = {
-  level: ['trace', 'info', 'warn', 'error', 'debug'], event: ['http.request.start', 'http.request.end', 'http.stream', 'model.http', 'iar.turn.stage', 'iar.turn.completed', 'model.reasoning', 'sandbox.start', 'sandbox.start_failed', 'sandbox.shutdown_failed', 'sandbox.snapshot'],
-  outcome: ['network_error', 'http_error', 'invalid_response', 'timeout', 'aborted', 'slow', 'success', 'stream_failed', 'stream_write_failed', 'startup_failed', 'port_in_use', 'shutdown_failed', 'invalid_mode', 'missing_api_key', 'snapshot_failed'],
+  level: ['trace', 'info', 'warn', 'error', 'debug'], event: ['http.request.start', 'http.request.end', 'http.stream', 'model.http', 'iar.turn.stage', 'iar.turn.completed', 'iar.route.contract', 'model.reasoning', 'sandbox.start', 'sandbox.start_failed', 'sandbox.shutdown_failed', 'sandbox.snapshot'],
+  outcome: ['network_error', 'http_error', 'invalid_response', 'timeout', 'aborted', 'slow', 'success', 'stream_failed', 'stream_write_failed', 'startup_failed', 'port_in_use', 'shutdown_failed', 'invalid_mode', 'missing_api_key', 'snapshot_failed', 'contract_violation'],
+  reasonCode: Object.keys(CONTRACT_MESSAGES),
   target: ['model.chat.completions', 'model.jev.systemone'], method: ['GET', 'POST', 'HEAD', 'OPTIONS', 'PUT', 'PATCH', 'DELETE', 'OTHER'],
   path: ['/', '/api/chat', '/api/confirm', '/api/compact', '/api/state', '/api/reset', 'unknown',
     '/api/sessions', '/api/sessions/:sessionId', '/api/sessions/:sessionId/chat', '/api/sessions/:sessionId/confirm',
@@ -90,6 +98,9 @@ function isSafeEntry([key, value]: [string, unknown]): boolean {
   if (SAFE_NUMBERS.has(key)) return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
   // 链路标识只接受固定 UUID 格式。
   if (SAFE_IDS.has(key)) return typeof value === 'string' && UUID_PATTERN.test(value);
+  if (key === 'expectedOperation' || key === 'actualOperation') return typeof value === 'string' && SAFE_CONTRACT_IDENTIFIERS.test(value);
+  if (key === 'messageZh') return typeof value === 'string' && Object.values(CONTRACT_MESSAGES).some((message) => message.zh === value);
+  if (key === 'messageEn') return typeof value === 'string' && Object.values(CONTRACT_MESSAGES).some((message) => message.en === value);
   return typeof value === 'string' && (SAFE_VALUES[key]?.includes(value) ?? false);
 }
 
@@ -257,7 +268,7 @@ export function writeSafeLog(record: Record<string, unknown>): void {
 export function formatBilingualLogLine(record: Record<string, unknown>): string {
   const safe = Object.fromEntries(Object.entries(record).filter(isSafeEntry));
   const event = typeof safe.event === 'string' ? safe.event : 'iar.observability';
-  const label = event === 'iar.turn.stage' ? '阶段耗时 / Stage timing' : event === 'iar.turn.completed' ? '轮次完成 / Turn completed' : event === 'model.reasoning' ? '模型思考 / Model reasoning' : '运行事件 / Runtime event';
+  const label = event === 'iar.turn.stage' ? '阶段耗时 / Stage timing' : event === 'iar.turn.completed' ? '轮次完成 / Turn completed' : event === 'iar.route.contract' ? '路由契约失败 / Route contract failure' : event === 'model.reasoning' ? '模型思考 / Model reasoning' : '运行事件 / Runtime event';
   const stage = typeof safe.stage === 'string' ? ` stage=${safe.stage}` : '';
   const modelRole = typeof safe.modelRole === 'string' ? ` modelRole=${safe.modelRole}` : '';
   const outcome = typeof safe.outcome === 'string' ? ` outcome=${safe.outcome}` : '';
@@ -266,7 +277,34 @@ export function formatBilingualLogLine(record: Record<string, unknown>): string 
   const firstToken = typeof safe.firstTokenMs === 'number' ? ` firstToken=${safe.firstTokenMs}ms` : '';
   const level = typeof safe.level === 'string' ? safe.level.toUpperCase() : 'INFO';
   const trace = typeof safe.traceId === 'string' ? ` traceId=${safe.traceId}` : '';
-  return `${level} ${label}${stage}${modelRole}${status}${outcome}${duration}${firstToken}${trace}`;
+  const reasonCode = typeof safe.reasonCode === 'string' ? ` reasonCode=${safe.reasonCode}` : '';
+  const expectedOperation = typeof safe.expectedOperation === 'string' ? ` expectedOperation=${safe.expectedOperation}` : '';
+  const actualOperation = typeof safe.actualOperation === 'string' ? ` actualOperation=${safe.actualOperation}` : '';
+  const messageZh = typeof safe.messageZh === 'string' ? ` messageZh=${safe.messageZh}` : '';
+  const messageEn = typeof safe.messageEn === 'string' ? ` messageEn=${safe.messageEn}` : '';
+  return `${level} ${label}${stage}${modelRole}${status}${outcome}${reasonCode}${expectedOperation}${actualOperation}${duration}${firstToken}${trace}${messageZh}${messageEn}`;
+}
+
+/** 路由契约失败的安全诊断输入；只接受固定原因码和有限标识。 */
+export type RouteContractFailure = {
+  reasonCode: string;
+  expectedOperation?: string;
+  actualOperation?: string;
+};
+
+/** 记录路由契约失败，不记录模型原文、请求正文或异常文本。 */
+export function logRouteContractFailure(traceId: string, diagnostic: RouteContractFailure): void {
+  const message = CONTRACT_MESSAGES[diagnostic.reasonCode];
+  if (!message) return;
+  const context = contexts.getStore();
+  const contextTraceId = context?.origin === 'http' ? context.traceId : undefined;
+  writeSafeLog({
+    level: 'warn', event: 'iar.route.contract', outcome: 'contract_violation', traceId: contextTraceId ?? safeModelTraceId(traceId),
+    reasonCode: diagnostic.reasonCode,
+    ...(diagnostic.expectedOperation === undefined ? {} : { expectedOperation: diagnostic.expectedOperation.slice(0, 256) }),
+    ...(diagnostic.actualOperation === undefined ? {} : { actualOperation: diagnostic.actualOperation.slice(0, 256) }),
+    messageZh: message.zh, messageEn: message.en
+  });
 }
 
 /**

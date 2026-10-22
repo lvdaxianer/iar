@@ -42,7 +42,7 @@ export type BridgeOpenRequest = { piSessionId: PiSessionId; iarSessionId?: IarSe
 export type BridgeOpenResponse = { version: typeof PI_BRIDGE_VERSION; piSessionId: PiSessionId; iarSessionId: IarSessionId; resumed: boolean };
 
 /** 路由公开证据，不包含模型原文、权限或敏感输入。 */
-export type BridgeRouteEvidence = { status: string; reasonCode: string; semanticIntent: string; semanticConfidence: number; functionId?: string; pluginId?: string; operationKind?: 'read' | 'action' };
+export type BridgeRouteEvidence = { status: string; reasonCode: string; semanticIntent: string; semanticConfidence: number; functionId?: string; pluginId?: string; operationKind?: 'read' | 'action'; expectedOperation?: string; actualOperation?: string };
 
 /** pass-through 交给下游模型的有界能力描述。 */
 export type BridgeCapabilityDescriptor = { functionId: string; pluginId: string; description: string; actionTypes: string[] };
