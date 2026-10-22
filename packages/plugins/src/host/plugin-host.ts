@@ -253,7 +253,11 @@ export class PluginHost {
       .slice(0, MAX_ROUTING_SCOPE_PLUGINS);
   }
 
-  /** 为已选 Plugin 投影其当前 Function/Operation 工具，拒绝跨 Plugin 范围。 */
+  /**
+   * 为已选 Plugin 投影旧版 flat Function/Operation 工具，拒绝跨 Plugin 范围。
+   *
+   * @deprecated 主路由应使用 nestedTools；此接口仅供 JEV/旧 Function Calling 兼容适配器使用。
+   */
   public functionTools(pluginId: string): PluginFunctionToolDescriptor[] {
     const record = this.records.get(pluginId);
     if (!record || record.state !== 'enabled' || record.manifest.pluginKind !== 'business') return [];
