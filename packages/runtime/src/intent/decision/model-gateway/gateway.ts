@@ -228,7 +228,7 @@ export class ModelGateway {
 
   /** 记录一次不含决策原始 input 的 audit entry。 @param options - audit 构造参数 @returns 脱敏审计快照 @author lvdaxianer@yeah.net @date 2026-10-17 */
   private auditEntry(options: AuditOptions): ModelAuditEntry {
-    const metadata = options.role === 'function.select' || options.role === 'plugin.select'
+    const metadata = options.role === 'function.call' || options.role === 'function.select' || options.role === 'plugin.select'
       ? createDecisionAuditMetadata(options.profile, options.invocation.input, options.reason)
       : redactModelRequest({ provider: options.profile.provider, request: options.invocation.input });
     return { traceId: options.invocation.traceId, runId: options.invocation.runId, role: options.role, profileId: options.profile.profileId, profileVersion: options.profile.profileVersion, modelId: options.profile.modelId, modelVersion: options.profile.modelVersion, attempt: options.attempt, outcome: options.outcome, fallbackUsed: options.fallbackUsed, metadata };

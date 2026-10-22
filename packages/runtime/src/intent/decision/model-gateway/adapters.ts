@@ -11,6 +11,7 @@ import { MODEL_NO_PROFILE_MESSAGE, type ModelGatewayInvocationOptions, type Mode
 import { ModelGateway } from './gateway.js';
 import { DecisionBackendResolver } from './decision-backend.js';
 import { buildIntentDecisionInput, canonicalizeDecisionRequest } from './intent-prompt.js';
+import { validateFunctionCallProposal, type FunctionCallProposal, type FunctionToolDefinition } from './function-call.js';
 
 /** Semantic Extractor 的最小结构化返回。 */
 export type SemanticFrame = {
@@ -71,6 +72,9 @@ export type ContextCompactInvocation = Omit<ModelInvocation, 'input'> & { input:
 /** Response Generator 的调用输入。 */
 export type ResponseGenerateInvocation = ModelInvocation;
 
+/** Function-call 的调用输入，工具列表必须来自已选 Plugin 的安装记录。 */
+export type FunctionCallInvocation = Omit<ModelInvocation, 'input'> & { input: JsonValue; tools: readonly FunctionToolDefinition[] };
+
 /** 使用 ModelGateway 运行 Semantic Extractor。 @author lvdaxianer@yeah.net @date 2026-10-17 */
 export class SemanticExtractorAdapter {
   /** 创建 Semantic Extractor adapter。 @param gateway - 统一模型调用边界 @author lvdaxianer@yeah.net @date 2026-10-17 */
@@ -85,6 +89,46 @@ export class SemanticExtractorAdapter {
    */
   public extract(invocation: SemanticExtractInvocation): Promise<ModelGatewayResult<SemanticFrame>> {
     return this.gateway.invoke('semantic.extract', invocation, validateSemanticFrame);
+  }
+}
+
+/** 使用指定 backend 执行一次受限 Function-call。 */
+export class FunctionCallAdapter {
+  /** 创建绑定 backend 的 Function-call adapter。 */
+  public constructor(private readonly gateway: ModelGateway, private readonly backend?: 'jev' | 'intent-model') {}
+
+  /**
+   * 发送当前 Plugin 工具集合并校验模型提案。
+   * @param invocation - trace/run、结构化上下文和已安装工具
+   * @param profileId - 可选的 backend primary profile
+   * @param options - 可选跨 backend fallback
+   * @returns 受约束 Function-call 提案或稳定模型错误
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-22
+   */
+  public call(invocation: FunctionCallInvocation, profileId?: string, options?: Pick<ModelGatewayInvocationOptions, 'crossBackendFallback'>): Promise<ModelGatewayResult<FunctionCallProposal>> {
+    const snapshot = snapshotFunctionCallInvocation(invocation);
+    if (!snapshot) return Promise.resolve(invalidFunctionCallResult('Function-call 输入无效'));
+    const input = withFunctionTools(snapshot.input, snapshot.tools);
+    const gatewayOptions = this.backend ? decisionOptions(this.backend, profileId, options) : undefined;
+    return this.gateway.invoke('function.call', { traceId: snapshot.traceId, runId: snapshot.runId, input }, (raw) => validateFunctionCallProposal(raw, snapshot.tools), gatewayOptions);
+  }
+}
+
+/** 按 JEV 优先、Intent Model 其次执行 Function-call。 */
+export class UnifiedFunctionCallAdapter {
+  /** 创建统一 Function-call 入口。 */
+  public constructor(private readonly resolver: DecisionBackendResolver, private readonly jevAdapter: FunctionCallAdapter, private readonly intentModelAdapter: FunctionCallAdapter) {}
+
+  /** 解析 backend 后只调用一个 Function-call provider。 */
+  public call(invocation: FunctionCallInvocation): Promise<ModelGatewayResult<FunctionCallProposal>> {
+    try {
+      const resolution = this.resolver.resolve('function.call');
+      const adapter = resolution.backend === 'jev' ? this.jevAdapter : this.intentModelAdapter;
+      return adapter.call(invocation, resolution.profileId);
+    } catch {
+      return Promise.resolve(noProfileResult());
+    }
   }
 }
 
@@ -450,4 +494,33 @@ function invalidDecisionResult<T>(message: string): ModelGatewayResult<T> {
 /** 创建不暴露 resolver 配置细节的 model.no_profile。 @returns 稳定配置错误结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function noProfileResult<T>(): ModelGatewayResult<T> {
   return { ok: false, error: { code: 'model.no_profile', message: MODEL_NO_PROFILE_MESSAGE, retryable: false, details: {} }, audit: [], events: [] };
+}
+
+/** 创建 Function-call 的不可变调用快照。 */
+function snapshotFunctionCallInvocation(invocation: unknown): FunctionCallInvocation | undefined {
+  try {
+    if (!isRecord(invocation) || !isNonEmptyString(invocation.traceId) || !isNonEmptyString(invocation.runId) || !Array.isArray(invocation.tools) || invocation.tools.length === 0) return undefined;
+    const input = structuredClone(invocation.input) as JsonValue;
+    const tools = structuredClone(invocation.tools) as FunctionToolDefinition[];
+    if (!isJsonValue(input) || !tools.every(isFunctionTool)) return undefined;
+    return { traceId: invocation.traceId, runId: invocation.runId, input, tools };
+  } catch {
+    return undefined;
+  }
+}
+
+/** 将已安装工具加入 provider 输入，不能从模型输出反向扩展。 */
+function withFunctionTools(input: JsonValue, tools: readonly FunctionToolDefinition[]): JsonValue {
+  if (!isRecord(input)) return { input, tools: tools as unknown as JsonValue };
+  return { ...input, tools: tools as unknown as JsonValue };
+}
+
+/** 判断 Function 工具快照是否具备最小固定字段。 */
+function isFunctionTool(value: unknown): value is FunctionToolDefinition {
+  return isRecord(value) && isNonEmptyString(value.name) && isNonEmptyString(value.pluginId) && isNonEmptyString(value.functionId) && isNonEmptyString(value.description) && isJsonValue(value.parameters);
+}
+
+/** 创建稳定的 Function-call 输入错误。 */
+function invalidFunctionCallResult<T>(message: string): ModelGatewayResult<T> {
+  return { ok: false, error: { code: 'model.invalid_request', message, retryable: false, details: {} }, audit: [], events: [] };
 }
