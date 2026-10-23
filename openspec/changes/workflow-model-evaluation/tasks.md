@@ -3,7 +3,7 @@
 ## 1. Scenario and prompt-capture foundation
 
 - [x] 1.1 Add typed workflow evaluation scenarios with synthetic authorized/disabled descriptors and realistic `BehaviorContext` fixtures; verify the fixture corpus covers initial routing, function selection, parameter collection, confirmation, cancellation, new topic, and pass-through states.
-- [ ] 1.2 Add prompt-capture assertions using `SEMANTIC_SYSTEM_PROMPT` and `buildSemanticUserPrompt()`; verify current text, bounded history, route, collection, pending, confirmation, workflow state, structured input, and only authorized descriptors are present.
+- [x] 1.2 Add prompt-capture assertions using `SEMANTIC_SYSTEM_PROMPT` and `buildSemanticUserPrompt()`; verify current text, bounded history, route, collection, pending, confirmation, workflow state, structured input, and only authorized descriptors are present.
 
 ## 2. Offline orchestration evaluation
 

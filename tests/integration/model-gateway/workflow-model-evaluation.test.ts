@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { validateContract, type BehaviorContext } from '@iar/contracts';
-import { WORKFLOW_EVALUATION_SCENARIOS, type WorkflowEvaluationScenario } from './workflow-evaluation-fixtures.js';
+import { buildSemanticUserPrompt, SEMANTIC_SYSTEM_PROMPT } from '../../../examples/agent-sandbox/src/models/model-input-transport.js';
+import { DISABLED_PLUGIN, WORKFLOW_EVALUATION_SCENARIOS, type WorkflowEvaluationScenario } from './workflow-evaluation-fixtures.js';
 
 function assertScenarioShape(scenario: WorkflowEvaluationScenario): void {
   assert.match(scenario.id, /^[a-z0-9-]+$/);
@@ -45,7 +46,54 @@ test('workflow evaluation fixtures preserve named route and parameter state', ()
 test('workflow evaluation corpus keeps disabled targets out of the authorized descriptor set', () => {
   const unavailable = WORKFLOW_EVALUATION_SCENARIOS.find((scenario) => scenario.id === 'disabled-plugin-cannot-recover');
   assert.ok(unavailable);
-  assert.equal(unavailable.behaviorContext.route.pluginId, 'plugin.synthetic.disabled');
-  assert.equal(unavailable.pluginDescriptors.some((descriptor) => descriptor.pluginId === 'plugin.synthetic.disabled'), false);
+  assert.equal(unavailable.behaviorContext.route.pluginId, DISABLED_PLUGIN);
+  assert.equal(unavailable.pluginDescriptors.some((descriptor) => descriptor.pluginId === DISABLED_PLUGIN), false);
   assert.equal(unavailable.expected.execute, false);
 });
+
+test('workflow evaluation captures the production semantic prompt context for parameter collection', () => {
+  const scenario = findScenario('parameter-merge-current-value-wins');
+  const prompt = buildSemanticUserPrompt({
+    text: scenario.userText,
+    behaviorContext: scenario.behaviorContext,
+    recentMessages: scenario.recentMessages,
+    pluginDescriptors: scenario.pluginDescriptors,
+    structuredInput: scenario.structuredInput
+  });
+  assert.match(SEMANTIC_SYSTEM_PROMPT, /iar\.semantic-frame\/v2/);
+  assert.match(prompt, /改成每秒 200 次/);
+  assert.match(prompt, /<behavior_context>[\s\S]*function\.synthetic\.rate/);
+  assert.match(prompt, /<behavior_context>[\s\S]*parameters_required/);
+  assert.match(prompt, /<recent_messages>[\s\S]*请补充突发次数/);
+  assert.match(prompt, /<pending_action>[\s\S]*null/);
+  assert.match(prompt, /<structured_input>[\s\S]*\"rate\"/);
+  assert.match(prompt, /<plugin_descriptors>[\s\S]*plugin\.synthetic\.control/);
+  assert.doesNotMatch(prompt, new RegExp(DISABLED_PLUGIN));
+});
+
+test('workflow evaluation captures confirmation and enforces bounded recent-message evidence', () => {
+  const scenario = findScenario('awaiting-confirmation-user-declines');
+  const context = scenario.behaviorContext;
+  const policy = context.recentMessagePolicy;
+  assert.ok(policy);
+  assert.ok(scenario.recentMessages.length <= policy.recentMessageLimit);
+  assert.ok(scenario.recentMessages.every((message) => message.text.length <= policy.maxMessageChars));
+  const prompt = buildSemanticUserPrompt({
+    text: scenario.userText,
+    behaviorContext: context,
+    recentMessages: scenario.recentMessages,
+    pendingAction: scenario.pendingAction,
+    pluginDescriptors: scenario.pluginDescriptors
+  });
+  assert.match(prompt, /<behavior_context>[\s\S]*awaiting_confirmation/);
+  assert.match(prompt, /<behavior_context>[\s\S]*\"state\": \"required\"/);
+  assert.match(prompt, /<pending_action>[\s\S]*function\.synthetic\.rate/);
+  assert.match(prompt, /<pending_action>[\s\S]*\"confirmationRequired\": true/);
+  assert.match(prompt, /<recent_messages>[\s\S]*是否确认修改/);
+});
+
+function findScenario(id: string): WorkflowEvaluationScenario {
+  const scenario = WORKFLOW_EVALUATION_SCENARIOS.find((candidate) => candidate.id === id);
+  assert.ok(scenario, `missing workflow evaluation scenario: ${id}`);
+  return scenario;
+}
