@@ -89,10 +89,22 @@
   }
 
   /**
+   * 记录最近一次服务端 timing，供结构化上下文复制使用。
+   * @param summary - 服务端有界 timing 摘要
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  function rememberTimingSummary(summary) {
+    if (summary && typeof summary === 'object') latestTimingSummary = summary;
+  }
+
+  /**
    * 更新右侧总耗时和阶段耗时，所有值来自服务端有界 timing 摘要。
    */
   function renderStreamTiming(summary) {
     if (!summary || typeof summary !== 'object') return;
+    rememberTimingSummary(summary);
     document.getElementById('timingTotal').textContent = typeof summary.durationMs === 'number' ? summary.durationMs + 'ms' : '-';
     renderTimingTrace(summary);
     var list = document.getElementById('timingList');
@@ -123,6 +135,7 @@
     if ((state.textEl.textContent.length === 0 || result.reasonCode === 'model_response_too_large') && result.reply) state.textEl.textContent = result.reply;
     var rawText = state.textEl.textContent;
     state.textEl.innerHTML = renderMarkdown(rawText);
+    collapseReasoning(state);
     var sourceMeta = lastReplySource || '来源未知';
     document.getElementById('routeReplySource').textContent = sourceMeta;
     var baseMeta = buildStreamResponseMeta(result, sourceMeta);
@@ -131,6 +144,19 @@
     recordConversation('bot', rawText, meta.text);
     messagesEl.scrollTop = messagesEl.scrollHeight;
     if (result.status === 'awaiting_confirmation' && result.pending) runConfirm(result.pending);
+  }
+
+  /**
+   * 终态到达后收起最终回复的原始思考，用户仍可手动展开查看。
+   * @param state - 当前流式消息状态
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  function collapseReasoning(state) {
+    if (!state.reasoningEl) return;
+    var details = state.reasoningEl.closest('details');
+    if (details) details.open = false;
   }
 
   /**
@@ -158,11 +184,13 @@
    * @author lvdaxianer@yeah.net
    * @date 2026-10-19
    */
-  function streamChat(text) {
+  function streamChat(text, structuredInput) {
+    var body = { message: text };
+    if (structuredInput && typeof structuredInput === 'object') body.structuredInput = structuredInput;
     return sessionFetch('/chat?stream=1', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text })
+      body: JSON.stringify(body)
     }).then(readStreamResponse);
   }
 

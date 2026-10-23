@@ -18,7 +18,7 @@ import { REQUIRED_PRESERVED_FACTS } from '@iar/contracts';
 import type { ModelProvider, ModelProviderRequest } from '@iar/runtime';
 
 /** 压缩 state 片段允许保留的白名单字段。 */
-const STATE_FIELD_WHITELIST = ['subject', 'intent', 'action', 'route', 'slots', 'workflow', 'pending', 'confirmation', 'clarification', 'pendingReference'] as const;
+const STATE_FIELD_WHITELIST = ['subject', 'intent', 'action', 'route', 'slots', 'workflow', 'pending', 'confirmation', 'clarification', 'collection', 'pendingReference'] as const;
 
 /**
  * 用关键词规则模拟真实模型的离线 provider。
@@ -37,7 +37,7 @@ export class ScriptedModelProvider implements ModelProvider {
    */
   public async complete(request: ModelProviderRequest): Promise<unknown> {
     const input = asRecord(request.input);
-    if (request.profile.role === 'semantic.extract') return this.extract(readString(input, 'text') ?? '', asRecord(input.behaviorContext), readPluginDescriptors(input.pluginDescriptors));
+    if (request.profile.role === 'semantic.extract') return this.extract(readString(input, 'text') ?? '', asRecord(input.behaviorContext), readPluginDescriptors(input.pluginDescriptors), asRecord(input.pendingAction));
     if (request.profile.role === 'route.propose') return this.routeProposal(input);
     if (request.profile.role === 'context.compact') return this.compact(input);
     return this.generate(input);
@@ -55,12 +55,12 @@ export class ScriptedModelProvider implements ModelProvider {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  private extract(text: string, behaviorContext: Record<string, unknown>, pluginDescriptors: PluginScopeDescriptor[]): unknown {
-    return addPluginId(this.extractFrame(text, behaviorContext), pluginDescriptors);
+  private extract(text: string, behaviorContext: Record<string, unknown>, pluginDescriptors: PluginScopeDescriptor[], pendingAction: Record<string, unknown> = {}): unknown {
+    return addPluginId(this.extractFrame(text, behaviorContext, pendingAction), pluginDescriptors);
   }
 
   /** 关键词抽取主体，外层只负责把候选 Plugin 标识绑定到受限描述。 */
-  private extractFrame(text: string, behaviorContext: Record<string, unknown>): unknown {
+  private extractFrame(text: string, behaviorContext: Record<string, unknown>, pendingAction: Record<string, unknown> = {}): unknown {
     const trimmed = text.trim();
     if (trimmed.length === 0) return frame('unknown', {}, 0.1, 'unknown');
     // 已有可信事实的追问优先交给通用回复模型，不能因业务名词重复触发默认动作。

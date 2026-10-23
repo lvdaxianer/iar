@@ -9,6 +9,7 @@ import { allSandboxPlugins, sandboxFunctionIds } from './functions/index.js';
 import { assertSandboxKnowledgeBases } from './knowledge/retrieval.js';
 import { BrainModelProvider, IntentModelProvider, JevModelProvider } from './models/llm-provider.js';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
+import { logModelAudit } from './safe-log.js';
 import type { SandboxDecisionBackend, SandboxMode } from './session-types.js';
 
 /** 安装沙箱的固定插件集合并预检知识库。
@@ -52,7 +53,11 @@ export function createSandboxModels(options: { mode: SandboxMode; decisionBacken
   // brain 模式使用真实 JEV System One；scripted 模式才注入离线确定性 provider。
   const jev = options.mode === 'brain' ? new JevModelProvider() : decision;
   const registry = createSandboxRegistry(options.decisionBackend);
-  const gateway = new ModelGateway({ registry, providers: { brain, mock: decision, jev, 'intent-model': intent } });
+  const gateway = new ModelGateway({
+    registry,
+    providers: { brain, mock: decision, jev, 'intent-model': intent },
+    onAudit: (audit, event) => logModelAudit(audit, event.errorCode)
+  });
   const resolver = new DecisionBackendResolver(registry);
   return {
     brain,

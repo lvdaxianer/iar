@@ -6,18 +6,19 @@
  * @date 2026-10-18
  */
 import { randomUUID } from 'node:crypto';
-import { SCHEMA_VERSIONS, validateJsonSchemaValue, type ActionDefinition, type ActionType, type BehaviorContext, type EventEnvelope, type JsonValue, type PendingReference, type PluginOperation, type PluginPolicyMetadata, type RuleExpression, type VerifiedFactRecord } from '@iar/contracts';
-import { SELF_INTRODUCTION_FUNCTION_ID, type PluginDescriptor, type PluginHost, type PluginScopeDescriptor } from '@iar/plugins';
+import { MAX_COLLECTION_ATTEMPTS, SCHEMA_VERSIONS, validateJsonSchemaValue, type ActionDefinition, type ActionType, type BehaviorContext, type CollectionState, type EventEnvelope, type JsonSchema, type JsonValue, type PendingReference, type PluginOperation, type PluginPolicyMetadata, type RuleExpression, type VerifiedFactRecord } from '@iar/contracts';
+import { SELF_INTRODUCTION_FUNCTION_ID, type PluginDescriptor, type PluginFunctionRecord, type PluginHost, type PluginRecord, type PluginScopeDescriptor } from '@iar/plugins';
 import { ModelGateway, SemanticExtractorAdapter, type HistoricalSemanticReference, type ModelGatewayResult, type ModelProfileRegistry, type SemanticFrame } from '@iar/runtime';
 import { PluginFirstRouter, resolveFactRelationCandidates, type AsyncDecisionAdapter, type AsyncFunctionCallAdapter, type AsyncNestedRouteAdapter, type FactRelationCandidateReference, type RouteResult } from '@iar/runtime';
 import type { FunctionRule, IarRuntimeConfiguration, PluginRule } from '@iar/runtime';
 import type { ActionExecutor, LocalWorkflow } from '@iar/runtime';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
-import { logSemanticFrame, type SemanticFrameDiagnostic } from './safe-log.js';
+import { logModelAudit, logParameterBoundary, logSemanticFrame, type SemanticFrameDiagnostic } from './safe-log.js';
 import { SESSION_RUN_ID, SESSION_CORRELATION_ID, TURN_DEFINITION } from './session-core.js';
 import type { CompactionContext } from './session-compaction.js';
 import { buildActionInput, buildFacts, buildFunctionCallInput, buildSelfIntroductionInput, describeAction, sandboxOperationKind, toSlotMap } from './session-helpers.js';
-import type { ExecuteTurnOutcome, ExtractFrameOutcome, ReferenceResolution, ResolvedFactReference, RouteEvidence, SandboxMode } from './session-types.js';
+import { collectParameters, parameterCollectionReply } from './parameter-collector.js';
+import type { ExecuteTurnOutcome, ExtractFrameOutcome, PendingActionContext, ReferenceResolution, ResolvedFactReference, RouteEvidence, SandboxMode, StructuredInput } from './session-types.js';
 
 /** 路由读取和更新当前会话的状态，不拥有独立生命周期。 */
 export type SessionRoutingContext = Pick<CompactionContext, 'eventStore' | 'projector' | 'gateway'> & {
@@ -72,9 +73,10 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public async extractFrame(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages = this.context.recentMessages, selectedDescriptor?: PluginDescriptor): Promise<ExtractFrameOutcome> {
+  public async extractFrame(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages = this.context.recentMessages, selectedDescriptor?: PluginDescriptor, pendingAction?: PendingActionContext, structuredInput?: StructuredInput): Promise<ExtractFrameOutcome> {
     const descriptors = selectedDescriptor ? this.context.pluginHost.pluginDescriptors().filter((descriptor) => descriptor.pluginId === selectedDescriptor.pluginId) : this.context.pluginHost.pluginDescriptors();
-    const extracted = await new SemanticExtractorAdapter(this.context.gateway).extract({ traceId, runId, input: { text: userText, behaviorContext, recentMessages, pluginDescriptors: descriptors } });
+    const input = { text: userText, behaviorContext, recentMessages, pluginDescriptors: descriptors, ...(pendingAction === undefined ? {} : { pendingAction }), ...(structuredInput === undefined ? {} : { structuredInput }) };
+    const extracted = await new SemanticExtractorAdapter(this.context.gateway).extract({ traceId, runId, input });
     if (extracted.ok) {
       const frame = selectedDescriptor ? constrainFrame(extracted.value, selectedDescriptor) : extracted.value;
       logSemanticFrame(traceId, semanticFrameDiagnostic(frame));
@@ -82,7 +84,7 @@ export class SandboxSessionRouting {
     }
     if (this.context.mode === 'brain') {
       // 真实 LLM 抽取失败时降级到离线关键词抽取，保证链路可以继续。
-      const retried = await this.retrySemanticWithScripted(traceId, runId, userText, behaviorContext, recentMessages, descriptors);
+      const retried = await this.retrySemanticWithScripted(traceId, runId, userText, behaviorContext, recentMessages, descriptors, structuredInput);
       if (retried.ok) {
         const frame = selectedDescriptor ? constrainFrame(retried.value, selectedDescriptor) : retried.value;
         logSemanticFrame(traceId, semanticFrameDiagnostic(frame));
@@ -108,9 +110,13 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected async retrySemanticWithScripted(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>, pluginDescriptors: PluginScopeDescriptor[]): Promise<ModelGatewayResult<SemanticFrame>> {
-    const fallbackGateway = new ModelGateway({ registry: this.context.registry, providers: { brain: new ScriptedModelProvider() } });
-    return new SemanticExtractorAdapter(fallbackGateway).extract({ traceId, runId, input: { text: userText, behaviorContext, recentMessages, pluginDescriptors } });
+  protected async retrySemanticWithScripted(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>, pluginDescriptors: PluginScopeDescriptor[], structuredInput?: StructuredInput): Promise<ModelGatewayResult<SemanticFrame>> {
+    const fallbackGateway = new ModelGateway({
+      registry: this.context.registry,
+      providers: { brain: new ScriptedModelProvider() },
+      onAudit: (audit, event) => logModelAudit(audit, event.errorCode)
+    });
+    return new SemanticExtractorAdapter(fallbackGateway).extract({ traceId, runId, input: { text: userText, behaviorContext, recentMessages, pluginDescriptors, ...(structuredInput === undefined ? {} : { structuredInput }) } });
   }
 
 
@@ -179,23 +185,102 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public async prepareAndExecute(context: { runId: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext }): Promise<ExecuteTurnOutcome> {
-    const { runId, userText, frame, route, behaviorContext } = context;
-    if (!route.functionId || !route.pluginId) return { status: 'failed', reply: '路由结果缺少 Function 或 Plugin。', reasonCode: 'route_incomplete' };
+  public async prepareAndExecute(context: { runId: string; traceId?: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext }): Promise<ExecuteTurnOutcome> {
+    const { route, frame, behaviorContext, userText, runId, traceId = runId } = context;
+    const resolved = this.resolveFunctionContext(route);
+    if (!resolved.ok) return resolved.result;
+    const prepared = this.prepareFunctionInput({ traceId, route, frame, behaviorContext, userText, functionRecord: resolved.functionRecord });
+    if (!prepared.ok) return prepared.result;
+    const operationKind = sandboxOperationKind(route.functionId!, prepared.input, resolved.functionRecord.operations);
+    const action = this.createAction({ runId, functionId: route.functionId!, pluginId: route.pluginId!, input: prepared.input, policy: resolved.manifest.policy, operations: resolved.functionRecord.operations });
+    await this.appendDecisionEvent({ runId, frame, route, input: prepared.input });
+    return this.executePreparedAction(action, resolved.manifest.capabilities, operationKind);
+  }
+
+  /**
+   * 解析已由路由层选中的 Function，并把实现归属固定在注册表记录上。
+   *
+   * @param route - 已完成候选选择的路由结果
+   * @returns 注册表中的插件和 Function，或稳定失败结果
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  private resolveFunctionContext(route: RouteResult): { ok: true; manifest: PluginRecord['manifest']; functionRecord: PluginFunctionRecord } | { ok: false; result: ExecuteTurnOutcome } {
+    if (!route.functionId || !route.pluginId) return { ok: false, result: { status: 'failed', reply: '路由结果缺少 Function 或 Plugin。', reasonCode: 'route_incomplete' } };
     const resolved = this.context.pluginHost.resolveCandidate(route.functionId, route.pluginId);
-    if (!resolved.ok) return { status: 'failed', reply: `路由选中的插件不可用（${resolved.error.code}）。`, reasonCode: resolved.error.code };
-    if (resolved.value.manifest.pluginKind !== 'business') return { status: 'failed', reply: '路由选中的插件不是业务 Plugin。', reasonCode: 'plugin_kind_invalid' };
-    const manifest = resolved.value.manifest;
+    if (!resolved.ok) return { ok: false, result: { status: 'failed', reply: `路由选中的插件不可用（${resolved.error.code}）。`, reasonCode: resolved.error.code } };
     const functionRecord = resolved.value.functions.get(route.functionId);
-    if (!functionRecord) return { status: 'failed', reply: '路由选中的 Plugin 不包含目标 Function。', reasonCode: 'function_unavailable' };
-    const built = route.functionId === SELF_INTRODUCTION_FUNCTION_ID ? { input: buildSelfIntroductionInput(this.context.pluginHost.allDescriptors(), this.context.configuration.selfIntroduction.extraPrompt) } : route.functionCallProposal ? buildFunctionCallInput(route.functionCallProposal) : buildActionInput(route.functionId, frame.slots, userText, frame.action, behaviorContext, functionRecord.operations);
-    if ('reasonCode' in built && built.reasonCode === 'operation_conflict') return { status: 'clarification', reply: '模型返回的操作信息不一致，请重试。', reasonCode: built.reasonCode, diagnostic: { reasonCode: built.reasonCode, expectedOperation: built.expectedOperation, actualOperation: built.actualOperation } };
-    if ('missing' in built) return { status: 'clarification', reply: `还缺少必要信息（${built.missing.join('、')}），请补充完整后再试。`, reasonCode: built.reasonCode, ...(built.reasonCode === 'operation_missing' ? { diagnostic: { reasonCode: built.reasonCode, ...(built.expectedOperation === undefined ? {} : { expectedOperation: built.expectedOperation }), ...(built.actualOperation === undefined ? {} : { actualOperation: built.actualOperation }) } } : {}) };
-    if (!validateJsonSchemaValue(functionRecord.definition.inputSchema, built.input).ok) return { status: 'clarification', reply: '模型提出的 Function 参数不完整或不符合输入契约，请补充必要信息后再试。', reasonCode: 'function_arguments_invalid', diagnostic: { reasonCode: 'function_arguments_invalid' } };
-    const operationKind = sandboxOperationKind(route.functionId, built.input, functionRecord.operations);
-    const action = this.createAction({ runId, functionId: route.functionId, pluginId: route.pluginId, input: built.input, policy: manifest.policy, operations: functionRecord.operations });
-    await this.appendDecisionEvent({ runId, frame, route, input: built.input });
-    return this.executePreparedAction(action, manifest.capabilities, operationKind);
+    if (!functionRecord) return { ok: false, result: { status: 'failed', reply: '路由选中的 Plugin 不包含目标 Function。', reasonCode: 'function_unavailable' } };
+    return { ok: true, manifest: resolved.value.manifest, functionRecord };
+  }
+
+  /**
+   * 在固定 Function Schema 内合并、校验并生成动作输入，失败时只返回收集结果。
+   *
+   * @param context - 当前 Function、语义帧与用户补充信息
+   * @returns 可执行输入或参数收集结果
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  private prepareFunctionInput(context: { traceId: string; route: RouteResult; frame: SemanticFrame; behaviorContext: BehaviorContext; userText: string; functionRecord: PluginFunctionRecord }): { ok: true; input: JsonValue } | { ok: false; result: ExecuteTurnOutcome } {
+    const { traceId, route, frame, behaviorContext, userText, functionRecord } = context;
+    const built = route.functionId === SELF_INTRODUCTION_FUNCTION_ID ? { input: buildSelfIntroductionInput(this.context.pluginHost.allDescriptors(), this.context.configuration.selfIntroduction.extraPrompt) } : route.functionCallProposal ? buildFunctionCallInput(route.functionCallProposal) : buildActionInput(route.functionId!, frame.slots, userText, frame.action, behaviorContext, functionRecord.operations);
+    if ('reasonCode' in built && built.reasonCode === 'operation_conflict') return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: frame.slots, requiredFields: ['operation'], conflictFields: ['operation'], fallback: { reasonCode: 'parameters_required', reply: '操作信息不一致，请确认后再试。' } });
+    if ('missing' in built) {
+      const requiredFields = schemaFields(functionRecord.definition.inputSchema, built.missing);
+      if (requiredFields.length === 0) return { ok: false, result: { status: 'clarification', reply: `还缺少必要信息（${built.missing.join('、')}），请补充完整后再试。`, reasonCode: built.reasonCode } };
+      return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: frame.slots, requiredFields });
+    }
+    if (!validateJsonSchemaValue(functionRecord.definition.inputSchema, built.input).ok) return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: built.input });
+    return { ok: true, input: built.input };
+  }
+
+  /**
+   * 把 Schema 校验失败转换为参数收集或稳定澄清结果。
+   *
+   * @param context - 固定 Function 的 Schema 校验上下文
+   * @returns 可执行输入或不执行的澄清结果
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  private parameterCollectionResult(context: { traceId: string; route: RouteResult; frame: SemanticFrame; functionRecord: PluginFunctionRecord; behaviorContext: BehaviorContext; value: unknown; requiredFields?: readonly string[]; conflictFields?: readonly string[]; fallback?: { reasonCode: string; reply: string } }): { ok: true; input: JsonValue } | { ok: false; result: ExecuteTurnOutcome } {
+    const collected = this.collectParameterState(context);
+    if (collected.status === 'collecting') return { ok: false, result: this.parameterClarification(context.traceId, collected.state) };
+    if (context.fallback) return { ok: false, result: { status: 'clarification', reply: context.fallback.reply, reasonCode: context.fallback.reasonCode } };
+    return { ok: true, input: collected.input };
+  }
+
+  /** 按已固定 Function 的 Schema 生成一次参数收集结果，不触发执行器。 */
+  private collectParameterState(context: { traceId: string; route: RouteResult; frame: SemanticFrame; functionRecord: { definition: { inputSchema: JsonSchema; schemaVersion: string; version: string } }; behaviorContext: BehaviorContext; value: unknown; requiredFields?: readonly string[]; conflictFields?: readonly string[] }): ReturnType<typeof collectParameters> {
+    const { route, frame, functionRecord, behaviorContext, value, requiredFields, conflictFields } = context;
+    const previous = behaviorContext.collection?.kind === 'parameters' ? behaviorContext.collection : undefined;
+    return collectParameters({
+      functionId: route.functionId ?? frame.intent,
+      ...(route.pluginId === undefined ? {} : { pluginId: route.pluginId }),
+      schemaVersion: `${functionRecord.definition.schemaVersion}:${functionRecord.definition.version}`.slice(0, 256),
+      schema: functionRecord.definition.inputSchema,
+      value,
+      ...(requiredFields === undefined ? {} : { requiredFields }),
+      ...(conflictFields === undefined ? {} : { conflictFields }),
+      ...(previous === undefined ? {} : { previous }),
+      attempt: Math.min(MAX_COLLECTION_ATTEMPTS, (previous?.attempt ?? 0) + 1)
+    });
+  }
+
+  /** 把收集状态转换成不带业务词汇的内部澄清结果。 */
+  private parameterClarification(traceId: string, state: Extract<CollectionState, { kind: 'parameters' }>): ExecuteTurnOutcome {
+    const fieldName = state.missingFields[0] ?? state.invalidFields[0] ?? state.conflictFields[0];
+    logParameterBoundary(traceId, {
+      stage: 'action.execute', status: 'failed', reasonCode: 'parameters_required',
+      ...(state.pluginId === undefined ? {} : { pluginId: state.pluginId }), functionId: state.functionId,
+      fieldState: state.missingFields.length > 0 ? 'missing' : 'invalid',
+      ...(fieldName === undefined ? {} : { fieldName }),
+      expectedFieldCount: Object.keys(state.presentation ?? {}).length,
+      actualFieldCount: Object.keys(state.collected).length,
+      missingFieldCount: state.missingFields.length,
+      invalidFieldCount: state.invalidFields.length + state.conflictFields.length
+    });
+    return { status: 'clarification', reply: parameterCollectionReply(state), reasonCode: 'parameters_required', collection: state, diagnostic: { reasonCode: 'parameters_required' } };
   }
 
   /** 按插件策略生成动作，读取操作保持低风险。
@@ -332,6 +417,13 @@ function semanticFrameDiagnostic(frame: SemanticFrame): SemanticFrameDiagnostic 
     status: 'completed', semanticIntent: frame.intent, semanticAction: frame.action, hasIntent, hasAction,
     ...(missingField === undefined ? { nextStage: 'route.propose' as const } : { missingField, nextStage: 'response.generate' as const })
   };
+}
+
+/** 从已注册输入 Schema 中保留运行时报告的字段名，不把未知原因码当成参数。 */
+function schemaFields(schema: JsonSchema, fields: readonly string[]): string[] {
+  const properties = schema.properties;
+  if (typeof properties !== 'object' || properties === null || Array.isArray(properties)) return [];
+  return fields.filter((field) => Object.hasOwn(properties, field));
 }
 
 /** 判断引用是否为新版不透明历史关系。 */

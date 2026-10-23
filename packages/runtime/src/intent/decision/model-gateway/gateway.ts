@@ -21,7 +21,7 @@ type AttemptResult<T> =
   | { ok: false; failure: AttemptFailure; audit: ModelAuditEntry; event: ModelGatewayEvent };
 
 /** 单个 profile 执行参数，避免通过参数顺序传递安全边界。 */
-type ProfileRunOptions<T> = { role: ModelRole; invocation: ModelInvocation; profile: ModelProfile; validate: (raw: unknown) => ModelOutputValidation<T>; useFallback: boolean };
+type ProfileRunOptions<T> = { role: ModelRole; invocation: ModelInvocation; profile: ModelProfile; validate: (raw: unknown) => ModelOutputValidation<T>; useFallback: boolean; onAudit?: ModelGatewayOptions['onAudit'] };
 
 /** 单个 provider attempt 参数。 */
 type AttemptOptions<T> = ProfileRunOptions<T> & { provider: ModelProvider; attempt: number };
@@ -33,9 +33,9 @@ type OutputOptions<T> = AttemptOptions<T> & { raw: unknown };
 type AuditOptions = { role: ModelRole; invocation: ModelInvocation; profile: ModelProfile; fallbackUsed: boolean; attempt: number; outcome: ModelAuditOutcome; errorCode?: ModelGatewayEvent['errorCode']; reason?: string };
 
 /** provider 缺失失败参数。 */
-type FailedAttemptOptions = AuditOptions & { code: ModelGatewayEvent['errorCode']; audit: ModelAuditEntry[]; events: ModelGatewayEvent[] };
+type FailedAttemptOptions = AuditOptions & { code: ModelGatewayEvent['errorCode']; audit: ModelAuditEntry[]; events: ModelGatewayEvent[]; onAudit?: ModelGatewayOptions['onAudit'] };
 /** retry loop 的已绑定 provider 参数。 */
-type RetryLoopOptions<T> = { profile: ModelProfile; audit: ModelAuditEntry[]; events: ModelGatewayEvent[]; runAttempt: (attempt: number) => Promise<AttemptResult<T>> };
+type RetryLoopOptions<T> = { profile: ModelProfile; audit: ModelAuditEntry[]; events: ModelGatewayEvent[]; onAudit?: ModelGatewayOptions['onAudit']; runAttempt: (attempt: number) => Promise<AttemptResult<T>> };
 
 /** 统一封装五类模型角色的 provider 调用。 @author lvdaxianer@yeah.net @date 2026-10-17 */
 export class ModelGateway {
@@ -44,6 +44,7 @@ export class ModelGateway {
   // auditRecorder 负责统一脱敏和版本快照。
   private readonly registry: ModelGatewayOptions['registry'];
   private readonly providers: ModelGatewayOptions['providers'];
+  private readonly onAudit: ModelGatewayOptions['onAudit'];
 
   // 所有 role adapter 都通过 invoke 进入同一超时/重试/fallback 门禁。
   // provider 不直接暴露原始异常和原始请求日志。
@@ -60,6 +61,7 @@ export class ModelGateway {
   public constructor(options: ModelGatewayOptions) {
     this.registry = options.registry;
     this.providers = options.providers;
+    this.onAudit = options.onAudit;
   }
 
   /**
@@ -81,10 +83,10 @@ export class ModelGateway {
     const primaryProfile = resolvePrimaryProfileForInvocation(this.registry, role, options);
     // 未知 role 不能伪造 fallback 或 audit 版本。
     if (!primaryProfile) return options ? noProfileResult() : invalidRoleResult();
-    const primary = await this.runProfile({ role, invocation: invocationSnapshot, profile: primaryProfile, validate, useFallback: false });
+    const primary = await this.runProfile({ role, invocation: invocationSnapshot, profile: primaryProfile, validate, useFallback: false, onAudit: this.onAudit });
     // primary 成功或产生合法澄清结果时不触发 fallback。
     if (primary.ok) return primary;
-    return this.finishWithFallback({ role, invocation: invocationSnapshot, validate, profile: primaryProfile, primary, crossBackendFallback: options?.crossBackendFallback === true, ...(options?.crossBackendInput !== undefined ? { crossBackendInput: options.crossBackendInput } : {}) });
+    return this.finishWithFallback({ role, invocation: invocationSnapshot, validate, profile: primaryProfile, primary, crossBackendFallback: options?.crossBackendFallback === true, onAudit: this.onAudit, ...(options?.crossBackendInput !== undefined ? { crossBackendInput: options.crossBackendInput } : {}) });
   }
 
   /**
@@ -94,11 +96,11 @@ export class ModelGateway {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
-  private async finishWithFallback<T>(options: { role: ModelRole; invocation: ModelInvocation; validate: (raw: unknown) => ModelOutputValidation<T>; profile: ModelProfile; primary: ModelGatewayFailure; crossBackendFallback: boolean; crossBackendInput?: JsonValue }): Promise<ModelGatewayResult<T>> {
+  private async finishWithFallback<T>(options: { role: ModelRole; invocation: ModelInvocation; validate: (raw: unknown) => ModelOutputValidation<T>; profile: ModelProfile; primary: ModelGatewayFailure; crossBackendFallback: boolean; onAudit?: ModelGatewayOptions['onAudit']; crossBackendInput?: JsonValue }): Promise<ModelGatewayResult<T>> {
     // 没有显式 fallback 时保留 primary 的稳定失败和审计证据。
     if (!options.profile.fallbackProfileId && (!options.crossBackendFallback || !canCrossBackendFallback(options.primary.error.code))) return options.primary;
     // 只有 provider/transport failure 才能通过显式配置跨 backend；schema 和业务边界错误不扩大调用范围。
-    const fallback = await this.runFallback({ role: options.role, invocation: options.invocation, validate: options.validate, profile: options.profile, primary: options.primary, crossBackendFallback: options.crossBackendFallback && canCrossBackendFallback(options.primary.error.code), ...(options.crossBackendInput !== undefined ? { crossBackendInput: options.crossBackendInput } : {}) });
+    const fallback = await this.runFallback({ role: options.role, invocation: options.invocation, validate: options.validate, profile: options.profile, primary: options.primary, crossBackendFallback: options.crossBackendFallback && canCrossBackendFallback(options.primary.error.code), onAudit: options.onAudit, ...(options.crossBackendInput !== undefined ? { crossBackendInput: options.crossBackendInput } : {}) });
     // 没有可用的同 backend 或跨 backend primary 时保留原始稳定失败。
     if (!fallback) return options.primary;
     // fallback 成功仍保留 primary attempt，便于审计降级原因。
@@ -121,10 +123,10 @@ export class ModelGateway {
     const audit: ModelAuditEntry[] = [];
     const events: ModelGatewayEvent[] = [];
     // provider 缺失是配置故障，不执行动态发现或网络调用。
-    if (!provider) return this.failedAttempt({ role, invocation, profile, fallbackUsed: useFallback, attempt: 1, outcome: 'provider_failed', errorCode: 'model.no_provider', reason: '模型 provider 未注册', code: 'model.no_provider', audit, events });
+    if (!provider) return this.failedAttempt({ role, invocation, profile, fallbackUsed: useFallback, attempt: 1, outcome: 'provider_failed', errorCode: 'model.no_provider', reason: '模型 provider 未注册', code: 'model.no_provider', audit, events, onAudit: options.onAudit });
     // provider 只能读取冻结 profile 快照，retry loop 使用原始受信任配置。
     const providerProfile = deepFreeze(structuredClone(profile));
-    return runRetryLoop({ profile, audit, events, runAttempt: (attempt) => this.runAttempt({ ...options, profile: providerProfile, provider, attempt }) });
+    return runRetryLoop({ profile, audit, events, onAudit: options.onAudit, runAttempt: (attempt) => this.runAttempt({ ...options, profile: providerProfile, provider, attempt }) });
   }
 
   /**
@@ -173,26 +175,26 @@ export class ModelGateway {
   }
 
   /** 使用 fallback profile 执行第二条 provider 路径。 @param options - fallback 执行参数 @returns fallback 结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
-  private async runFallback<T>(options: { role: ModelRole; invocation: ModelInvocation; validate: (raw: unknown) => ModelOutputValidation<T>; profile: ModelProfile; primary: ModelGatewayFailure; crossBackendFallback: boolean; crossBackendInput?: JsonValue }): Promise<ModelGatewayResult<T> | undefined> {
-    const { role, invocation, validate, profile, primary, crossBackendFallback, crossBackendInput } = options;
+  private async runFallback<T>(options: { role: ModelRole; invocation: ModelInvocation; validate: (raw: unknown) => ModelOutputValidation<T>; profile: ModelProfile; primary: ModelGatewayFailure; crossBackendFallback: boolean; onAudit?: ModelGatewayOptions['onAudit']; crossBackendInput?: JsonValue }): Promise<ModelGatewayResult<T> | undefined> {
+    const { role, invocation, validate, profile, primary, crossBackendFallback, onAudit, crossBackendInput } = options;
     try {
       const sameBackendFallback = resolveFallbackProfile(this.registry, profile);
       if (sameBackendFallback) {
-        const sameResult = await this.runProfile({ role, invocation, profile: sameBackendFallback, validate, useFallback: true });
+        const sameResult = await this.runProfile({ role, invocation, profile: sameBackendFallback, validate, useFallback: true, onAudit });
         // 同 backend fallback 成功后立即结束，不能因为显式策略再额外调用另一 backend。
         if (sameResult.ok || !crossBackendFallback || !canCrossBackendFallback(sameResult.error.code)) return sameResult;
         const crossProfile = resolveCrossBackendProfile(this.registry, profile);
         if (!crossProfile) return sameResult;
         const crossInvocation = createFallbackInvocation(invocation, crossBackendInput);
         if (!crossInvocation) return invalidInputResult();
-        const crossResult = await this.runProfile({ role, invocation: crossInvocation, profile: crossProfile, validate, useFallback: true });
+        const crossResult = await this.runProfile({ role, invocation: crossInvocation, profile: crossProfile, validate, useFallback: true, onAudit });
         return mergeFallbackAttempts(sameResult, crossResult);
       }
       const crossProfile = crossBackendFallback ? resolveCrossBackendProfile(this.registry, profile) : undefined;
       if (!crossProfile) return undefined;
       const crossInvocation = createFallbackInvocation(invocation, crossBackendInput);
       if (!crossInvocation) return invalidInputResult();
-      return await this.runProfile({ role, invocation: crossInvocation, profile: crossProfile, validate, useFallback: true });
+      return await this.runProfile({ role, invocation: crossInvocation, profile: crossProfile, validate, useFallback: true, onAudit });
     } catch {
       // registry fallback 配置损坏也要保留 primary code 并稳定失败。
       return { ok: false, error: { code: 'model.fallback_failed', message: '模型 fallback 配置无效', retryable: false, details: { primaryCode: primary.error.code } }, audit: [], events: [] };
@@ -240,6 +242,7 @@ export class ModelGateway {
     const entry = this.auditEntry(options);
     options.audit.push(entry);
     options.events.push({ eventName: 'model.failed', audit: entry, ...(options.code ? { errorCode: options.code } : {}) });
+    notifyAudit(options.onAudit, entry, options.events.at(-1)!);
     return { ok: false, error: { code: options.code ?? 'model.no_provider', message: '模型 provider 未注册', retryable: false, details: {} }, audit: options.audit, events: options.events };
   }
 }
@@ -269,6 +272,7 @@ async function runRetryLoop<T>(options: RetryLoopOptions<T>): Promise<ModelGatew
     const result = await options.runAttempt(attempt);
     options.audit.push(result.audit);
     options.events.push(result.event);
+    notifyAudit(options.onAudit, result.audit, result.event);
     // 任一 attempt 成功后立即停止 retry，避免重复调用 provider。
     if (result.ok) return { ok: true, value: result.value, audit: options.audit, events: options.events };
     lastFailure = result.failure;
@@ -277,6 +281,15 @@ async function runRetryLoop<T>(options: RetryLoopOptions<T>): Promise<ModelGatew
     await waitBackoff(options.profile.retryPolicy.backoffMs);
   }
   return { ok: false, error: { code: lastFailure.code, message: lastFailure.message, retryable: lastFailure.code === 'model.timeout' || lastFailure.code === 'model.provider_failed', details: {} }, audit: options.audit, events: options.events };
+}
+
+/** 观测回调只用于诊断，任何写入故障都不能改变模型调用结果。 */
+function notifyAudit(observer: ModelGatewayOptions['onAudit'], audit: ModelAuditEntry, event: ModelGatewayEvent): void {
+  try {
+    observer?.(audit, event);
+  } catch {
+    // 观测边界故障必须被隔离，不能让模型主链失败。
+  }
 }
 
 /** 把 provider 异常转换为不泄漏正文的稳定错误。 @param error - provider 或 timeout 异常 @returns 稳定错误摘要 @author lvdaxianer@yeah.net @date 2026-10-17 */

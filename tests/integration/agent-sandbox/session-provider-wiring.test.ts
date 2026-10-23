@@ -75,3 +75,18 @@ test('服务可注入外部 Provider，并以会话 sessionId 写入后关闭 Pr
   assert.equal(provider.openCount, 1);
   assert.equal(provider.closeCount, 1);
 });
+
+test('会话入口只接受有界对象形式的结构化收集值', async () => {
+  const server = await startSandboxServer({ mode: 'scripted', port: await availablePort() });
+  try {
+    const created = await server.app.inject({ method: 'POST', url: '/api/sessions' });
+    const sessionId = created.json().sessionId as string;
+    const invalid = await server.app.inject({ method: 'POST', url: `/api/sessions/${sessionId}/chat`, payload: { message: '补充参数', structuredInput: [] } });
+    assert.equal(invalid.statusCode, 400);
+    assert.equal(invalid.json().reasonCode, 'structured_input_invalid');
+    const valid = await server.app.inject({ method: 'POST', url: `/api/sessions/${sessionId}/chat`, payload: { message: '补充参数', structuredInput: { value: 'bounded' } } });
+    assert.notEqual(valid.statusCode, 400);
+  } finally {
+    await server.close();
+  }
+});

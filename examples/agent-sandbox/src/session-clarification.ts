@@ -11,8 +11,16 @@ export function createSelectionState(descriptors: readonly PluginDescriptor[], u
 }
 
 /** 有可信事实的追问交给回复模型处理，不把正常事实回答计入 unresolved。 */
-export function hasVerifiedFactsForFollowUp(context: BehaviorContext, evidence: RouteEvidence): boolean {
-  return evidence.semanticIntent === 'unknown' && evidence.reasonCode !== 'reference_unresolved' && (context.factHistory?.records.length ?? 0) > 0;
+export function hasVerifiedFactsForFollowUp(context: BehaviorContext, evidence: RouteEvidence, userText = ''): boolean {
+  return evidence.semanticIntent === 'unknown'
+    && evidence.reasonCode !== 'reference_unresolved'
+    && (context.factHistory?.records.length ?? 0) > 0
+    && (userText.length === 0 || isLikelyFactFollowUp(userText));
+}
+
+/** 只有带有明确上下文指代或事实查询词时，才把未知输入视为事实追问。 */
+function isLikelyFactFollowUp(userText: string): boolean {
+  return /(刚才|之前|上一|上一个|这个|那个|这张|那张|编号|单号|进度|状态|处理到哪|第几个|第几位|多少|哪一个|哪些|记录|回执)/u.test(userText);
 }
 
 /** 用户正在回答已有澄清选项时视为进展，不增加新的 unresolved 次数。 */

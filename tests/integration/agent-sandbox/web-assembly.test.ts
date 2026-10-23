@@ -107,6 +107,20 @@ test('流式页面独立展示原始 thinking，不混入最终 Markdown', () =>
   assert.match(source, /className = 'reasoning'/);
   assert.match(source, /state\.reasoningEl\.textContent \+= text/);
   assert.match(source, /state\.textEl\.innerHTML = renderMarkdown\(rawText\)/);
+  assert.match(source, /details\.open = false/);
+  assert.match(source, /function streamChat\(text, structuredInput\)/);
+});
+
+test('页面提供通用参数收集表单和结构化上下文复制入口', () => {
+  const controls = readFileSync('examples/agent-sandbox/web/controls.fragment.js', 'utf8');
+  const page = readFileSync('examples/agent-sandbox/web/index.html', 'utf8');
+  assert.match(page, /id="collectionPanel"/);
+  assert.match(page, /id="copyContextBtn"/);
+  assert.match(controls, /function renderCollection\(collection\)/);
+  assert.match(controls, /function copyStructuredContext\(\)/);
+  assert.match(controls, /navigator\.clipboard\.writeText/);
+  const stream = readFileSync('examples/agent-sandbox/web/stream.fragment.js', 'utf8');
+  assert.match(stream, /structuredInput/);
 });
 
 /* 历史回放依赖原始 Markdown：innerHTML 替换后的 textContent 会丢失换行与标记，

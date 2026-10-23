@@ -2,7 +2,7 @@
 import { resolveSandboxTraceId } from './safe-log.js';
 import { SESSION_RUN_ID } from './session-core.js';
 import { pendingBridgeResult } from './session-turn-helpers.js';
-import type { ExtractFrameOutcome, RouteEvidence, TurnResult } from './session-types.js';
+import type { ExtractFrameOutcome, PendingActionContext, RouteEvidence, StructuredInput, TurnResult } from './session-types.js';
 import { recordTurnTiming, TurnTimingTracker } from './turn-timing.js';
 import type { BehaviorContext, PendingReference } from '@iar/contracts';
 import type { PluginDescriptor } from '@iar/plugins';
@@ -11,11 +11,12 @@ export type SessionTurnContext = {
   whenReady: () => Promise<void>;
   nextTurnId: () => number;
   hasPending: () => boolean;
+  pendingAction: () => PendingActionContext | undefined;
   cancelStalePending: () => Promise<void>;
   currentBehaviorContext: () => BehaviorContext;
   resolveSelection: (text: string, context: BehaviorContext) => { descriptor?: PluginDescriptor; invalid: boolean; reasonCode: string };
   rejectSelection: (userText: string, reasonCode: string) => Promise<TurnResult>;
-  extractFrame: (traceId: string, text: string, context: BehaviorContext, recentMessages: Array<{ role: string; text: string }>, selectedDescriptor?: PluginDescriptor) => Promise<ExtractFrameOutcome>;
+  extractFrame: (traceId: string, text: string, context: BehaviorContext, recentMessages: Array<{ role: string; text: string }>, selectedDescriptor?: PluginDescriptor, pendingAction?: PendingActionContext, structuredInput?: StructuredInput) => Promise<ExtractFrameOutcome>;
   recentMessages: () => Array<{ role: string; text: string }>;
   markUnresolved: (reasonCode: string, pendingReference?: PendingReference) => Promise<void>;
   pushMessage: (userText: string, reply: string) => void;
@@ -25,7 +26,7 @@ export type SessionTurnContext = {
 export class SandboxSessionTurn {
   public constructor(private readonly context: SessionTurnContext) {}
 
-  public async run(text: string, bridgeMode: boolean): Promise<TurnResult> {
+  public async run(text: string, bridgeMode: boolean, structuredInput?: StructuredInput): Promise<TurnResult> {
     await this.context.whenReady();
     const userText = text.trim();
     const turnId = this.context.nextTurnId();
@@ -33,12 +34,12 @@ export class SandboxSessionTurn {
     const timing = new TurnTimingTracker(traceId);
     try {
       if (bridgeMode && this.context.hasPending()) return this.withTiming(pendingBridgeResult(), timing);
-      if (!bridgeMode) await this.context.cancelStalePending();
+      const pendingAction = this.context.pendingAction();
       const behaviorContext = this.context.currentBehaviorContext();
       const selection = this.context.resolveSelection(userText, behaviorContext);
       if (selection.invalid) return this.withTiming(await this.context.rejectSelection(userText, selection.reasonCode), timing);
       timing.start('semantic.extract');
-      const extracted = await this.context.extractFrame(traceId, userText, behaviorContext, this.context.recentMessages(), selection.descriptor);
+      const extracted = await this.context.extractFrame(traceId, userText, behaviorContext, this.context.recentMessages(), selection.descriptor, pendingAction, structuredInput);
       timing.end('semantic.extract');
       if (!extracted.ok) {
         await this.context.markUnresolved(extracted.reasonCode);

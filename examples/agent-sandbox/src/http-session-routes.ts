@@ -4,8 +4,11 @@ import { streamTurn } from './http-stream-transport.js';
 import { handleError } from './http-lifecycle-routes.js';
 import { asRecord, readSessionId, type RunOperation } from './http-reservation.js';
 import type { Operation } from './session-manager.js';
+import type { StructuredInput } from './session-types.js';
 
 const MAX_MESSAGE_LENGTH = 4096;
+const MAX_STRUCTURED_INPUT_BYTES = 16_384;
+const MAX_STRUCTURED_INPUT_DEPTH = 6;
 // 消息长度按 UTF-16 代码单元限制，与前端输入边界保持一致。
 // 读取状态和空消息不增加 mutate 操作计数。
 // 高风险确认仍由会话工作流决定，HTTP 层不提前执行插件。
@@ -32,7 +35,9 @@ export function registerSessionRoutes(app: FastifyInstance, run: RunOperation, p
     const body = asRecord(request.body); const message = typeof body.message === 'string' ? body.message.trim() : '';
     if (!message) return run(request, 'read', async () => ({ status: 'failed', reply: '消息不能为空。', reasonCode: 'empty_message' }));
     if (message.length > MAX_MESSAGE_LENGTH) return run(request, 'read', async () => reply.code(413).send({ status: 'failed', reasonCode: 'message_too_long' }));
-    return run(request, 'mutate', async (session) => wantsStream(request, body) ? streamTurn(session, message, reply) : session.turn(message));
+    const structuredInput = readStructuredInput(body.structuredInput);
+    if (body.structuredInput !== undefined && structuredInput === undefined) return reply.code(400).send({ status: 'failed', reasonCode: 'structured_input_invalid' });
+    return run(request, 'mutate', async (session) => wantsStream(request, body) ? streamTurn(session, message, reply, structuredInput) : session.turn(message, structuredInput));
   }));
   app.post(`${prefix}/confirm`, async (request, reply) => handleError(reply, () => confirmRequest(request, run)));
   app.post(`${prefix}/compact`, async (request, reply) => handleError(reply, () => run(request, 'mutate', (session) => session.compact())));
@@ -68,4 +73,46 @@ function wantsStream(request: FastifyRequest, body: Record<string, unknown>): bo
   if (body.stream === true) return true;
   const query = asRecord(request.query);
   return query.stream === '1' || query.stream === 'true';
+}
+
+/**
+ * 校验参数收集器提交的结构化值，拒绝循环、过深或过大的客户端对象。
+ * @param value - 客户端提交的结构化值
+ * @returns 合法的对象输入，非法或非对象输入返回 undefined
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+function readStructuredInput(value: unknown): StructuredInput | undefined {
+  if (value === undefined || !isBoundedJson(value, 0)) return undefined;
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as StructuredInput : undefined;
+}
+
+/**
+ * 在 HTTP 边界限制 JSON 值形状和序列化大小，避免把任意对象送进模型。
+ * @param value - 待校验的 JSON 值
+ * @param depth - 当前递归深度
+ * @returns 是否符合结构化输入边界
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+function isBoundedJson(value: unknown, depth: number): boolean {
+  if (depth > MAX_STRUCTURED_INPUT_DEPTH || value === null) return value === null;
+  if (typeof value === 'string') return value.length <= MAX_STRUCTURED_INPUT_BYTES;
+  if (typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (Array.isArray(value)) return value.length <= 64 && value.every((item) => isBoundedJson(item, depth + 1));
+  if (typeof value !== 'object') return false;
+  const entries = Object.entries(value);
+  return entries.length <= 64 && entries.every(([key, item]) => key.length <= 200 && isBoundedJson(item, depth + 1)) && serializedLength(value) <= MAX_STRUCTURED_INPUT_BYTES;
+}
+
+/**
+ * 计算客户端结构化值的序列化长度，循环对象按非法输入处理。
+ * @param value - 待序列化的对象
+ * @returns 序列化字符数，循环对象返回超限值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+function serializedLength(value: object): number {
+  try { return JSON.stringify(value).length; } catch (error) { return MAX_STRUCTURED_INPUT_BYTES + 1; }
 }

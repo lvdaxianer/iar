@@ -2,34 +2,42 @@ import { ModelResponseLimitError, trackModelResponseLimit } from './models/model
 import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
-import { applyRouteDiagnostic, canPassThrough, gateIncompleteSemanticFrame, resolveNoMatchTurn, runPiAgentDelegate, semanticIncompleteClarification } from './session-turn-helpers.js';
-import type { ActionDefinition, ActionResult, BehaviorContext, PendingReference, VerifiedFactRecord } from '@iar/contracts';
+import { allowsContextFollowUp, applyRouteDiagnostic, canPassThrough, deterministicFallbackReply, gateIncompleteSemanticFrame, logActionResult, logRouteResult, pendingBridgeResult, resolveNoMatchTurn, runPiAgentDelegate, semanticIncompleteClarification } from './session-turn-helpers.js';
+import { hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
+import type { ActionDefinition, ActionResult, BehaviorContext, CollectionState, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
 import type { PluginDescriptor } from '@iar/plugins';
-import { withReplySource, type ExecuteTurnOutcome, type ExtractFrameOutcome, type ReferenceResolution, type ResolvedFactReference, type RouteEvidence, type StreamEvent, type TurnResult } from './session-types.js';
+import { withReplySource, type ExecuteTurnOutcome, type ExtractFrameOutcome, type PendingActionContext, type ReferenceResolution, type ResolvedFactReference, type RouteEvidence, type StreamEvent, type StructuredInput, type TurnResult } from './session-types.js';
 import { recordTurnTiming, TurnTimingTracker } from './turn-timing.js';
+import type { SandboxMode } from './session-types.js';
 
 /** 流式编排所需的会话能力，状态和资源仍由宿主唯一持有。 */
 export type StreamTurnContext = {
-  /** 新轮次开始前撤销旧的待确认动作。 */
+  /** 当前会话模式决定未知语义是否交给 Response Model。 */
+  mode: SandboxMode;
+  /** 新路由确认后撤销被替换的待确认动作。 */
   cancelStalePending: () => Promise<void>;
+  hasPending: () => boolean;
+  pendingAction: () => PendingActionContext | undefined;
   /** 与普通入口共用轮次计数和追踪标识生成。 */
   nextTraceId: () => string;
   /** 选择状态只接受当前授权候选；无效键必须在语义抽取前终止。 */
   resolveSelection: (text: string, context: BehaviorContext) => { descriptor?: PluginDescriptor; invalid: boolean; reasonCode: string };
   rejectSelection: (userText: string, reasonCode: string) => Promise<TurnResult>;
+  collectFunctionCandidates: (context: { userText: string; route: RouteResult; frame: SemanticFrame; evidence: RouteEvidence }) => Promise<{ route?: RouteResult; result?: TurnResult }>;
   markUnresolved: (reasonCode: string, pendingReference?: PendingReference) => Promise<void>;
+  updateParameterCollection: (collection: Extract<CollectionState, { kind: 'parameters' }>) => Promise<void>;
   resetClarification: () => Promise<void>;
   /** 与普通入口共用语义抽取及路由，确保相同的策略边界。 */
-  extractFrame: (traceId: string, runId: string, text: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>, selectedDescriptor?: PluginDescriptor) => Promise<ExtractFrameOutcome>;
+  extractFrame: (traceId: string, runId: string, text: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>, selectedDescriptor?: PluginDescriptor, pendingAction?: PendingActionContext, structuredInput?: StructuredInput) => Promise<ExtractFrameOutcome>;
   /** 当前会话的有界原文窗口，普通与流式入口必须读取同一份状态。 */
   recentMessages: Array<{ role: string; text: string }>;
   /** 当前启用 Plugin 的动态能力描述。 */
   functionDescriptors: PluginDescriptor[];
   routeFrame: (traceId: string, runId: string, frame: SemanticFrame, behaviorContext: BehaviorContext, currentMessage: string, recentMessages: Array<{ role: string; text: string }>, selectedDescriptor?: PluginDescriptor) => Promise<RouteResult>;
   resolveReferences: (frame: SemanticFrame, behaviorContext: BehaviorContext) => ReferenceResolution;
-  prepareAndExecute: (context: { runId: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext }) => Promise<ExecuteTurnOutcome>;
+  prepareAndExecute: (context: { runId: string; traceId?: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext }) => Promise<ExecuteTurnOutcome>;
   /** 兜底与执行后回复分别保留增量回调和超限错误。 */
   fallbackReplyStreamed: (context: { traceId: string; runId: string; userText: string; reasonCode: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[]; resolvedReferences?: ResolvedFactReference[] }, onDelta: (delta: string) => void, onReasoningDelta?: (delta: string) => void) => Promise<string>;
   generateReplyStreamed: (context: { traceId: string; runId: string; userText: string; action: ActionDefinition; actionResult: ActionResult; operationKind: 'read' | 'action'; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[] }, onDelta: (delta: string) => void, onReasoningDelta?: (delta: string) => void) => Promise<string>;
@@ -69,12 +77,12 @@ export class SandboxSessionStreamTurn {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public async turnStreamed(text: string, emit: (event: StreamEvent) => void, bridgeMode = false): Promise<TurnResult> {
+  public async turnStreamed(text: string, emit: (event: StreamEvent) => void, bridgeMode = false, structuredInput?: StructuredInput): Promise<TurnResult> {
     const userText = text.trim();
     const traceId = this.context.nextTraceId();
     const timing = new TurnTimingTracker(traceId);
     try {
-      const result = await this.executeStreamTurn({ userText, traceId, emit, timing, bridgeMode });
+      const result = await this.executeStreamTurn({ userText, traceId, emit, timing, bridgeMode, ...(structuredInput === undefined ? {} : { structuredInput }) });
       return this.finishStreamResult(result, timing, emit);
     } catch (error) {
       this.finishStreamFailure(timing, emit);
@@ -82,15 +90,16 @@ export class SandboxSessionStreamTurn {
     }
   }
 
-  private async executeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; timing: TurnTimingTracker; bridgeMode: boolean }): Promise<TurnResult> {
-    const { userText, traceId, emit, timing, bridgeMode } = context;
+  private async executeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; timing: TurnTimingTracker; bridgeMode: boolean; structuredInput?: StructuredInput }): Promise<TurnResult> {
+    const { userText, traceId, emit, timing, bridgeMode, structuredInput } = context;
     emit({ type: 'stage', stage: 'semantic' });
-    await this.context.cancelStalePending();
+    if (bridgeMode && this.context.hasPending()) return withReplySource(pendingBridgeResult());
+    const pendingAction = this.context.pendingAction();
     const behaviorContext = this.context.currentBehaviorContext();
     const selection = this.context.resolveSelection(userText, behaviorContext);
     if (selection.invalid) return withReplySource(await this.context.rejectSelection(userText, selection.reasonCode));
     timing.start('semantic.extract');
-    const extracted = await this.context.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext, this.context.recentMessages, selection.descriptor);
+    const extracted = await this.context.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext, this.context.recentMessages, selection.descriptor, pendingAction, structuredInput);
     timing.end('semantic.extract');
     return withReplySource(await this.finishStreamExtraction({ userText, traceId, emit, behaviorContext, extracted, timing, bridgeMode, ...(selection.descriptor === undefined ? {} : { selectedDescriptor: selection.descriptor }) }));
   }
@@ -147,7 +156,7 @@ export class SandboxSessionStreamTurn {
     if (!references.ok) return this.finishStreamFallback({ userText, traceId, emit, behaviorContext, timing, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: frame.intent, semanticConfidence: frame.confidence }, ...(references.pendingReference === undefined ? {} : { pendingReference: references.pendingReference }), ...(references.candidates === undefined ? {} : { referenceCandidates: references.candidates }) });
     if (behaviorContext.pendingReference !== undefined) await this.context.resetClarification();
     const routeContext = this.context.currentBehaviorContext();
-    const incomplete = gateIncompleteSemanticFrame(frame, traceId, timing, userText);
+    const incomplete = gateIncompleteSemanticFrame(frame, traceId, timing, userText, allowsContextFollowUp(frame, routeContext, userText) || bridgeMode || this.context.piAgent !== undefined || this.context.mode === 'brain');
     if (incomplete) {
       const bridgeResult = bridgeMode ? await resolveNoMatchTurn({ piAgent: undefined, pushMessages: this.context.pushMessages, passThroughOnNoMatch: true, userText, evidence: incomplete, behaviorContext: routeContext, selectedDescriptor, functionDescriptors: this.context.functionDescriptors }) : undefined;
       if (bridgeResult) return bridgeResult;
@@ -167,19 +176,34 @@ export class SandboxSessionStreamTurn {
       if (usesNestedRoute) timing.end('route.propose', routeCompleted ? 'completed' : 'failed');
     }
     timing.end('route.select');
+    logRouteResult(traceId, route);
     const evidence = buildEvidence(route, frame);
     if (extracted.semanticFallback) evidence.semanticFallback = true;
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
+      const recovered = await this.context.collectFunctionCandidates({ userText, route, frame, evidence });
+      if (recovered.result) return recovered.result;
+      if (recovered.route) {
+        route = recovered.route;
+        evidence.status = route.status;
+        evidence.reasonCode = route.reasonCode;
+        if (route.functionId === undefined) delete evidence.functionId; else evidence.functionId = route.functionId;
+        if (route.pluginId === undefined) delete evidence.pluginId; else evidence.pluginId = route.pluginId;
+        logRouteResult(traceId, route);
+      }
+      else {
       const bridgeResult = bridgeMode ? await resolveNoMatchTurn({ piAgent: undefined, pushMessages: this.context.pushMessages, passThroughOnNoMatch: true, userText, evidence, behaviorContext, selectedDescriptor, functionDescriptors: this.context.functionDescriptors }) : undefined;
       if (bridgeResult) return bridgeResult;
       const agentResult = await this.runStreamAgent({ userText, emit, timing, evidence, behaviorContext, selectedDescriptor });
       if (agentResult !== undefined) return agentResult;
       return this.finishStreamFallback({ userText, traceId, emit, behaviorContext: routeContext, timing, evidence, resolvedReferences: references.references });
+      }
     }
     emit({ type: 'stage', stage: 'action' });
+    if (this.context.hasPending()) await this.context.cancelStalePending();
     timing.start('action.execute');
-    const outcome = await this.context.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame, route, behaviorContext: routeContext });
+    const outcome = await this.context.prepareAndExecute({ runId: SESSION_RUN_ID, traceId, userText, frame, route, behaviorContext: routeContext });
     timing.end('action.execute');
+    logActionResult(traceId, outcome);
     applyRouteDiagnostic(evidence, traceId, outcome);
     return this.finishStreamOutcome({ userText, traceId, emit, timing, evidence, outcome });
   }
@@ -194,7 +218,7 @@ export class SandboxSessionStreamTurn {
   protected async runStreamAgent(context: { userText: string; emit: (event: StreamEvent) => void; timing: TurnTimingTracker; evidence: RouteEvidence; behaviorContext: BehaviorContext; selectedDescriptor?: PluginDescriptor | undefined }): Promise<TurnResult | undefined> {
     const { userText, emit, timing, evidence, behaviorContext, selectedDescriptor } = context;
     const delegate = this.context.piAgent;
-    if (!delegate || !canPassThrough(behaviorContext, evidence, selectedDescriptor)) return undefined;
+    if (!delegate || !canPassThrough(behaviorContext, evidence, selectedDescriptor, userText)) return undefined;
     emit({ type: 'stage', stage: 'response' });
     timing.start('response.generate');
     const reply = await runPiAgentDelegate(delegate, userText, (delta) => { timing.firstToken('response.generate'); emit({ type: 'delta', text: delta }); }, this.context.functionDescriptors);
@@ -212,13 +236,20 @@ export class SandboxSessionStreamTurn {
    */
   protected async finishStreamFallback(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; timing: TurnTimingTracker; evidence: RouteEvidence; resolvedReferences?: ResolvedFactReference[]; pendingReference?: PendingReference; referenceCandidates?: VerifiedFactRecord[] }): Promise<TurnResult> {
     const { userText, traceId, emit, behaviorContext, timing, evidence, resolvedReferences, pendingReference, referenceCandidates } = context;
-    if (!(evidence.semanticIntent === 'unknown' && evidence.reasonCode !== 'reference_unresolved' && (behaviorContext.factHistory?.records.length ?? 0) > 0) && !(behaviorContext.pending.status === 'required' && behaviorContext.pending.options?.some((option) => option.key === userText.trim()) === true)) await this.context.markUnresolved(evidence.reasonCode, pendingReference);
+    if (!hasVerifiedFactsForFollowUp(behaviorContext, evidence, userText) && !matchesPendingOption(behaviorContext, userText)) await this.context.markUnresolved(evidence.reasonCode, pendingReference);
     const currentBehaviorContext = this.context.currentBehaviorContext();
     const deterministicReply = semanticIncompleteClarification(evidence);
     if (deterministicReply !== undefined) {
       timing.skip('response.generate');
       this.context.pushMessages(userText, deterministicReply);
       return { status: 'clarification', reply: deterministicReply, route: evidence, reasonCode: evidence.reasonCode };
+    }
+    const canUseModelContext = hasVerifiedFactsForFollowUp(behaviorContext, evidence, userText) || matchesPendingOption(behaviorContext, userText);
+    const stableReply = canUseModelContext ? undefined : deterministicFallbackReply(evidence.reasonCode);
+    if (stableReply !== undefined) {
+      timing.skip('response.generate');
+      this.context.pushMessages(userText, stableReply);
+      return { status: 'clarification', reply: stableReply, route: evidence, reasonCode: evidence.reasonCode };
     }
     let reasoningStarted = false;
     timing.start('response.generate');
@@ -252,9 +283,12 @@ export class SandboxSessionStreamTurn {
       return { status: 'awaiting_confirmation', reply: outcome.reply, route: evidence, pending: summarizeAction(outcome.action) };
     }
     if (outcome.status === 'failed' || outcome.status === 'clarification') {
-      if (outcome.status === 'clarification') await this.context.markUnresolved(outcome.reasonCode);
+      if (outcome.status === 'clarification') {
+        if (outcome.collection !== undefined) await this.context.updateParameterCollection(outcome.collection);
+        else await this.context.markUnresolved(outcome.reasonCode);
+      }
       this.context.pushMessages(userText, outcome.reply);
-      return { status: outcome.status, reply: outcome.reply, route: evidence, reasonCode: outcome.reasonCode };
+      return { status: outcome.status, reply: outcome.reply, route: evidence, reasonCode: outcome.reasonCode, ...(outcome.status === 'clarification' && outcome.collection === undefined ? {} : outcome.status === 'clarification' ? { collection: outcome.collection } : {}) };
     }
     return this.finishStreamExecution({ ...context, outcome });
   }

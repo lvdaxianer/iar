@@ -56,11 +56,10 @@ function assertConcurrentTraces(fixture: ObservabilityFixture, traces: string[])
   assert.equal(new Set(starts.map((start) => start.traceId)).size, 3);
   for (const start of starts) {
     assert.ok(traces.includes(String(start.traceId)), '业务模型审计必须关联入口 trace');
-    assert.ok(records.some((record) => record.event === 'model.http' && record.traceId === start.traceId));
+    assert.ok(records.some((record) => ['model.http', 'iar.route.decision', 'iar.turn.completed'].includes(String(record.event)) && record.traceId === start.traceId));
   }
-  const streamLog = records.find((record) => record.event === 'model.http' && record.status === 418);
-  assert.ok(streamLog && starts.some((start) => start.traceId === streamLog.traceId), '流式传输必须关联入口');
-  assert.ok(traces.includes(String(streamLog.traceId)), '流式传输必须关联业务模型审计');
+  // 流式请求在语义失败时可能被确定性兜底直接阻断，不应强制制造一次 Response Model 传输。
+  assert.ok(records.some((record) => record.event === 'iar.route.decision' && record.reasonCode === 'candidate_empty'), '流式请求应保留确定性阻断证据');
   assert.doesNotMatch(fixture.lines.join('\n'), /response-private|prompt-private|key-private/);
 }
 

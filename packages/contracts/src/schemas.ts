@@ -7,7 +7,7 @@
 import type { TSchema } from '@sinclair/typebox';
 import { CompactionReferenceSchema, CompactionResultSchema } from './schema-compaction.js';
 import { FunctionHandlerResultSchema, FunctionResponseSchema, MAX_FUNCTION_RESPONSE_TEXT_LENGTH, MAX_FUNCTION_RESPONSE_UI_BYTES } from './schema-function-response.js';
-import { ClarificationStateSchema, PendingReferenceSchema, RecentMessagePolicySchema, VerifiedFactHistorySchema, VerifiedFactRecordSchema } from './schema-context.js';
+import { ClarificationStateSchema, CollectionStateSchema, PendingReferenceSchema, RecentMessagePolicySchema, VerifiedFactHistorySchema, VerifiedFactRecordSchema } from './schema-context.js';
 import {
   // Action 请求 Schema。
   ActionDefinitionSchema,
@@ -147,6 +147,7 @@ export {
   PendingInputSchema,
   RecentMessagePolicySchema,
   ClarificationStateSchema,
+  CollectionStateSchema,
   PendingReferenceSchema,
   SlotValueSchema,
   SubjectReferenceSchema,

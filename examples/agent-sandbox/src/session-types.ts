@@ -9,7 +9,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { ActionDefinition, ActionResult, BehaviorContext, EventEnvelope, JsonValue, PendingReference, VerifiedFactRecord } from '@iar/contracts';
+import type { ActionDefinition, ActionResult, BehaviorContext, CollectionState, EventEnvelope, JsonValue, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { DecisionBackend, SemanticFrame } from '@iar/runtime';
 import type { PluginDescriptor } from '@iar/plugins';
 import type { TurnTimingSummary } from './turn-timing.js';
@@ -22,6 +22,9 @@ export type SandboxDecisionBackend = DecisionBackend;
 
 /** 用户可观测的回复来源，值域与 Pi bridge 保持稳定。 */
 export type ReplySource = 'direct_function' | 'response_model' | 'pi_agent' | 'none';
+
+/** 页面参数收集器提交的有界结构化值，不包含执行授权。 */
+export type StructuredInput = Record<string, JsonValue>;
 
 /** 运行时选中的 Function Operation 类型。 */
 export type OperationKind = 'read' | 'action';
@@ -84,13 +87,16 @@ export type PendingActionSummary = {
   input: JsonValue;
 };
 
+/** 语义抽取可读取的当前待确认动作摘要；仅用于理解修改/确认上下文，不代表授权。 */
+export type PendingActionContext = Pick<PendingActionSummary, 'functionId' | 'pluginId' | 'riskLevel' | 'confirmationRequired' | 'input'>;
+
 /** 单轮对话结果联合。 */
 type TurnResultBody =
   | { status: 'pass_through'; route: RouteEvidence; capabilityContext: PassThroughCapabilityContext; replySource?: ReplySource }
   | { status: 'agent'; reply: string; route: RouteEvidence; replySource?: ReplySource }
   | { status: 'executed'; reply: string; route: RouteEvidence; actionResult: ActionResult; reasonCode?: string; replySource?: ReplySource }
   | { status: 'awaiting_confirmation'; reply: string; route: RouteEvidence; pending: PendingActionSummary; replySource?: ReplySource }
-  | { status: 'clarification'; reply: string; route: RouteEvidence; reasonCode: string; disposition?: 'context_answered'; replySource?: ReplySource }
+  | { status: 'clarification'; reply: string; route: RouteEvidence; reasonCode: string; disposition?: 'context_answered'; collection?: Extract<CollectionState, { kind: 'parameters' }>; replySource?: ReplySource }
   | { status: 'failed'; reply: string; route: RouteEvidence; reasonCode: string; replySource?: ReplySource };
 
 /**
@@ -130,7 +136,7 @@ export type ReferenceResolution =
 export type ExecuteTurnOutcome =
   | { status: 'executed'; action: ActionDefinition; actionResult: ActionResult; operationKind: OperationKind }
   | { status: 'awaiting_confirmation'; action: ActionDefinition; reply: string; operationKind: OperationKind }
-  | { status: 'clarification'; reply: string; reasonCode: string; diagnostic?: RouteDiagnostic }
+  | { status: 'clarification'; reply: string; reasonCode: string; diagnostic?: RouteDiagnostic; collection?: Extract<CollectionState, { kind: 'parameters' }> }
   | { status: 'failed'; reply: string; reasonCode: string; diagnostic?: RouteDiagnostic };
 
 /** 确认操作结果联合。 */

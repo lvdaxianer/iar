@@ -7,7 +7,7 @@ test('不完整语义帧会记录缺失字段并明确跳过路由和动作阶�
   await withObservabilityFixture(async (fixture) => {
     const session = new IarSandboxSession({ mode: 'scripted' });
     try {
-      const result = await session.turn('执行这个 200 次/秒');
+      const result = await session.turn('请处理这个请求');
       await flushObservabilityLogs();
 
       const records = fixture.records();
@@ -30,8 +30,8 @@ test('不完整语义帧会记录缺失字段并明确跳过路由和动作阶�
 test('重复确认语言仍缺少目标时返回确定性澄清，不调用回复模型或执行动作', async () => {
   const session = new IarSandboxSession({ mode: 'scripted' });
   try {
-    const first = await session.turn('执行这个 200 次/秒');
-    const second = await session.turn('执行这个 200 次/秒');
+    const first = await session.turn('请处理这个请求');
+    const second = await session.turn('请处理这个请求');
 
     for (const result of [first, second]) {
       assert.equal(result.status, 'clarification');
@@ -45,4 +45,31 @@ test('重复确认语言仍缺少目标时返回确定性澄清，不调用回�
   } finally {
     session.dispose();
   }
+});
+
+test('完整路由和候选为空分别记录 route matched 与 candidate empty', async () => {
+  await withObservabilityFixture(async (fixture) => {
+    const matchedSession = new IarSandboxSession({ mode: 'scripted' });
+    try {
+      const matched = await matchedSession.turn('现在有哪些告警');
+      assert.equal(matched.status, 'executed');
+      await flushObservabilityLogs();
+      const matchedRoutes = fixture.records().filter((record) => record.event === 'iar.route.decision');
+      assert.ok(matchedRoutes.some((record) => record.stage === 'route.select' && record.status === 'completed' && record.reasonCode === 'route_matched'));
+      assert.ok(matchedRoutes.some((record) => record.stage === 'action.execute' && record.status === 'completed' && record.execution === 'allowed'));
+    } finally {
+      matchedSession.dispose();
+    }
+
+    const emptySession = new IarSandboxSession({ mode: 'scripted', disabledPluginIds: ['system-status-v1'] });
+    try {
+      const empty = await emptySession.turn('现在有哪些告警');
+      assert.notEqual(empty.status, 'executed');
+      await flushObservabilityLogs();
+      const emptyRoutes = fixture.records().filter((record) => record.event === 'iar.route.decision');
+      assert.ok(emptyRoutes.some((record) => record.stage === 'route.select' && record.status === 'failed' && record.reasonCode === 'candidate_empty' && record.execution === 'blocked'));
+    } finally {
+      emptySession.dispose();
+    }
+  });
 });

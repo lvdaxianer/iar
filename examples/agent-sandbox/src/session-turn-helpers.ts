@@ -12,6 +12,7 @@ import type { SandboxSessionReplies } from './session-replies.js';
 import { hasVerifiedFactsForFollowUp } from './session-clarification.js';
 import type { ConfirmResult, ExecuteTurnOutcome, OperationKind, PassThroughCapabilityContext, RouteEvidence, TurnResult } from './session-types.js';
 import type { SemanticFrame } from '@iar/runtime';
+import type { RouteResult } from '@iar/runtime';
 import type { TurnTimingTracker } from './turn-timing.js';
 
 /**
@@ -25,9 +26,9 @@ import type { TurnTimingTracker } from './turn-timing.js';
  * @author lvdaxianer@yeah.net
  * @date 2026-10-23
  */
-export function gateIncompleteSemanticFrame(frame: SemanticFrame, traceId: string, timing: TurnTimingTracker, userText: string): RouteEvidence | undefined {
+export function gateIncompleteSemanticFrame(frame: SemanticFrame, traceId: string, timing: TurnTimingTracker, _userText: string, allowUnmatchedHandling = false): RouteEvidence | undefined {
   const missingField = frame.intent === 'unknown' ? 'intent' : frame.action === 'unknown' ? 'action' : undefined;
-  if (missingField === undefined || !isLikelyBusinessRequest(userText)) return undefined;
+  if (missingField === undefined || (allowUnmatchedHandling && missingField === 'intent')) return undefined;
   const evidence: RouteEvidence = { status: 'semantic_incomplete', reasonCode: 'semantic_incomplete', semanticIntent: frame.intent, semanticConfidence: frame.confidence };
   evidence.missingField = missingField;
   for (const stage of ['route.propose', 'route.select', 'action.execute'] as const) {
@@ -35,17 +36,6 @@ export function gateIncompleteSemanticFrame(frame: SemanticFrame, traceId: strin
     logRouteDecision(traceId, { stage, status: 'skipped', reasonCode: 'semantic_incomplete', execution: 'blocked' });
   }
   return evidence;
-}
-
-/**
- * 只作为安全门禁判断输入是否声称要处理业务，不负责选择 Function 或 Plugin。
- * @param userText - 当前用户输入
- * @returns 是否应阻止不完整帧进入业务路由
- * @author lvdaxianer@yeah.net
- * @date 2026-10-23
- */
-function isLikelyBusinessRequest(userText: string): boolean {
-  return /帮我|请|我要|执行|创建|提交|调整|修改|查询|查看|列出|导出|删除|重启|停止|转人工|工单|限流|告警|报表|权限/u.test(userText);
 }
 
 /**
@@ -58,8 +48,75 @@ function isLikelyBusinessRequest(userText: string): boolean {
 export function semanticIncompleteClarification(evidence: RouteEvidence): string | undefined {
   if (evidence.reasonCode !== 'semantic_incomplete') return undefined;
   if (evidence.missingField === 'action') return `已识别目标 Function「${evidence.semanticIntent}」，但还缺少操作类型。请说明是查询、创建、更新、删除还是执行；当前不会执行任何动作。`;
-  if (evidence.missingField === 'intent') return '我识别到这是业务请求，但还不能确定目标 Function。请补充要处理的对象或能力，并说明要查询、创建、更新、删除还是执行；当前不会执行任何动作。';
+  if (evidence.missingField === 'intent') return '我暂时无法确定你的需求。请补充想查询的对象、希望了解的结果，或明确说明是否要执行某个新操作；如果是在追问当前会话的结果，也可以说明想查看哪项信息。';
   return '当前请求缺少路由所需信息，请补充目标和操作类型；当前不会执行任何动作。';
+}
+
+/**
+ * 为稳定路由失败生成不经过回复模型的固定说明。
+ *
+ * @param reasonCode - 已由运行时归一化的稳定原因码
+ * @returns 固定澄清文本；普通上下文追问返回 undefined
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+export function deterministicFallbackReply(reasonCode: string): string | undefined {
+  if (reasonCode === 'candidate_empty' || reasonCode === 'route_incomplete' || reasonCode === 'plugin_noul' || reasonCode === 'function_noul') {
+    return '当前没有匹配到可用的 Function。请检查已启用的 Plugin，或补充你希望处理的目标。';
+  }
+  if (reasonCode === 'bridge_timeout' || reasonCode === 'bridge_unavailable' || reasonCode === 'bridge_session_failed') {
+    return 'IAR 桥接当前不可用，本轮输入已安全阻断，请稍后重试。';
+  }
+  if (reasonCode.startsWith('model.')) return '当前模型暂时不可用，本轮未执行任何动作，请稍后重试。';
+  return undefined;
+}
+
+/**
+ * 判断不完整语义帧是否可以交给结构化事实追问处理。
+ * @param frame - 已通过 Schema 校验的语义帧
+ * @param context - 当前会话行为上下文
+ * @returns 是否允许继续进入事实追问分支
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+export function allowsContextFollowUp(frame: SemanticFrame, context: BehaviorContext, userText = ''): boolean {
+  if (frame.intent !== 'unknown') return false;
+  return hasVerifiedFactsForFollowUp(context, { status: 'semantic_incomplete', reasonCode: 'semantic_incomplete', semanticIntent: frame.intent, semanticConfidence: frame.confidence }, userText);
+}
+
+/**
+ * 记录完整语义帧经过候选路由后的结果，区分命中和候选为空。
+ * @param traceId - 当前回合链路标识
+ * @param route - 已通过运行时契约校验的路由结果
+ * @returns 无返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+export function logRouteResult(traceId: string, route: RouteResult): void {
+  const matched = route.status === 'matched' && route.functionId !== undefined && route.pluginId !== undefined;
+  logRouteDecision(traceId, {
+    stage: 'route.select', status: matched ? 'completed' : 'failed', reasonCode: matched ? 'route_matched' : 'candidate_empty', execution: matched ? 'allowed' : 'blocked',
+    ...(route.functionId === undefined ? {} : { functionId: route.functionId }), ...(route.pluginId === undefined ? {} : { pluginId: route.pluginId })
+  });
+}
+
+/**
+ * 记录动作门禁结果，确认等待和真正执行不再共用同一个含义。
+ * @param traceId - 当前回合链路标识
+ * @param outcome - 动作准备与执行结果
+ * @returns 无返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+export function logActionResult(traceId: string, outcome: ExecuteTurnOutcome): void {
+  const pendingConfirmation = outcome.status === 'awaiting_confirmation';
+  const succeeded = outcome.status === 'executed';
+  const blockedReason = outcome.status === 'clarification' && outcome.reasonCode === 'parameters_required'
+    ? 'parameters_required'
+    : succeeded ? 'route_matched' : pendingConfirmation ? 'confirmation_required' : outcome.diagnostic ? 'route_contract_invalid' : 'action_failed';
+  logRouteDecision(traceId, {
+    stage: 'action.execute', status: succeeded || pendingConfirmation ? 'completed' : 'failed', reasonCode: blockedReason, execution: succeeded ? 'allowed' : 'blocked'
+  });
 }
 
 /** 将动作阶段的契约失败投影到公开证据并写入安全诊断日志。 */
@@ -68,6 +125,7 @@ export function applyRouteDiagnostic(evidence: RouteEvidence, traceId: string, o
   if (outcome.diagnostic === undefined) return;
   evidence.status = 'clarification';
   evidence.reasonCode = outcome.diagnostic.reasonCode;
+  if (outcome.diagnostic.reasonCode === 'parameters_required') evidence.missingField = 'parameters';
   if (outcome.diagnostic.expectedOperation !== undefined) evidence.expectedOperation = outcome.diagnostic.expectedOperation;
   if (outcome.diagnostic.actualOperation !== undefined) evidence.actualOperation = outcome.diagnostic.actualOperation;
   logRouteContractFailure(traceId, outcome.diagnostic);
@@ -79,8 +137,12 @@ export function pendingBridgeResult(): TurnResult {
 }
 
 /** 判断路由未命中是否真的是普通 Pi 输入。 */
-export function canPassThrough(context: BehaviorContext, evidence: RouteEvidence, selectedDescriptor: PluginDescriptor | undefined): boolean {
-  return selectedDescriptor === undefined && evidence.semanticIntent === 'unknown' && context.pending.status !== 'required' && !hasVerifiedFactsForFollowUp(context, evidence);
+export function canPassThrough(context: BehaviorContext, evidence: RouteEvidence, selectedDescriptor: PluginDescriptor | undefined, userText = ''): boolean {
+  return selectedDescriptor === undefined
+    && evidence.semanticIntent === 'unknown'
+    && context.pending.status !== 'required'
+    && context.collection === undefined
+    && !hasVerifiedFactsForFollowUp(context, evidence, userText);
 }
 
 /** 运行 Pi 委托并统一故障处理；返回 undefined 表示调用方继续走 IAR 兜底。
@@ -109,8 +171,12 @@ export async function runPiAgentDelegate(delegate: PiAgentDelegate, userText: st
  */
 export async function resolveNoMatchTurn(context: { piAgent: PiAgentDelegate | undefined; pushMessages: (userText: string, reply: string) => void; passThroughOnNoMatch: boolean; userText: string; evidence: RouteEvidence; behaviorContext: BehaviorContext; selectedDescriptor: PluginDescriptor | undefined; functionDescriptors: readonly PluginDescriptor[] }): Promise<TurnResult | undefined> {
   const { piAgent, pushMessages, passThroughOnNoMatch, userText, evidence, behaviorContext, selectedDescriptor, functionDescriptors } = context;
-  if (!canPassThrough(behaviorContext, evidence, selectedDescriptor)) return undefined;
-  if (passThroughOnNoMatch) return evidence.status === 'noul' ? { status: 'pass_through', route: evidence, capabilityContext: passThroughCapabilityContext(functionDescriptors) } : undefined;
+  if (!canPassThrough(behaviorContext, evidence, selectedDescriptor, userText)) return undefined;
+  if (passThroughOnNoMatch) {
+    // Bridge 对未命中和语义不完整的非 IAR 输入都交给 Pi，不能误报为 IAR 澄清。
+    const canPassThroughIncomplete = evidence.status === 'noul' || evidence.status === 'semantic_incomplete';
+    return canPassThroughIncomplete ? { status: 'pass_through', route: evidence, capabilityContext: passThroughCapabilityContext(functionDescriptors) } : undefined;
+  }
   if (!piAgent) return undefined;
   const reply = await runPiAgentDelegate(piAgent, userText, () => undefined, functionDescriptors);
   if (reply === undefined) return undefined;

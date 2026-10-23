@@ -9,6 +9,7 @@ import { AsyncResource } from 'node:async_hooks';
 import type { IarSandboxSession, StreamEvent } from './session.js';
 import { logStreamFailure } from './safe-log.js';
 import { auditStreamWriteFailure } from './request-audit.js';
+import type { StructuredInput } from './session-types.js';
 
 /** 单个响应的有界终态，重复或迟到错误不会重复审计。 */
 type StreamState = { isFailed: boolean; isDisconnected: boolean; isFinished: boolean };
@@ -25,13 +26,13 @@ const STREAM_END_TIMEOUT_MS = 10_000;
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export async function streamTurn(session: IarSandboxSession, message: string, reply: FastifyReply): Promise<void> {
+export async function streamTurn(session: IarSandboxSession, message: string, reply: FastifyReply, structuredInput?: StructuredInput): Promise<void> {
   reply.hijack();
   const state = watchStreamErrors(reply);
   reply.raw.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8',
     'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   try {
-    await session.turnStreamed(message, (event) => emitEvent(reply, event, state));
+    await session.turnStreamed(message, (event) => emitEvent(reply, event, state), structuredInput);
   } catch {
     // 会话失败时向客户端发送既有的安全错误码。
     logStreamFailure();

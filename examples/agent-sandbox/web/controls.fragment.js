@@ -1,4 +1,5 @@
   let lastReplySource = null;
+  let latestState = null;
 
   /** 展示确认结果并写入本地历史，三种终态对应原有展示文案。
    * 执行与取消共用动作标识，结果文字直接来自服务端响应。
@@ -125,6 +126,8 @@
       messagesEl.innerHTML = '';
       pendingRunId = null;
       lastReplySource = null;
+      latestState = null;
+      latestTimingSummary = null;
       document.getElementById('routeReplySource').textContent = '-';
       document.getElementById('timingTotal').textContent = '-';
       document.getElementById('timingTraceId').textContent = '-';
@@ -150,6 +153,8 @@
     messagesEl.innerHTML = '';
     pendingRunId = null;
     lastReplySource = null;
+    latestState = null;
+    latestTimingSummary = null;
     document.getElementById('routeReplySource').textContent = '-';
     document.getElementById('timingTotal').textContent = '-';
     document.getElementById('timingTraceId').textContent = '-';
@@ -213,6 +218,7 @@
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
   function renderState(state) {
+    latestState = state;
     if (state.pending) runConfirm(state.pending);
     else { pendingRunId = null; document.querySelectorAll('.confirm-box').forEach(function (box) { box.remove(); }); }
     var badge = document.getElementById('modeBadge');
@@ -227,8 +233,236 @@
     var score = state.context.action && state.context.action.name !== 'unknown' ? state.context.action.name + '（' + state.context.action.status + '）' : '-';
     document.getElementById('routeScore').textContent = score;
     document.getElementById('contextJson').textContent = JSON.stringify(state.context, null, 2);
+    renderCollection(state.context.collection);
     renderEvents(state.events);
   }
+
+  /**
+   * 将当前会话快照裁剪为可复制的结构化调试上下文。
+   * @param state - 当前页面状态
+   * @returns 不含正文和授权字段的结构化快照
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  function buildStructuredContextSnapshot(state) {
+    var context = state && state.context ? state.context : {};
+    return { traceId: latestTimingSummary && latestTimingSummary.traceId || null, route: pickRoute(context.route), collection: context.collection || null, timing: latestTimingSummary || null };
+  }
+
+  /**
+   * 复制结构化上下文所需的路由字段，避免把正文或授权字段带出页面。
+   * @param route - 当前页面路由状态
+   * @returns 白名单路由摘要
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  function pickRoute(route) {
+    var source = route && typeof route === 'object' ? route : {};
+    var keys = ['functionId', 'pluginId', 'operationKind', 'status', 'reasonCode', 'semanticIntent', 'semanticConfidence', 'missingField', 'expectedOperation', 'actualOperation'];
+    return keys.reduce(function (result, key) { if (source[key] !== undefined) result[key] = source[key]; return result; }, {});
+  }
+
+  /**
+   * 通过浏览器剪贴板复制有界 JSON，失败时给出可重试提示。
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  function copyStructuredContext() {
+    var status = document.getElementById('copyContextStatus');
+    if (!latestState) { status.textContent = '暂无可复制的会话上下文。'; return; }
+    if (!navigator.clipboard || !navigator.clipboard.writeText) { status.textContent = '当前浏览器不支持剪贴板，请手动查看 BehaviorContext。'; return; }
+    var text = JSON.stringify(buildStructuredContextSnapshot(latestState), null, 2);
+    navigator.clipboard.writeText(text).then(function () { status.textContent = '结构化上下文已复制。'; }).catch(function () { status.textContent = '复制失败，请检查浏览器剪贴板权限后重试。'; });
+  }
+
+  /**
+   * 根据服务端收集状态渲染通用参数表单，不解释 Function 的业务含义。
+   * @param collection - 服务端收集状态
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  function renderCollection(collection) {
+    var panel = document.getElementById('collectionPanel');
+    panel.innerHTML = '';
+    if (!collection) { panel.textContent = '当前没有待收集参数。'; return; }
+    if (collection.kind === 'function') { renderFunctionCollection(panel, collection); return; }
+    if (collection.kind === 'parameters') renderParameterCollection(panel, collection);
+  }
+
+  /**
+   * 展示 Function 候选状态，候选仅作为不透明标识显示。
+   * @param panel - 收集面板节点
+   * @param collection - Function 收集状态
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  function renderFunctionCollection(panel, collection) {
+    var title = document.createElement('div');
+    title.className = 'collection-status';
+    title.textContent = collection.reasonCode === 'function_ambiguous' ? '请从候选 Function 中选择：' : '当前还不能唯一确定 Function：';
+    panel.appendChild(title);
+    (collection.candidateFunctionIds || []).forEach(function (id) { appendCodeItem(panel, id); });
+  }
+
+  /**
+   * 为 Function 候选创建安全的代码标识行。
+   * @param panel - 收集面板节点
+   * @param value - 不透明 Function 标识
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  function appendCodeItem(panel, value) {
+    var item = document.createElement('code');
+    item.className = 'collection-code';
+    item.textContent = value;
+    panel.appendChild(item);
+  }
+
+  /**
+   * 按 Schema 展示当前缺失、非法或冲突的字段。
+   * @param panel - 收集面板节点
+   * @param collection - 参数收集状态
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  function renderParameterCollection(panel, collection) {
+    var form = document.createElement('form');
+    form.className = 'collection-form';
+    var title = document.createElement('div');
+    title.className = 'collection-status';
+    title.textContent = '请补充参数：' + collection.functionId;
+    form.appendChild(title);
+    collectionFields(collection).forEach(function (field) { form.appendChild(createCollectionField(collection, field)); });
+    var submit = document.createElement('button');
+    submit.type = 'submit'; submit.textContent = '提交参数';
+    form.appendChild(submit);
+    form.onsubmit = function (event) { event.preventDefault(); submitCollection(form, collection); };
+    panel.appendChild(form);
+  }
+
+  /**
+   * 合并缺失、非法、冲突字段并保持页面字段数量有界。
+   * @param collection - 参数收集状态
+   * @returns 去重后的字段名
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  function collectionFields(collection) {
+    return (collection.missingFields || []).concat(collection.invalidFields || [], collection.conflictFields || []).filter(function (field, index, fields) { return fields.indexOf(field) === index; }).slice(0, 32);
+  }
+
+  /**
+   * 创建单个通用字段控件，标签来自服务端 Schema 展示元数据。
+   * @param collection - 参数收集状态
+   * @param field - Schema 字段名
+   * @returns 字段标签节点
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  function createCollectionField(collection, field) {
+    var meta = collection.presentation && collection.presentation[field] || {};
+    var label = document.createElement('label'); label.className = 'collection-field';
+    var caption = document.createElement('span'); caption.textContent = meta.label || field; label.appendChild(caption);
+    if (meta.description) { var help = document.createElement('small'); help.className = 'collection-help'; help.textContent = meta.description; label.appendChild(help); }
+    label.appendChild(createCollectionControl(meta, field, collection.collected && collection.collected[field]));
+    return label;
+  }
+
+  /**
+   * 由控件元数据创建文本、数值、布尔、枚举或 JSON 输入。
+   * @param meta - 服务端 Schema 展示元数据
+   * @param field - Schema 字段名
+   * @param value - 已收集值
+   * @returns 输入控件节点
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  function createCollectionControl(meta, field, value) {
+    var control = meta.control || 'text';
+    if (control === 'boolean') { var checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.name = field; checkbox.checked = value === true; checkbox.dataset.collectionControl = control; return checkbox; }
+    if (control === 'object') return collectionTextarea(field, value);
+    if (control === 'select' || control === 'multi-select') return collectionSelect(meta.options || [], field, value, control === 'multi-select');
+    var input = document.createElement('input'); input.name = field; input.type = control === 'number' ? 'number' : 'text'; input.value = value === undefined ? '' : String(value); input.dataset.collectionControl = control; return input;
+  }
+
+  /**
+   * 创建对象字段的 JSON 文本框。
+   * @param field - Schema 字段名
+   * @param value - 已收集对象值
+   * @returns JSON 文本框节点
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  function collectionTextarea(field, value) {
+    var textarea = document.createElement('textarea'); textarea.name = field; textarea.rows = 3; textarea.value = value === undefined ? '' : JSON.stringify(value); textarea.dataset.collectionControl = 'object'; return textarea;
+  }
+
+  /**
+   * 创建枚举或多选控件，选项值严格来自服务端 Schema。
+   * @param options - 服务端提供的有限选项
+   * @param field - Schema 字段名
+   * @param value - 已收集值
+   * @param multiple - 是否允许多选
+   * @returns 选择控件节点
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  function collectionSelect(options, field, value, multiple) {
+    var select = document.createElement('select'); select.name = field; select.multiple = multiple; select.dataset.collectionControl = multiple ? 'multi-select' : 'select';
+    var values = Array.isArray(value) ? value : [value];
+    options.forEach(function (option) { var item = document.createElement('option'); item.value = option.value; item.textContent = option.label; item.selected = values.indexOf(option.value) >= 0; select.appendChild(item); });
+    return select;
+  }
+
+  /**
+   * 读取控件值并按展示类型转换为 JSON 值。
+   * @param control - 页面输入控件
+   * @returns 结构化字段值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  function readCollectionControl(control) {
+    var type = control.dataset.collectionControl;
+    if (type === 'boolean') return control.checked;
+    if (type === 'number') return Number(control.value);
+    if (type === 'multi-select') return Array.from(control.selectedOptions).map(function (option) { return option.value; });
+    if (type === 'object') return JSON.parse(control.value);
+    return control.value;
+  }
+
+  /**
+   * 提交结构化收集值，仍由服务端重新抽取、校验并决定是否执行。
+   * @param form - 参数表单节点
+   * @param collection - 当前参数收集状态
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  function submitCollection(form, collection) {
+    var values = Object.assign({}, collection.collected || {});
+    try { Array.from(form.querySelectorAll('[data-collection-control]')).forEach(function (control) { if (control.value !== '' || control.dataset.collectionControl === 'boolean' || control.dataset.collectionControl === 'multi-select') values[control.name] = readCollectionControl(control); }); }
+    catch (error) { showCollectionError('参数格式不正确，请按字段提示修改。'); return; }
+    appendMsg('user', '补充参数'); recordConversation('user', '补充参数'); setBusy(true);
+    streamChat('补充参数', values).catch(function () { if (!sessionExpired) showCollectionError('参数提交未完成，结果可能未知，请检查状态后重试。'); }).then(refreshState).finally(function () { setBusy(false); });
+  }
+
+  /**
+   * 展示参数收集提交错误，不写入模型内容或原始异常。
+   * @param message - 固定的用户可见错误消息
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-23
+   */
+  function showCollectionError(message) {
+    var status = document.getElementById('copyContextStatus'); status.textContent = message;
+  }
+
+  document.getElementById('copyContextBtn').onclick = copyStructuredContext;
 
   /** 只显示最近八条事件，事件内容以纯文本呈现。
    * 页面列表上限仅影响展示，完整事件仍由会话资源上限约束。

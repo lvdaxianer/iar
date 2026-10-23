@@ -10,6 +10,10 @@ import { MAX_FACT_RECORD_ID_LENGTH, MAX_FACT_RECORD_VALUES, MAX_FACT_SEQUENCE, M
 import {
   MAX_CANDIDATE_KEY_LENGTH,
   MAX_CANDIDATE_VERSION_LENGTH,
+  MAX_COLLECTION_ATTEMPTS,
+  MAX_COLLECTION_CANDIDATES,
+  MAX_COLLECTION_FIELD_LENGTH,
+  MAX_COLLECTION_FIELDS,
   MAX_CLARIFICATION_LABEL_LENGTH,
   MAX_CLARIFICATION_OPTIONS,
   MAX_CLARIFICATION_REASON_LENGTH,
@@ -24,6 +28,11 @@ import { SCHEMA_VERSIONS } from './versions.js';
 
 /** BehaviorContext 摘要文本的统一长度边界。 */
 export const MAX_CONTEXT_SUMMARY_LENGTH = 1200;
+
+/** 收集器独立使用的递归 JSON 值 Schema，避免与槽位递归引用共享 $id。 */
+const CollectionJsonValueSchema = Type.Recursive((self) => Type.Union([
+  Type.String(), Type.Number(), Type.Boolean(), Type.Null(), Type.Array(self), Type.Record(Type.String(), self)
+]), { $id: 'https://iar.dev/schema/collection-json-value/v1' });
 
 /** 下一轮模型可观察的有限 Plugin/Action 范围。 */
 export const RoutingScopeSchema = Type.Object({
@@ -143,6 +152,37 @@ export const ClarificationStateSchema = Type.Object({
   // candidateKeys 是当前候选集合中的不透明键。
   candidateKeys: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: MAX_CANDIDATE_KEY_LENGTH }), { maxItems: MAX_CLARIFICATION_OPTIONS, uniqueItems: true }))
 }, { additionalProperties: false });
+
+/** Function/参数收集器的可恢复状态 Schema，不授予执行权限。 */
+export const CollectionStateSchema = Type.Union([
+  Type.Object({
+    kind: Type.Literal('function'),
+    pluginId: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_COLLECTION_FIELD_LENGTH })),
+    candidateFunctionIds: Type.Array(Type.String({ minLength: 1, maxLength: MAX_COLLECTION_FIELD_LENGTH }), { minItems: 1, maxItems: MAX_COLLECTION_CANDIDATES, uniqueItems: true }),
+    candidateKeys: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: MAX_CANDIDATE_KEY_LENGTH }), { maxItems: MAX_COLLECTION_CANDIDATES, uniqueItems: true })),
+    reasonCode: Type.Union([Type.Literal('function_missing'), Type.Literal('function_ambiguous')]),
+    attempt: Type.Integer({ minimum: 1, maximum: MAX_COLLECTION_ATTEMPTS })
+  }, { additionalProperties: false }),
+  Type.Object({
+    kind: Type.Literal('parameters'),
+    functionId: Type.String({ minLength: 1, maxLength: MAX_COLLECTION_FIELD_LENGTH }),
+    pluginId: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_COLLECTION_FIELD_LENGTH })),
+    schemaVersion: Type.String({ minLength: 1, maxLength: MAX_COLLECTION_FIELD_LENGTH }),
+    collected: Type.Record(Type.String({ minLength: 1, maxLength: MAX_COLLECTION_FIELD_LENGTH }), CollectionJsonValueSchema, { maxProperties: MAX_COLLECTION_FIELDS }),
+    missingFields: Type.Array(Type.String({ minLength: 1, maxLength: MAX_COLLECTION_FIELD_LENGTH }), { maxItems: MAX_COLLECTION_FIELDS, uniqueItems: true }),
+    invalidFields: Type.Array(Type.String({ minLength: 1, maxLength: MAX_COLLECTION_FIELD_LENGTH }), { maxItems: MAX_COLLECTION_FIELDS, uniqueItems: true }),
+    conflictFields: Type.Array(Type.String({ minLength: 1, maxLength: MAX_COLLECTION_FIELD_LENGTH }), { maxItems: MAX_COLLECTION_FIELDS, uniqueItems: true }),
+    attempt: Type.Integer({ minimum: 1, maximum: MAX_COLLECTION_ATTEMPTS }),
+    presentation: Type.Optional(Type.Record(Type.String({ minLength: 1, maxLength: MAX_COLLECTION_FIELD_LENGTH }), Type.Object({
+      label: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_CLARIFICATION_LABEL_LENGTH })),
+      description: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_CLARIFICATION_LABEL_LENGTH })),
+      control: Type.Optional(Type.Union([
+        Type.Literal('text'), Type.Literal('number'), Type.Literal('boolean'), Type.Literal('select'), Type.Literal('multi-select'), Type.Literal('object')
+      ])),
+      options: Type.Optional(Type.Array(Type.Object({ value: Type.String({ minLength: 1, maxLength: MAX_COLLECTION_FIELD_LENGTH }), label: Type.String({ minLength: 1, maxLength: MAX_CLARIFICATION_LABEL_LENGTH }) }, { additionalProperties: false }), { maxItems: MAX_CLARIFICATION_OPTIONS, uniqueItems: true }))
+    }, { additionalProperties: false }), { maxProperties: MAX_COLLECTION_FIELDS }))
+  }, { additionalProperties: false })
+]);
 
 /** 待解析事实引用 Schema，只保存通用关系和不透明记录 ID。 */
 export const PendingReferenceSchema = Type.Object({
@@ -271,6 +311,8 @@ export const BehaviorContextSchema = Type.Object({
   recentMessagePolicy: Type.Optional(RecentMessagePolicySchema),
   // clarification 保存可恢复的通用澄清状态。
   clarification: Type.Optional(ClarificationStateSchema),
+  // collection 保存 Function/参数收集的有限状态，不代表授权。
+  collection: Type.Optional(CollectionStateSchema),
   // pendingReference 保存通用事实关系的有限消歧状态。
   pendingReference: Type.Optional(PendingReferenceSchema),
   // confirmation 记录确认范围和状态。
