@@ -90,7 +90,12 @@ The system SHALL persist accepted messages and structured context through the co
 
 ### Requirement: Model calls receive structured conversational context
 
-The runtime SHALL provide `semantic.extract` with current user text, bounded recent messages, verified structured context, and enabled/authorized Plugin-level capability descriptions. The `function.call` stage SHALL receive the same relevant context plus only the selected Plugin's Function tools and input Schemas. Neither model call SHALL receive authority-bearing secrets or a cross-Plugin executable Function list.
+The semantic extraction call SHALL receive a bounded workflow context and transition map derived from the current validated session state in addition to its existing user text, recent messages, BehaviorContext and authorized Plugin descriptors. The workflow context SHALL be advisory input for event classification only; Runtime remains the authority for target, permission, policy, confirmation and execution.
+
+#### Scenario: Workflow context is included in semantic extraction
+
+- **WHEN** a user supplies a continuation or parameter answer
+- **THEN** semantic.extract receives the current workflow state, allowed events, pending/collection summary and authorized candidates without receiving execution secrets or unrelated capabilities
 
 #### Scenario: Plugin proposal input is bounded
 
@@ -150,7 +155,12 @@ The runtime SHALL provide `semantic.extract` with current user text, bounded rec
 #### Scenario: Compaction excludes raw messages
 
 - **WHEN** the system requests context compaction
-- **THEN** the compaction model receives structured state and relevant events but no recent-message window
+- **THEN** raw messages are not treated as verified facts or executable workflow authority
+
+#### Scenario: Response text cannot authorize execution
+
+- **WHEN** a response model produces text claiming that a Function is confirmed or executed
+- **THEN** the runtime ignores that text for workflow transitions and requires the validated event, route, policy and confirmation path
 
 ### Requirement: Applicable reply models receive the Agent overall prompt
 
