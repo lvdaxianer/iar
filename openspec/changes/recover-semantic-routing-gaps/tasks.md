@@ -12,8 +12,8 @@
 
 ## 3. Integration verification
 
-- [ ] 3.1 Add or update regression coverage for extraction omission, candidate-empty, bridge failure and successful execution, and verify each outcome has a distinct safe log reason and timing record.
-- [ ] 3.2 Run `openspec validate recover-semantic-routing-gaps --strict`, build, lint, focused tests and the full test suite; review the diff for logging privacy, backend reliability, route authority and compatibility before marking the change complete.
+- [x] 3.1 Add or update regression coverage for extraction omission, candidate-empty, bridge failure and successful execution, and verify each outcome has a distinct safe log reason and timing record.
+- [x] 3.2 Run `openspec validate recover-semantic-routing-gaps --strict`, build, lint, focused tests and the full test suite; review the diff for logging privacy, backend reliability, route authority and compatibility before marking the change complete.
 
 ## Workflow follow-up
 

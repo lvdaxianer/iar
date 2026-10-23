@@ -11,6 +11,8 @@ See `proposal.md` for the user-facing problem and scope. 当前 Sandbox 已有 `
 - 在语义抽取完成、路由门禁、候选校验、确认等待、执行和桥接失败边界输出统一 trace-correlated 的安全诊断。
 - 让诊断能明确回答：抽取字段是否存在、哪一字段缺失、是否调用了路由模型、候选是否为空、为何没有执行。
 - 对缺失字段建立确定性澄清状态；用户补充后作为新输入重新抽取和验证，任何模型文本都不能直接授权执行。
+- 将“Plugin 已命中但 Function 不唯一”和“Function 已固定但参数不完整”分别建模为 Function 收集器和参数收集器；收集器只读取注册表标识及 OpenAI-compatible Function Schema。
+- 通过 Schema 的 `title`、`description`、`enum` 和运行时 presentation metadata 生成中文字段、输入框、选择框和多选控件，用户无需记忆英文字段或枚举值。
 - 保持现有 OpenAI-compatible nested Plugin/Function 契约、JEV/Intent Model 优先级、Response Model 回复职责和敏感信息日志边界不变。
 
 **Non-Goals:**
@@ -18,6 +20,7 @@ See `proposal.md` for the user-facing problem and scope. 当前 Sandbox 已有 `
 - 不在运行时增加关键词规则来替代语义模型。
 - 不记录原始用户文本、完整 prompt、模型 response、token 或 thinking 原文。
 - 不通过自动重试或模型兜底猜测缺失的 Plugin、Function、Operation 或业务参数。
+- 不把离线测试 provider 的业务 fixture 当作生产路由规则；生产路由只接受注册表中已启用且已授权的标识。
 - 不改变已通过契约、授权、策略和确认门禁的 Function 执行语义。
 
 ## Decisions
@@ -33,6 +36,8 @@ See `proposal.md` for the user-facing problem and scope. 当前 Sandbox 已有 `
 ### 3. 运行时生成澄清，Response Model 只负责表达
 
 新增一个纯运行时的 semantic recovery 判定：根据当前行为上下文、pending clarification 和已授权的有限候选计算缺失字段。它返回稳定的 `missingFields`、`allowedValueCount` 和 `nextAction`，并把这些信息交给现有回复层表达。回复模型可以把结构化结果写成自然语言，但运行时不读取其正文来决定执行；只有下一轮语义抽取重新形成完整帧并通过全部路由/策略/确认门禁时才可执行。
+
+Function collector 只在 Function 尚未唯一确定时触发；parameter collector 只在 Function 已固定、但 required/type/enum/additionalProperties 校验未通过时触发。参数收集器会持久化 Schema 版本、已收集值和字段状态，下一轮仍绑定原 Function，不能借补参过程切换执行目标。
 
 ### 4. 不对“执行这个”做模糊自动绑定
 
