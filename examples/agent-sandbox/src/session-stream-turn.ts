@@ -3,7 +3,7 @@ import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
 import { allowsContextFollowUp, applyRouteDiagnostic, canPassThrough, deterministicFallbackReply, gateIncompleteSemanticFrame, logActionResult, logRouteResult, pendingBridgeResult, resolveNoMatchTurn, runPiAgentDelegate, semanticIncompleteClarification } from './session-turn-helpers.js';
-import { hasVerifiedFactsForFollowUp, matchesPendingOption, recoverContinuation } from './session-clarification.js';
+import { classifySessionWorkflowDecision, hasVerifiedFactsForFollowUp, matchesPendingOption, recoverContinuation, workflowDecisionReply } from './session-clarification.js';
 import type { ActionDefinition, ActionResult, BehaviorContext, CollectionState, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
@@ -151,6 +151,23 @@ export class SandboxSessionStreamTurn {
   protected async routeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }>; timing: TurnTimingTracker; bridgeMode: boolean; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
     const { userText, traceId, emit, behaviorContext, extracted, timing, bridgeMode, selectedDescriptor } = context;
     emit({ type: 'stage', stage: 'route' });
+    const workflowDecision = classifySessionWorkflowDecision(behaviorContext, extracted.frame.workflowDecision);
+    if (workflowDecision.kind === 'invalid') {
+      const route: RouteEvidence = { status: 'rejected', reasonCode: workflowDecision.reasonCode, semanticIntent: extracted.frame.intent, semanticConfidence: extracted.frame.confidence };
+      const reply = workflowDecisionReply(workflowDecision) ?? '当前工作流事件无效，本轮未执行任何动作。';
+      timing.skip('route.propose'); timing.skip('route.select'); timing.skip('action.execute'); timing.skip('response.generate');
+      this.context.pushMessages(userText, reply);
+      return { status: 'clarification', reply, route, reasonCode: workflowDecision.reasonCode };
+    }
+    if (workflowDecision.kind === 'cancelled') {
+      if (this.context.hasPending()) await this.context.cancelStalePending();
+      await this.context.resetClarification();
+      const reply = workflowDecisionReply(workflowDecision) ?? '已取消当前流程，未执行任何动作。';
+      const route: RouteEvidence = { status: 'clarification', reasonCode: workflowDecision.event, semanticIntent: extracted.frame.intent, semanticConfidence: extracted.frame.confidence };
+      timing.skip('route.propose'); timing.skip('route.select'); timing.skip('action.execute'); timing.skip('response.generate');
+      this.context.pushMessages(userText, reply);
+      return { status: 'clarification', reply, route, reasonCode: workflowDecision.event };
+    }
     const recovered = recoverContinuation(this.context.functionDescriptors, behaviorContext, extracted.frame, userText);
     const frame = recovered.frame;
     const effectiveDescriptor = recovered.descriptor ?? selectedDescriptor;

@@ -1,6 +1,7 @@
 import { MAX_CANDIDATE_VERSION_LENGTH, MAX_CLARIFICATION_LABEL_LENGTH, MAX_CLARIFICATION_OPTIONS, type BehaviorContext, type ClarificationState, type PendingInput } from '@iar/contracts';
 import type { PluginDescriptor } from '@iar/plugins';
-import type { SemanticFrame } from '@iar/runtime';
+import { classifyWorkflowDecision, projectWorkflowContext, type SemanticFrame, type WorkflowDecisionDisposition } from '@iar/runtime';
+import type { WorkflowDecision } from '@iar/contracts';
 import type { RouteEvidence } from './session-types.js';
 
 const GENERIC_CONTINUATION_PATTERN = /(继续|修改|改成|调整|调到|设为|提高|降低|执行这个|按这个|照这个|重试|再试|重新|proceed|retry|change|update|adjust|set|run)/iu;
@@ -42,11 +43,25 @@ export type ContinuationRecovery = {
   reasonCode?: 'function_unavailable' | 'plugin_unavailable';
 };
 
+/** 让普通与流式入口共享同一套模型事件校验和取消分类。 */
+export function classifySessionWorkflowDecision(context: BehaviorContext, decision: WorkflowDecision | undefined): WorkflowDecisionDisposition {
+  return classifyWorkflowDecision(projectWorkflowContext(context).currentState, decision);
+}
+
+/** 将受控的取消或非法转换映射为稳定、无业务标识的用户反馈。 */
+export function workflowDecisionReply(disposition: WorkflowDecisionDisposition): string | undefined {
+  if (disposition.kind === 'cancelled') return disposition.event === 'new_topic' ? '已结束当前流程，接下来可以开始新的话题。' : '已取消当前流程，未执行任何动作。';
+  if (disposition.kind === 'invalid') return '当前工作流事件与会话状态不匹配，本轮未执行任何动作。';
+  return undefined;
+}
+
 /** 按参数收集优先、稳定路由其次的顺序恢复连续输入目标。 */
 export function recoverContinuation(descriptors: readonly PluginDescriptor[], context: BehaviorContext, frame: SemanticFrame, userText: string): ContinuationRecovery {
+  const workflowEvent = frame.workflowDecision?.event;
+  const eventAllowsRecovery = workflowEvent === 'parameter_received' || workflowEvent === 'function_selected';
   const target = context.collection?.kind === 'parameters'
     ? { functionId: context.collection.functionId, pluginId: context.collection.pluginId }
-    : GENERIC_CONTINUATION_PATTERN.test(userText) && (context.route.functionId !== undefined || context.route.pluginId !== undefined)
+    : (eventAllowsRecovery || (workflowEvent === undefined && GENERIC_CONTINUATION_PATTERN.test(userText))) && (context.route.functionId !== undefined || context.route.pluginId !== undefined)
       ? { functionId: context.route.functionId, pluginId: context.route.pluginId }
       : undefined;
   if (target === undefined) return { frame };

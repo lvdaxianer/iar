@@ -56,7 +56,9 @@ export class ScriptedModelProvider implements ModelProvider {
    * @date 2026-10-18
    */
   private extract(text: string, behaviorContext: Record<string, unknown>, pluginDescriptors: PluginScopeDescriptor[], pendingAction: Record<string, unknown> = {}): unknown {
-    return addPluginId(this.extractFrame(text, behaviorContext, pendingAction), pluginDescriptors);
+    const semanticFrame = addPluginId(this.extractFrame(text, behaviorContext, pendingAction), pluginDescriptors);
+    const workflowDecision = scriptedWorkflowDecision(text, behaviorContext);
+    return workflowDecision.event === 'unknown' ? semanticFrame : { semanticFrame, workflowDecision };
   }
 
   /** 关键词抽取主体，外层只负责把候选 Plugin 标识绑定到受限描述。 */
@@ -268,6 +270,16 @@ function addPluginId(raw: unknown, descriptors: PluginScopeDescriptor[]): unknow
   const pluginId = OFFLINE_PLUGIN_IDS[raw.intent];
   if (!pluginId || !descriptors.some((descriptor) => descriptor.pluginId === pluginId)) return raw;
   return { ...raw, pluginId };
+}
+
+/** 离线模型只模拟通用 Workflow 事件，验证 Runtime 不依赖业务标识完成状态处理。 */
+function scriptedWorkflowDecision(text: string, context: Record<string, unknown>): { schemaVersion: 'iar.workflow-decision/v1'; userIntent: 'provide_parameter' | 'cancel_workflow' | 'new_topic'; event: 'parameter_received' | 'workflow_cancelled' | 'new_topic' } | { schemaVersion: 'iar.workflow-decision/v1'; userIntent: 'unknown'; event: 'unknown' } {
+  if (/换个话题|开始新的话题/.test(text)) return { schemaVersion: 'iar.workflow-decision/v1', userIntent: 'new_topic', event: 'new_topic' };
+  if (/不用了|取消|算了|不填了|不需要了/.test(text)) return { schemaVersion: 'iar.workflow-decision/v1', userIntent: 'cancel_workflow', event: 'workflow_cancelled' };
+  const hasCollection = isRecord(context.collection);
+  const hasRoute = isRecord(context.route) && (typeof context.route.functionId === 'string' || typeof context.route.pluginId === 'string');
+  if (hasCollection || hasRoute && /(继续|修改|改成|调整|调到|设为|提高|降低|执行这个|按这个|照这个|重试|再试|重新|proceed|retry|change|update|adjust|set|run)/iu.test(text)) return { schemaVersion: 'iar.workflow-decision/v1', userIntent: 'provide_parameter', event: 'parameter_received' };
+  return { schemaVersion: 'iar.workflow-decision/v1', userIntent: 'unknown', event: 'unknown' };
 }
 
 /** 沙箱固定 Function 到 Plugin 的映射，仅用于离线测试 provider。 */

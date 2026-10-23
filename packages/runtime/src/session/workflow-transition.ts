@@ -26,8 +26,12 @@ export type WorkflowTransitionResult =
   | { ok: true; currentState: WorkflowPhase; nextState: WorkflowPhase; event: WorkflowEvent }
   | { ok: false; reasonCode: 'workflow_transition_invalid'; currentState: WorkflowPhase; event: WorkflowEvent };
 
-/** 终态不接受新的执行事件，只能由新输入重新进入 normal。 */
-const TERMINAL_PHASES = new Set<WorkflowPhase>(['completed', 'failed']);
+/** Runtime 对模型事件的安全处置结果，不携带模型提出的目标或下一状态。 */
+export type WorkflowDecisionDisposition =
+  | { kind: 'none' }
+  | { kind: 'accepted'; event: WorkflowEvent }
+  | { kind: 'cancelled'; event: Extract<WorkflowEvent, 'workflow_cancelled' | 'new_topic'> }
+  | { kind: 'invalid'; reasonCode: 'workflow_transition_invalid'; event: WorkflowEvent };
 
 /** 有界的事件转换表；未声明的事件默认拒绝。 */
 const TRANSITIONS: Readonly<Record<WorkflowPhase, Partial<Record<WorkflowEvent, WorkflowPhase>>>> = {
@@ -57,12 +61,18 @@ const TRANSITIONS: Readonly<Record<WorkflowPhase, Partial<Record<WorkflowEvent, 
   },
   executing: {},
   completed: {
+    function_selected: 'function_selection',
+    parameter_received: 'collecting_parameters',
     new_topic: 'normal'
   },
   cancelled: {
+    function_selected: 'function_selection',
+    parameter_received: 'collecting_parameters',
     new_topic: 'normal'
   },
   failed: {
+    function_selected: 'function_selection',
+    parameter_received: 'collecting_parameters',
     new_topic: 'normal'
   }
 };
@@ -78,9 +88,6 @@ export function transitionWorkflow(currentState: WorkflowPhase, decision: Workfl
   const event = decision.event;
   const transitions = Object.hasOwn(TRANSITIONS, currentState) ? TRANSITIONS[currentState] : undefined;
   if (!transitions) return { ok: false, reasonCode: 'workflow_transition_invalid', currentState, event };
-  if (TERMINAL_PHASES.has(currentState) && event !== 'new_topic') {
-    return { ok: false, reasonCode: 'workflow_transition_invalid', currentState, event };
-  }
   const nextState = transitions[event];
   if (!nextState) return { ok: false, reasonCode: 'workflow_transition_invalid', currentState, event };
   return { ok: true, currentState, nextState, event };
@@ -98,4 +105,13 @@ export function allowedWorkflowEvents(currentState: WorkflowPhase): WorkflowEven
   const transitions = Object.hasOwn(TRANSITIONS, currentState) ? TRANSITIONS[currentState] : undefined;
   if (!transitions) return ['unknown'];
   return ['unknown', ...Object.keys(transitions) as WorkflowEvent[]];
+}
+
+/** 校验模型事件并归一化取消/换题分支，执行授权仍由会话编排层负责。 */
+export function classifyWorkflowDecision(currentState: WorkflowPhase, decision: WorkflowDecision | undefined): WorkflowDecisionDisposition {
+  if (decision === undefined) return { kind: 'none' };
+  const transition = transitionWorkflow(currentState, decision);
+  if (!transition.ok) return { kind: 'invalid', reasonCode: transition.reasonCode, event: decision.event };
+  if (decision.event === 'workflow_cancelled' || decision.event === 'new_topic') return { kind: 'cancelled', event: decision.event };
+  return { kind: 'accepted', event: decision.event };
 }
