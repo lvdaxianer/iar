@@ -93,6 +93,27 @@ test('confirmation decline and topic abandonment clear old workflow state in bot
   }
 });
 
+test('parameter collection can be abandoned by a new-topic message without executing', async () => {
+  const normal = new IarSandboxSession({ mode: 'scripted' });
+  const streamed = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    await seedCollection(normal, { functionId: 'api.gateway', pluginId: 'api-gateway-v1' });
+    await seedCollection(streamed, { functionId: 'api.gateway', pluginId: 'api-gateway-v1' });
+    const normalResult = await normal.turn('不用了，换个话题');
+    const streamedResult = await streamed.turnStreamed('不用了，换个话题', () => undefined);
+    for (const result of [normalResult, streamedResult]) {
+      assert.notEqual(result.status, 'executed');
+      assert.equal(result.route.functionId, undefined);
+      assert.equal(result.route.pluginId, undefined);
+    }
+    assert.equal((await normal.state()).context.collection, undefined);
+    assert.equal((await streamed.state()).context.collection, undefined);
+  } finally {
+    normal.dispose();
+    streamed.dispose();
+  }
+});
+
 async function runTurn(request: TurnRequest): Promise<TurnResult> {
   const events = request.events ?? [];
   return request.mode === 'normal' ? request.session.turn(request.text) : request.session.turnStreamed(request.text, (event) => events.push(event));
