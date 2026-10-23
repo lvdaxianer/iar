@@ -8,7 +8,7 @@
  * @date 2026-10-18
  */
 import { randomUUID } from 'node:crypto';
-import { DEFAULT_RECENT_MESSAGE_LIMIT, MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGE_LIMIT, SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type ClarificationState, type EventName, type JsonValue, type PendingInput, type PendingReference, type WorkflowDefinition } from '@iar/contracts';
+import { DEFAULT_RECENT_MESSAGE_LIMIT, MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGE_LIMIT, SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type ClarificationState, type CollectionState, type EventName, type JsonValue, type PendingInput, type PendingReference, type WorkflowDefinition } from '@iar/contracts';
 import { ModelGateway, ModelProfileRegistry, type IarRuntimeConfiguration, type SelfIntroductionOptions } from '@iar/runtime';
 import { PersistenceSubscriptionBridge } from '@iar/storage';
 import type { SessionMessage, SessionPersistenceProvider } from '@iar/storage';
@@ -305,9 +305,9 @@ export class SandboxSessionCore {
   }
 
   /** 保存连续澄清状态与当前 pending，供重启后继续安全恢复。 */
-  protected async updateClarificationState(clarification: ClarificationState, pending: PendingInput = this.projector.current().pending, pendingReference: PendingReference | null | undefined = undefined): Promise<void> {
-    const eventLog = this.workflowEventLog as unknown as { clarificationUpdated: (runId: string, input: PendingInput, state: ClarificationState, reference: PendingReference | null | undefined) => void };
-    eventLog.clarificationUpdated(SESSION_RUN_ID, pending, clarification, pendingReference);
+  protected async updateClarificationState(clarification: ClarificationState, pending: PendingInput = this.projector.current().pending, pendingReference: PendingReference | null | undefined = undefined, collection: CollectionState | null | undefined = undefined): Promise<void> {
+    const eventLog = this.workflowEventLog as unknown as { clarificationUpdated: (runId: string, input: PendingInput, state: ClarificationState, reference: PendingReference | null | undefined, collection: CollectionState | null | undefined) => void };
+    eventLog.clarificationUpdated(SESSION_RUN_ID, pending, clarification, pendingReference, collection);
     await this.drainWorkflowEvents();
   }
 

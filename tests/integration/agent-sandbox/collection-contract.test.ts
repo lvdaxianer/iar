@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createInitialContext, criticalFieldHash } from '@iar/runtime';
-import { validateContract, type BehaviorContext, type CollectionState } from '@iar/contracts';
+import { BehaviorContextProjector, createInitialContext, criticalFieldHash } from '@iar/runtime';
+import { SCHEMA_VERSIONS, validateContract, type BehaviorContext, type CollectionState, type EventEnvelope } from '@iar/contracts';
 import { summarizeParameterValidation } from '../../../examples/agent-sandbox/src/collection-types.js';
 
 const schema = {
@@ -68,4 +68,19 @@ test('collection contract rejects unbounded candidates and values', () => {
   });
   const result = validateContract('behaviorContext', context);
   assert.equal(result.ok, false);
+});
+
+test('collection state survives clarification event projection and can be cleared', () => {
+  const projector = new BehaviorContextProjector();
+  const collection: CollectionState = {
+    kind: 'function', candidateFunctionIds: ['function.synthetic'], candidateKeys: ['plugin.synthetic:function.synthetic'], reasonCode: 'function_missing', attempt: 1
+  };
+  const event: EventEnvelope = {
+    schemaVersion: SCHEMA_VERSIONS.event, eventId: 'collection-event', eventName: 'context.clarification.updated', occurredAt: '2026-10-23T00:00:00.000Z', runId: 'collection-run', correlationId: 'collection-correlation',
+    payload: { pending: { kind: 'selection', status: 'required', options: [{ key: 'plugin.synthetic:function.synthetic', label: 'Synthetic capability' }] }, collection }
+  };
+  projector.apply(event);
+  assert.deepEqual(projector.current().collection, collection);
+  projector.apply({ ...event, eventId: 'collection-clear', occurredAt: '2026-10-23T00:00:01.000Z', payload: { pending: { kind: 'input', status: 'none' }, collection: null } });
+  assert.equal(projector.current().collection, undefined);
 });

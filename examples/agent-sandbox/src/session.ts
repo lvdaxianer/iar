@@ -5,14 +5,15 @@ import { SandboxSessionStreamTurn } from './session-stream-turn.js';
 import { SandboxSessionTurn } from './session-turn.js';
 import { SandboxSessionReplies } from './session-replies.js';
 import { SandboxSessionRouting } from './session-routing.js';
-import { DEFAULT_UNRESOLVED_STREAK_THRESHOLD, MAX_UNRESOLVED_STREAK, type ActionDefinition, type BehaviorContext, type PendingReference, type VerifiedFactRecord } from '@iar/contracts';
+import { DEFAULT_UNRESOLVED_STREAK_THRESHOLD, MAX_COLLECTION_ATTEMPTS, MAX_UNRESOLVED_STREAK, type ActionDefinition, type BehaviorContext, type CollectionState, type PendingReference, type VerifiedFactRecord } from '@iar/contracts';
 import type { PluginDescriptor } from '@iar/plugins';
-import { confirmationScopeHash } from '@iar/runtime';
+import { confirmationScopeHash, type RouteResult, type SemanticFrame } from '@iar/runtime';
 import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, sandboxOperationKind, summarizeAction } from './session-helpers.js';
 import { createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
-import { applyRouteDiagnostic, finishConfirmedAction, gateIncompleteSemanticFrame, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection, semanticIncompleteClarification } from './session-turn-helpers.js';
-import { withConfirmReplySource, withReplySource, type CompactResult, type ConfirmResult, type ExecuteTurnOutcome, type ExtractFrameOutcome, type RouteEvidence, type StreamEvent, type TurnResult } from './session-types.js';
+import { collectFunctionCandidates } from './function-collector.js';
+import { allowsContextFollowUp, applyRouteDiagnostic, finishConfirmedAction, gateIncompleteSemanticFrame, logActionResult, logRouteResult, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection, semanticIncompleteClarification } from './session-turn-helpers.js';
+import { withConfirmReplySource, withReplySource, type CompactResult, type ConfirmResult, type ExecuteTurnOutcome, type ExtractFrameOutcome, type PendingActionContext, type RouteEvidence, type StreamEvent, type TurnResult } from './session-types.js';
 import type { TurnTimingTracker } from './turn-timing.js';
 export type { CompactResult, ConfirmResult, PendingActionSummary, ReplySource, RouteEvidence, SandboxDecisionBackend, SandboxMode, SandboxState, StreamEvent, TurnResult, TurnStage } from './session-types.js';
 /** 公开会话对话和确认入口。 */
@@ -86,12 +87,15 @@ export class IarSandboxSession extends SandboxSessionCore {
     const session = this;
     return new SandboxSessionStreamTurn({
       cancelStalePending: () => this.cancelStalePending(),
+      hasPending: () => session.pending !== null,
+      pendingAction: (): PendingActionContext | undefined => session.pending === null ? undefined : summarizeAction(session.pending.action),
       nextTraceId: () => { this.turnCount += 1; return resolveSandboxTraceId(`trace-sandbox-${String(this.turnCount)}`); },
       resolveSelection: (text, context) => session.resolveSelection(text, context),
       rejectSelection: (text, reasonCode) => session.rejectSelection(text, reasonCode),
+      collectFunctionCandidates: (context) => session.collectFunctionCandidates(context),
       markUnresolved: (reasonCode) => session.markUnresolved(reasonCode),
       resetClarification: () => session.resetClarification(),
-      extractFrame: (traceId, runId, text, behaviorContext, recentMessages, selectedDescriptor) => this.routing.extractFrame(traceId, runId, text, behaviorContext, recentMessages, selectedDescriptor),
+      extractFrame: (traceId, runId, text, behaviorContext, recentMessages, selectedDescriptor, pendingAction) => this.routing.extractFrame(traceId, runId, text, behaviorContext, recentMessages, selectedDescriptor, pendingAction),
       get recentMessages() { return session.recentMessages; },
       get functionDescriptors() { return session.pluginHost.descriptors(); },
       routeFrame: (traceId, runId, frame, behaviorContext, currentMessage, recentMessages, selectedDescriptor) => this.routing.routeFrame(traceId, runId, frame, behaviorContext, currentMessage, recentMessages, selectedDescriptor),
@@ -111,11 +115,12 @@ export class IarSandboxSession extends SandboxSessionCore {
       whenReady: () => session.whenReady(),
       nextTurnId: () => { session.turnCount += 1; return session.turnCount; },
       hasPending: () => session.pending !== null,
+      pendingAction: (): PendingActionContext | undefined => session.pending === null ? undefined : summarizeAction(session.pending.action),
       cancelStalePending: () => session.cancelStalePending(),
       currentBehaviorContext: () => session.projector.current(),
       resolveSelection: (text, context) => session.resolveSelection(text, context),
       rejectSelection: (text, reasonCode) => session.rejectSelection(text, reasonCode),
-      extractFrame: (traceId, text, context, recentMessages, selectedDescriptor) => session.routing.extractFrame(traceId, SESSION_RUN_ID, text, context, recentMessages, selectedDescriptor),
+      extractFrame: (traceId, text, context, recentMessages, selectedDescriptor, pendingAction) => session.routing.extractFrame(traceId, SESSION_RUN_ID, text, context, recentMessages, selectedDescriptor, pendingAction),
       recentMessages: () => session.recentMessages,
       markUnresolved: (reasonCode, pendingReference) => session.markUnresolved(reasonCode, pendingReference),
       pushMessage: (text, reply) => session.replies.pushMessages(text, reply),
@@ -171,7 +176,7 @@ export class IarSandboxSession extends SandboxSessionCore {
     if (!references.ok) return this.finishNormalFallback({ userText, traceId, behaviorContext, timing, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: extracted.frame.intent, semanticConfidence: extracted.frame.confidence }, ...(references.pendingReference === undefined ? {} : { pendingReference: references.pendingReference }), ...(references.candidates === undefined ? {} : { referenceCandidates: references.candidates }) });
     if (behaviorContext.pendingReference !== undefined) await this.resetClarification();
     const routeContext = this.projector.current();
-    const incomplete = gateIncompleteSemanticFrame(extracted.frame, traceId, timing, userText);
+    const incomplete = gateIncompleteSemanticFrame(extracted.frame, traceId, timing, userText, allowsContextFollowUp(extracted.frame, routeContext, userText) || this.piAgent !== undefined);
     if (incomplete) {
       const resolved = await resolveNoMatchTurn({ piAgent: this.piAgent, pushMessages: this.replies.pushMessages.bind(this.replies), passThroughOnNoMatch, userText, evidence: incomplete, behaviorContext: routeContext, selectedDescriptor, functionDescriptors: this.pluginHost.descriptors() });
       return resolved ?? this.finishNormalFallback({ userText, traceId, behaviorContext: routeContext, timing, evidence: incomplete, resolvedReferences: references.references });
@@ -188,16 +193,31 @@ export class IarSandboxSession extends SandboxSessionCore {
       if (usesNestedRoute) timing.end('route.propose', routeCompleted ? 'completed' : 'failed');
     }
     timing.end('route.select');
+    logRouteResult(traceId, route);
     const evidence = buildEvidence(route, extracted.frame);
     // 抽取降级须保留在返回的路由证据中。
     if (extracted.semanticFallback) evidence.semanticFallback = true;
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
+      const recovered = await this.collectFunctionCandidates({ userText, route, frame: extracted.frame, evidence });
+      if (recovered.result) return recovered.result;
+      if (recovered.route) {
+        route = recovered.route;
+        evidence.status = route.status;
+        evidence.reasonCode = route.reasonCode;
+        if (route.functionId === undefined) delete evidence.functionId; else evidence.functionId = route.functionId;
+        if (route.pluginId === undefined) delete evidence.pluginId; else evidence.pluginId = route.pluginId;
+        logRouteResult(traceId, route);
+      }
+      else {
       const resolved = await resolveNoMatchTurn({ piAgent: this.piAgent, pushMessages: this.replies.pushMessages.bind(this.replies), passThroughOnNoMatch, userText, evidence, behaviorContext, selectedDescriptor, functionDescriptors: this.pluginHost.descriptors() });
       return resolved ?? this.finishNormalFallback({ userText, traceId, behaviorContext: routeContext, timing, evidence, resolvedReferences: references.references });
+      }
     }
     timing.start('action.execute');
+    if (this.pending !== null) await this.cancelStalePending();
     const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame: extracted.frame, route, behaviorContext: routeContext });
     timing.end('action.execute');
+    logActionResult(traceId, outcome);
     applyRouteDiagnostic(evidence, traceId, outcome);
     return this.finishNormalOutcome({ userText, traceId, timing, evidence, outcome });
   }
@@ -211,7 +231,7 @@ export class IarSandboxSession extends SandboxSessionCore {
    */
   protected async finishNormalFallback(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; timing: TurnTimingTracker; evidence: RouteEvidence; resolvedReferences?: import('./session-types.js').ResolvedFactReference[]; pendingReference?: PendingReference; referenceCandidates?: VerifiedFactRecord[] }): Promise<TurnResult> {
     const { userText, traceId, behaviorContext, timing, evidence, resolvedReferences, pendingReference, referenceCandidates } = context;
-    if (!hasVerifiedFactsForFollowUp(behaviorContext, evidence) && !matchesPendingOption(behaviorContext, userText)) await this.markUnresolved(evidence.reasonCode, pendingReference);
+    if (!hasVerifiedFactsForFollowUp(behaviorContext, evidence, userText) && !matchesPendingOption(behaviorContext, userText)) await this.markUnresolved(evidence.reasonCode, pendingReference);
     const currentBehaviorContext = this.projector.current();
     const deterministicReply = semanticIncompleteClarification(evidence);
     if (deterministicReply !== undefined) {
@@ -279,6 +299,28 @@ export class IarSandboxSession extends SandboxSessionCore {
     return { status: 'executed', reply, route: evidence, actionResult: outcome.actionResult };
   }
   /** 累加未解决状态，达到阈值时将当前授权候选转换为动态选择。 */
+  public async collectFunctionCandidates(context: { userText: string; route: RouteResult; frame: SemanticFrame; evidence: RouteEvidence }): Promise<{ route?: RouteResult; result?: TurnResult }> {
+    const current = this.projector.current();
+    const previousAttempt = current.collection?.kind === 'function' ? current.collection.attempt : 0;
+    const pluginId = context.route.pluginId ?? context.frame.pluginId;
+    const functionId = context.route.functionId ?? (context.frame.intent === 'unknown' ? undefined : context.frame.intent);
+    if (pluginId === undefined && functionId === undefined) return {};
+    const result = collectFunctionCandidates(this.pluginHost.descriptors(), {
+      ...(pluginId === undefined ? {} : { pluginId }),
+      ...(functionId === undefined ? {} : { functionId }),
+      attempt: Math.min(MAX_COLLECTION_ATTEMPTS, previousAttempt + 1)
+    });
+    if (result.status === 'empty') return {};
+    if (result.status === 'selected') return { route: { ...context.route, status: 'matched', reasonCode: 'route_recovered', functionId: result.descriptor.functionId, pluginId: result.descriptor.pluginId } };
+    const candidateKeys = result.state.candidateKeys ?? [];
+    const clarification = { mode: 'selection' as const, unresolvedStreak: current.clarification?.unresolvedStreak ?? 0, reasonCode: 'function_collection_required', candidateVersion: candidateKeys.join('|'), candidateKeys };
+    await this.updateClarificationState(clarification, { kind: 'selection', status: 'required', options: result.options }, null, result.state);
+    const reply = ['请从当前可用能力中选择要使用的 Function：', ...result.options.map((option, index) => `${index + 1}. ${option.label}（${option.key}）`)].join('\n');
+    this.replies.pushMessages(context.userText, reply);
+    return { result: { status: 'clarification', reply, route: { ...context.evidence, status: 'clarification', reasonCode: 'function_collection_required' }, reasonCode: 'function_collection_required' } };
+  }
+
+  /** 累加未解决状态，达到阈值时将当前授权候选转换为动态选择。 */
   public async markUnresolved(reasonCode: string, pendingReference?: PendingReference): Promise<void> {
     const current = this.projector.current();
     const streak = Math.min(MAX_UNRESOLVED_STREAK, (current.clarification?.unresolvedStreak ?? 0) + 1);
@@ -293,7 +335,7 @@ export class IarSandboxSession extends SandboxSessionCore {
 
   /** 成功进入确认或执行阶段后清除旧的 unresolved 状态。 */
   public async resetClarification(): Promise<void> {
-    await this.updateClarificationState({ mode: 'none', unresolvedStreak: 0 }, { kind: 'input', status: 'none' }, null);
+    await this.updateClarificationState({ mode: 'none', unresolvedStreak: 0 }, { kind: 'input', status: 'none' }, null, null);
   }
 
   /** 解析待选择的候选键，只接受当前启用且授权的候选快照。 */
