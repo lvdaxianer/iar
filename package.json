@@ -18,6 +18,7 @@
     "pack:all": "npm run build && npm pack --workspaces",
     "pack:verify": "npm run build && npm run verify:packages",
     "test": "npm run build && node scripts/run-tests.mjs",
+    "eval:workflow-model": "npm run build && node scripts/run-workflow-model-evaluation.mjs",
     "demo:fake-plugin": "npm run build && node scripts/run-fake-plugin-demo.mjs",
     "demo:sandbox": "npm run build && node scripts/run-agent-sandbox.mjs",
     "demo:pi-host": "npm run build && node scripts/run-pi-host-demo.mjs"

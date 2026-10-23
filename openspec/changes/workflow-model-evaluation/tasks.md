@@ -13,7 +13,7 @@
 
 ## 3. Opt-in real-model experiment
 
-- [ ] 3.1 Add an explicit real-model runner that reuses the same scenario corpus and production provider configuration, skips with a clear message when credentials are absent, and records only bounded accuracy/transition metrics.
+- [x] 3.1 Add an explicit real-model runner that reuses the same scenario corpus and production provider configuration, skips with a clear message when credentials are absent, and records only bounded accuracy/transition metrics.
 - [ ] 3.2 Run focused tests, lint, build, and the full test suite; verify the experiment remains test-only and production execution behavior is unchanged.
 
 ## Workflow follow-up
