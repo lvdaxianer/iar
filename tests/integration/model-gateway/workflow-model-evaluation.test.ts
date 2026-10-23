@@ -5,6 +5,7 @@ import type { SemanticFrame } from '@iar/runtime';
 import { buildSemanticUserPrompt, SEMANTIC_SYSTEM_PROMPT } from '../../../examples/agent-sandbox/src/models/model-input-transport.js';
 import { DISABLED_PLUGIN, WORKFLOW_EVALUATION_SCENARIOS, type WorkflowEvaluationScenario } from './workflow-evaluation-fixtures.js';
 import { evaluateWorkflowFrame, type WorkflowEvaluationFunction } from './workflow-evaluation-oracle.js';
+import { buildWorkflowEvaluationReport } from './workflow-evaluation-report.js';
 
 function assertScenarioShape(scenario: WorkflowEvaluationScenario): void {
   assert.match(scenario.id, /^[a-z0-9-]+$/);
@@ -148,6 +149,25 @@ test('workflow oracle marks only fully gated low-risk input as executable', () =
   assert.equal(outcome.gates.idempotencyValidated, true);
   assert.equal(outcome.gates.confirmationSatisfied, true);
   assert.equal(outcome.gates.handlerReachable, true);
+});
+
+test('workflow evaluation report is bounded to stable transition evidence', () => {
+  const scenario = findScenario('stable-route-unknown-frame');
+  const outcome = evaluateWorkflowFrame({
+    frame: semanticFrame({ intent: 'unknown', action: 'update', slots: { rate: 200 } }),
+    behaviorContext: scenario.behaviorContext,
+    authorizedFunctions: [rateFunction()]
+  });
+  const report = buildWorkflowEvaluationReport([{
+    scenarioId: scenario.id,
+    expected: scenario.expected,
+    actual: outcome
+  }]);
+  const serialized = JSON.stringify(report);
+  assert.deepEqual(report.summary, { total: 1, passed: 1, failed: 0 });
+  assert.equal(report.scenarios[0]?.scenarioId, 'stable-route-unknown-frame');
+  assert.equal(report.scenarios[0]?.actual.nextStage, 'clarification');
+  assert.doesNotMatch(serialized, /改成每秒 200 次|\"rate\": 200|prompt|response|collected|api[_-]?key|secret/i);
 });
 
 function semanticFrame(input: { intent: string; action: SemanticFrame['action']; pluginId?: string; slots?: Record<string, JsonValue> }): SemanticFrame {
