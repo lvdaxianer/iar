@@ -8,7 +8,7 @@
 ## 2. Prompt and semantic adapter
 
 - [x] 2.1 Add RED tests that capture the real semantic prompt with BehaviorContext, collection, confirmation and authorized descriptors, and assert the workflow context/map is present without secrets or unverified capabilities.
-- [ ] 2.2 Extend the semantic adapter to parse the workflow decision envelope while preserving legacy semantic-frame compatibility and treating model IDs/next states as non-authoritative.
+- [x] 2.2 Extend the semantic adapter to parse the workflow decision envelope while preserving legacy semantic-frame compatibility and treating model IDs/next states as non-authoritative.
 
 ## 3. Unified session integration
 
