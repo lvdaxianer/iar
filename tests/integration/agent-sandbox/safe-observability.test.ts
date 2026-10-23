@@ -6,7 +6,7 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { logModelSuccess, registerDebugSignal, setSafeLogWriterForTesting, writeSafeLog } from '../../../examples/agent-sandbox/src/safe-log.js';
+import { formatBilingualLogLine, logBridgeFailure, logModelAudit, logModelSuccess, logParameterBoundary, registerDebugSignal, setSafeLogWriterForTesting, writeSafeLog } from '../../../examples/agent-sandbox/src/safe-log.js';
 import { createSemanticRequest, createTestProvider, flushObservabilityLogs, withObservabilityFixture, type ObservabilityFixture } from './observability-fixture.js';
 
 /**
@@ -247,6 +247,43 @@ async function checkWhitelist(fixture: ObservabilityFixture): Promise<void> {
 test('日志序列化器拒绝非白名单字段和自由文本值', () => withObservabilityFixture(checkWhitelist));
 
 /**
+ * 验证桥接异常使用稳定分类，不能只留下没有上下文的通用运行事件。
+ * @param fixture - 捕获桥接诊断日志的夹具
+ * @returns 无返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+async function checkBridgeFailureClassification(fixture: ObservabilityFixture): Promise<void> {
+  logBridgeFailure('bridge_timeout');
+  await flushObservabilityLogs();
+  const record = fixture.records().find((item) => item.event === 'iar.bridge.error');
+  assert.ok(record, '桥接异常应输出稳定诊断事件');
+  assert.equal(record.reasonCode, 'bridge_timeout');
+  assert.equal(record.outcome, 'bridge_error');
+  assert.equal(typeof record.traceId, 'string');
+}
+
+test('桥接异常日志区分稳定原因并保留 trace', () => withObservabilityFixture(checkBridgeFailureClassification));
+
+/**
+ * 验证 Pi 委托故障不会被安全白名单清空，终端能够看到双语事件标签和稳定结果。
+ * @param fixture - 捕获安全日志的夹具
+ * @returns 无返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+async function checkPiAgentFailureClassification(fixture: ObservabilityFixture): Promise<void> {
+  writeSafeLog({ level: 'warn', event: 'sandbox.pi_agent', outcome: 'agent_unavailable' });
+  await flushObservabilityLogs();
+  const record = fixture.records().find((item) => item.event === 'sandbox.pi_agent');
+  assert.ok(record, 'Pi 委托故障应保留稳定事件');
+  assert.equal(record.outcome, 'agent_unavailable');
+  assert.match(formatBilingualLogLine(record), /Pi 委托 \/ Pi Agent/);
+}
+
+test('Pi 委托故障日志保留双语事件与稳定结果', () => withObservabilityFixture(checkPiAgentFailureClassification));
+
+/**
  * 验证重复释放引用不会破坏后续服务的信号注册。
  * 第一个释放函数调用两次，模拟重复关闭。
  * 再次注册后发送信号并记录调试日志。
@@ -272,3 +309,32 @@ async function checkRepeatedRelease(fixture: ObservabilityFixture): Promise<void
 }
 
 test('重复释放调试开关不会影响后续服务注册', () => withObservabilityFixture(checkRepeatedRelease));
+
+test('模型尝试和参数边界日志包含双语诊断字段且不记录参数值', () => withObservabilityFixture(async (fixture) => {
+  logModelAudit({
+    traceId: 'trace-model-audit', runId: 'run-model-audit', role: 'semantic.extract',
+    profileId: 'semantic-primary', profileVersion: '1.0.0', modelId: 'deepseek-v4-pro', modelVersion: 'v1',
+    attempt: 2, outcome: 'timeout', fallbackUsed: false, metadata: {}
+  });
+  logParameterBoundary('trace-parameter-boundary', {
+    stage: 'action.execute', status: 'failed', reasonCode: 'function_arguments_invalid',
+    pluginId: 'plugin.test', functionId: 'function.test', fieldName: 'query', fieldState: 'missing',
+    expectedFieldCount: 2, actualFieldCount: 1, missingFieldCount: 1, invalidFieldCount: 0
+  });
+  await flushObservabilityLogs();
+  const records = fixture.records();
+  const model = records.find((record) => record.event === 'iar.model.audit');
+  const parameter = records.find((record) => record.event === 'iar.parameter.boundary');
+  assert.equal(model?.modelRole, 'semantic.extract');
+  assert.equal(model?.profileId, 'semantic-primary');
+  assert.equal(model?.modelId, 'deepseek-v4-pro');
+  assert.equal(model?.attempt, 2);
+  assert.equal(model?.outcome, 'timeout');
+  assert.equal(parameter?.fieldName, 'query');
+  assert.equal(parameter?.fieldState, 'missing');
+  assert.equal(parameter?.expectedFieldCount, 2);
+  assert.equal(parameter?.actualFieldCount, 1);
+  assert.doesNotMatch(fixture.lines.join('\n'), /private-query-value|raw-model-output/);
+  assert.match(formatBilingualLogLine(model ?? {}), /模型调用审计 \/ Model attempt/);
+  assert.match(formatBilingualLogLine(parameter ?? {}), /参数边界 \/ Parameter boundary/);
+}));

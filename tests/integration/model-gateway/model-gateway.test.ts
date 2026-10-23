@@ -198,6 +198,25 @@ test('routes all model roles through the gateway and records redacted audit even
   assert.equal(JSON.stringify(response.events).includes('api-key'), false);
 });
 
+test('publishes every model attempt to the diagnostic observer, including retry and fallback', async () => {
+  const attempts: Array<{ profileId: string; attempt: number; outcome: string; fallbackUsed: boolean }> = [];
+  const provider: ModelProvider = { complete: async (request) => {
+    if (request.profile.profileId === 'semantic-extractor-primary') throw new ModelProviderError('provider_unavailable');
+    return semanticFrame();
+  } };
+  const gateway = new ModelGateway({
+    registry: registry(), providers: { mock: provider },
+    onAudit: (entry) => attempts.push({ profileId: entry.profileId, attempt: entry.attempt, outcome: entry.outcome, fallbackUsed: entry.fallbackUsed })
+  });
+  const result = await new SemanticExtractorAdapter(gateway).extract({ traceId: 'trace-attempt-audit', runId: 'run-attempt-audit', input: { text: 'private-prompt' } });
+  assert.equal(result.ok, true);
+  assert.deepEqual(attempts, [
+    { profileId: 'semantic-extractor-primary', attempt: 1, outcome: 'provider_failed', fallbackUsed: false },
+    { profileId: 'semantic-extractor-primary', attempt: 2, outcome: 'provider_failed', fallbackUsed: false },
+    { profileId: 'semantic-extractor-fallback', attempt: 1, outcome: 'fallback', fallbackUsed: true }
+  ]);
+});
+
 test('semantic action is normalized to unknown when omitted and rejects dynamic action names', async () => {
   let dynamic = false;
   const provider: ModelProvider = { complete: async (request) => {

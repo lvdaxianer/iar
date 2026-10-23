@@ -10,6 +10,7 @@ import type { BridgeConfirmResponse, BridgeInputResponse, BridgeInputStreamEvent
 import { PI_BRIDGE_VERSION } from '@iar/pi-bridge';
 import { readSessionId, type RunOperation } from './http-reservation.js';
 import { SandboxSessionManager, SessionError } from './session-manager.js';
+import { logBridgeFailure } from './safe-log.js';
 import type { IarSandboxSession } from './session.js';
 import type { ConfirmResult, RouteEvidence, StreamEvent, TurnResult } from './session-types.js';
 
@@ -118,6 +119,7 @@ function projectBridgeStreamEvent(event: StreamEvent, sessionId: string): Bridge
 
 /** 将 Bridge 错误投影成稳定 SSE 错误事件，不传播异常正文。 */
 function bridgeStreamError(error: unknown): BridgeInputStreamEvent {
+  logBridgeFailure(classifyBridgeFailure(error));
   if (error instanceof BridgeRequestError) return { type: 'error', code: error.code, message: error.message, retryable: false };
   if (error instanceof SessionError) return { type: 'error', code: error.reasonCode, message: 'IAR 会话请求未完成。', retryable: error.status >= 500 || error.status === 429 };
   return { type: 'error', code: 'bridge_internal_error', message: 'IAR 桥接请求未完成。', retryable: true };
@@ -199,10 +201,29 @@ function confirmationOperation(request: FastifyRequest): { kind: 'confirm' | 'ca
 async function handleBridge(reply: FastifyReply, action: () => Promise<unknown>): Promise<unknown> {
   try { return await action(); }
   catch (error) {
+    logBridgeFailure(classifyBridgeFailure(error));
     if (error instanceof BridgeRequestError) return reply.code(error.status).send({ version: PI_BRIDGE_VERSION, code: error.code, message: error.message, retryable: false });
     if (error instanceof SessionError) return reply.code(error.status).send({ version: PI_BRIDGE_VERSION, code: error.reasonCode, message: 'IAR 会话请求未完成。', retryable: error.status >= 500 || error.status === 429 });
     return reply.code(500).send({ version: PI_BRIDGE_VERSION, code: 'bridge_internal_error', message: 'IAR 桥接请求未完成。', retryable: true });
   }
+}
+
+/**
+ * 将桥接异常归并为有限、可检索且不暴露异常正文的原因码。
+ *
+ * @param error - 桥接层捕获的未知异常
+ * @returns 稳定的桥接错误原因码
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+function classifyBridgeFailure(error: unknown): 'bridge_timeout' | 'bridge_unavailable' | 'bridge_request_invalid' | 'bridge_session_failed' | 'bridge_internal_error' {
+  if (error instanceof BridgeRequestError) return 'bridge_request_invalid';
+  if (error instanceof SessionError) {
+    if (error.status === 408 || error.status === 504 || error.reasonCode === 'request_timeout') return 'bridge_timeout';
+    if (error.status >= 500) return 'bridge_unavailable';
+    return 'bridge_session_failed';
+  }
+  return 'bridge_internal_error';
 }
 
 /** Bridge 请求校验错误。 */

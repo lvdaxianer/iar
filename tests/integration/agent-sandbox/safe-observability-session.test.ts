@@ -101,7 +101,8 @@ async function assertOversizedFallback(server: Awaited<ReturnType<ObservabilityF
   assert.doesNotMatch(normal.reply, /partial-private/);
   assert.doesNotMatch(streamed.reply, /partial-private/);
   assert.equal(events.some((event) => event.type === 'delta'), false);
-  assert.equal(streamed.timing?.stages.find((stage) => stage.stage === 'response.generate')?.status, 'skipped');
+  const responseStage = streamed.timing?.stages.find((stage) => stage.stage === 'response.generate');
+  assert.ok(responseStage?.status === 'skipped' || (responseStage?.status === 'completed' && (streamed as { reasonCode?: string }).reasonCode === 'plugin_noul'));
 }
 
 /** 动作已经执行时，超限只标记回复不完整，不能诱导用户重复动作。

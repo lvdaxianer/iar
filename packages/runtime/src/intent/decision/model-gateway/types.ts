@@ -126,6 +126,8 @@ export type ModelGatewayOptions = {
   registry: ModelProfileRegistry;
   /** provider 名称到实现的显式绑定。 */
   providers: Readonly<Record<string, ModelProvider>>;
+  /** 每次 provider attempt 完成后的安全观测回调；回调不得改变调用结果。 */
+  onAudit?: (audit: ModelAuditEntry, event: ModelGatewayEvent) => void;
 };
 
 /** 成功的模型调用结果。 */
