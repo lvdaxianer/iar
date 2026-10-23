@@ -108,3 +108,34 @@ test('重置后流式路由和确认共享新工作流与新事件存储', async
     assert.equal(events.at(-1)?.type, 'done');
   } finally { session.dispose(); }
 });
+
+test('普通与流式入口使用相同的连续路由恢复和确认边界', async () => {
+  const normalSession = new IarSandboxSession({ mode: 'scripted' });
+  const streamedSession = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    const normalPending = await normalSession.turn('把订单接口的限流值调整到每秒50次');
+    assert.equal(normalPending.status, 'awaiting_confirmation');
+    if (normalPending.status !== 'awaiting_confirmation') return;
+    assert.equal((await normalSession.confirm(true)).status, 'executed');
+    const normal = await normalSession.turn('改成每秒200次吧');
+
+    const streamedPending = await streamedSession.turn('把订单接口的限流值调整到每秒50次');
+    assert.equal(streamedPending.status, 'awaiting_confirmation');
+    if (streamedPending.status !== 'awaiting_confirmation') return;
+    assert.equal((await streamedSession.confirm(true)).status, 'executed');
+    const events: StreamEvent[] = [];
+    const streamed = await streamedSession.turnStreamed('改成每秒200次吧', (event) => events.push(event));
+
+    for (const result of [normal, streamed]) {
+      assert.notEqual(result.status, 'pass_through');
+      assert.equal(result.replySource, 'response_model');
+      assert.equal(result.route.functionId, 'api.gateway');
+      assert.equal(result.route.pluginId, 'api-gateway-v1');
+    }
+    assert.equal(streamed.status, normal.status);
+    assert.equal(events.at(-1)?.type, 'done');
+  } finally {
+    normalSession.dispose();
+    streamedSession.dispose();
+  }
+});

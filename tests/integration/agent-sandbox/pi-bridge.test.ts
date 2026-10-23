@@ -4,6 +4,9 @@ import { createServer } from 'node:net';
 import test from 'node:test';
 import { PI_BRIDGE_VERSION } from '@iar/pi-bridge';
 import { SELF_INTRODUCTION_FUNCTION_ID } from '@iar/plugins';
+import type { CollectionState } from '@iar/contracts';
+import type { PiAgentDelegate } from '../../../examples/agent-sandbox/src/models/pi-agent-delegate.js';
+import { IarSandboxSession } from '../../../examples/agent-sandbox/src/session.js';
 import { startSandboxServer } from '../../../examples/agent-sandbox/src/server.js';
 
 test('IAR bridge maps Pi sessions and passes through non-business input', async () => {
@@ -58,6 +61,55 @@ test('IAR bridge handles business input and protects confirmation isolation', as
     const duplicate = await server.app.inject({ method: 'POST', url: `/api/bridge/v1/sessions/${first}/confirm`, payload: { actionId: pending.pending.actionId, accepted: false } });
     assert.equal(duplicate.statusCode, 409);
   } finally { await server.close(); }
+});
+
+test('IAR bridge restores a verified route for a generic continuation', async () => {
+  const server = await startBridgeServer();
+  try {
+    const sessionId = await openBridgeSession(server, 'pi-session-continuation');
+    const pendingResponse = await server.app.inject({ method: 'POST', url: `/api/bridge/v1/sessions/${sessionId}/input`, payload: { text: '把订单接口的限流值调整到每秒50次' } });
+    const pending = pendingResponse.json() as { disposition: string; pending: { actionId: string } };
+    assert.equal(pending.disposition, 'awaiting_confirmation');
+    const confirmed = await server.app.inject({ method: 'POST', url: `/api/bridge/v1/sessions/${sessionId}/confirm`, payload: { actionId: pending.pending.actionId, accepted: true } });
+    assert.equal(confirmed.statusCode, 200);
+    const continuation = await server.app.inject({ method: 'POST', url: `/api/bridge/v1/sessions/${sessionId}/input`, payload: { text: '改成每秒200次吧' } });
+    const body = continuation.json() as { disposition: string; replySource: string; route?: { functionId?: string; pluginId?: string } };
+    assert.notEqual(body.disposition, 'pass_through');
+    assert.equal(body.replySource, 'response_model');
+    assert.equal(body.route?.functionId, 'api.gateway');
+    assert.equal(body.route?.pluginId, 'api-gateway-v1');
+  } finally { await server.close(); }
+});
+
+test('stale or disabled continuation targets cannot execute or reach Pi', async () => {
+  for (const target of [
+    { functionId: 'api.gateway', pluginId: 'api-gateway-v1', disabledPluginIds: ['api-gateway-v1'] },
+    { functionId: 'missing.function', pluginId: 'missing-plugin', disabledPluginIds: [] }
+  ]) {
+    let piRuns = 0;
+    const delegate: PiAgentDelegate = {
+      run: async () => { piRuns += 1; return '不应调用'; },
+      recordHandledTurn: () => undefined,
+      reset: () => undefined
+    };
+    const session = new IarSandboxSession({ mode: 'scripted', disabledPluginIds: target.disabledPluginIds, piAgent: delegate });
+    try {
+      const collection: Extract<CollectionState, { kind: 'parameters' }> = {
+        kind: 'parameters', functionId: target.functionId, pluginId: target.pluginId, schemaVersion: 'iar.function/v1',
+        collected: { operation: 'limit' }, missingFields: ['params'], invalidFields: [], conflictFields: [], attempt: 1,
+        presentation: { params: { label: '参数', control: 'object' } }
+      };
+      await session.updateParameterCollection(collection);
+      const result = await session.turn('改成每秒200次吧');
+      assert.equal(result.status, 'clarification');
+      assert.equal(result.reasonCode, 'plugin_unavailable');
+      assert.equal(result.route.functionId, target.functionId);
+      assert.equal(result.route.pluginId, target.pluginId);
+      assert.equal(piRuns, 0);
+    } finally {
+      session.dispose();
+    }
+  }
 });
 
 test('IAR bridge rejects malformed input before session mutation', async () => {

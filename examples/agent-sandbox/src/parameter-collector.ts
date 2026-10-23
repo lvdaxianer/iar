@@ -23,7 +23,7 @@ export type ParameterCollectionResult =
 
 /**
  * 按 Function 输入 Schema 合并参数并决定是否继续收集。
- * 冲突字段保留先前可信值，未知或非法字段不会进入可执行参数。
+ * 冲突字段保留当前轮值并阻断执行，未知或非法字段不会进入可执行参数。
  *
  * @param request - Function 标识、Schema、当前值和可恢复收集状态
  * @returns 完整输入或字段级收集状态
@@ -78,12 +78,22 @@ function sameCollection(previous: ParameterCollectionRequest['previous'], reques
 function mergeValues(previous: Record<string, JsonValue> | undefined, incoming: Record<string, JsonValue>, previouslyConflicted: readonly string[] = []): { value: Record<string, JsonValue>; conflicts: string[] } {
   const value = { ...(previous ?? {}) };
   const conflicts: string[] = [];
-  for (const [field, next] of Object.entries(incoming)) {
-    if (previouslyConflicted.includes(field)) value[field] = next;
-    else if (Object.hasOwn(value, field) && JSON.stringify(value[field]) !== JSON.stringify(next)) conflicts.push(field);
-    else value[field] = next;
-  }
+  mergeNamedValues(value, incoming, previouslyConflicted, conflicts);
   return { value, conflicts };
+}
+
+/** 递归按字段名合并对象，当前轮值始终覆盖旧值。 */
+function mergeNamedValues(target: Record<string, JsonValue>, incoming: Record<string, JsonValue>, previouslyConflicted: readonly string[], conflicts: string[], prefix = ''): void {
+  for (const [field, next] of Object.entries(incoming)) {
+    const path = prefix.length > 0 ? `${prefix}.${field}` : field;
+    const current = target[field];
+    if (isRecord(current) && isRecord(next)) {
+      mergeNamedValues(current, next, previouslyConflicted, conflicts, path);
+      continue;
+    }
+    if (!previouslyConflicted.includes(path) && Object.hasOwn(target, field) && JSON.stringify(current) !== JSON.stringify(next)) conflicts.push(path);
+    target[field] = next;
+  }
 }
 
 /** 只保留 Schema 已声明且未被字段级校验标记的值。 */
