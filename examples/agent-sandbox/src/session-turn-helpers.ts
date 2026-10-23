@@ -26,9 +26,9 @@ import type { TurnTimingTracker } from './turn-timing.js';
  * @author lvdaxianer@yeah.net
  * @date 2026-10-23
  */
-export function gateIncompleteSemanticFrame(frame: SemanticFrame, traceId: string, timing: TurnTimingTracker, userText: string, allowUnmatchedHandling = false): RouteEvidence | undefined {
+export function gateIncompleteSemanticFrame(frame: SemanticFrame, traceId: string, timing: TurnTimingTracker, _userText: string, allowUnmatchedHandling = false): RouteEvidence | undefined {
   const missingField = frame.intent === 'unknown' ? 'intent' : frame.action === 'unknown' ? 'action' : undefined;
-  if (missingField === undefined || !isLikelyBusinessRequest(userText) || (allowUnmatchedHandling && missingField === 'intent')) return undefined;
+  if (missingField === undefined || (allowUnmatchedHandling && missingField === 'intent')) return undefined;
   const evidence: RouteEvidence = { status: 'semantic_incomplete', reasonCode: 'semantic_incomplete', semanticIntent: frame.intent, semanticConfidence: frame.confidence };
   evidence.missingField = missingField;
   for (const stage of ['route.propose', 'route.select', 'action.execute'] as const) {
@@ -36,17 +36,6 @@ export function gateIncompleteSemanticFrame(frame: SemanticFrame, traceId: strin
     logRouteDecision(traceId, { stage, status: 'skipped', reasonCode: 'semantic_incomplete', execution: 'blocked' });
   }
   return evidence;
-}
-
-/**
- * 只作为安全门禁判断输入是否声称要处理业务，不负责选择 Function 或 Plugin。
- * @param userText - 当前用户输入
- * @returns 是否应阻止不完整帧进入业务路由
- * @author lvdaxianer@yeah.net
- * @date 2026-10-23
- */
-function isLikelyBusinessRequest(userText: string): boolean {
-  return /帮我|请|我要|执行|创建|提交|调整|修改|查询|查看|列出|导出|删除|重启|停止|转人工|工单|限流|告警|报表|权限/u.test(userText);
 }
 
 /**
@@ -59,7 +48,7 @@ function isLikelyBusinessRequest(userText: string): boolean {
 export function semanticIncompleteClarification(evidence: RouteEvidence): string | undefined {
   if (evidence.reasonCode !== 'semantic_incomplete') return undefined;
   if (evidence.missingField === 'action') return `已识别目标 Function「${evidence.semanticIntent}」，但还缺少操作类型。请说明是查询、创建、更新、删除还是执行；当前不会执行任何动作。`;
-  if (evidence.missingField === 'intent') return '我识别到这是业务请求，但还不能确定目标 Function。请补充要处理的对象或能力，并说明要查询、创建、更新、删除还是执行；当前不会执行任何动作。';
+  if (evidence.missingField === 'intent') return '我暂时无法确定你的需求。请补充想查询的对象、希望了解的结果，或明确说明是否要执行某个新操作；如果是在追问当前会话的结果，也可以说明想查看哪项信息。';
   return '当前请求缺少路由所需信息，请补充目标和操作类型；当前不会执行任何动作。';
 }
 
@@ -133,6 +122,7 @@ export function canPassThrough(context: BehaviorContext, evidence: RouteEvidence
   return selectedDescriptor === undefined
     && evidence.semanticIntent === 'unknown'
     && context.pending.status !== 'required'
+    && context.collection === undefined
     && !hasVerifiedFactsForFollowUp(context, evidence, userText);
 }
 
