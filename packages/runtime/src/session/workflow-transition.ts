@@ -85,3 +85,17 @@ export function transitionWorkflow(currentState: WorkflowPhase, decision: Workfl
   if (!nextState) return { ok: false, reasonCode: 'workflow_transition_invalid', currentState, event };
   return { ok: true, currentState, nextState, event };
 }
+
+/**
+ * 返回当前状态可观察的有限事件集合。
+ *
+ * `unknown` 是允许的分类结果，但不对应状态转换，避免模型被迫猜测。
+ *
+ * @param currentState - Runtime 派生的当前状态
+ * @returns 有序且去重的允许事件
+ */
+export function allowedWorkflowEvents(currentState: WorkflowPhase): WorkflowEvent[] {
+  const transitions = Object.hasOwn(TRANSITIONS, currentState) ? TRANSITIONS[currentState] : undefined;
+  if (!transitions) return ['unknown'];
+  return ['unknown', ...Object.keys(transitions) as WorkflowEvent[]];
+}

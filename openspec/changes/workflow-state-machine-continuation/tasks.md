@@ -3,7 +3,7 @@
 ## 1. Workflow contract and deterministic transition
 
 - [x] 1.1 Add RED tests for versioned workflow decision validation, bounded event enums and legal/illegal state transitions; implement shared contract and transition reducer without business identifiers.
-- [ ] 1.2 Add RED tests for deriving workflow context from existing BehaviorContext and implement the bounded projection used by model input and diagnostics.
+- [x] 1.2 Add RED tests for deriving workflow context from existing BehaviorContext and implement the bounded projection used by model input and diagnostics.
 
 ## 2. Prompt and semantic adapter
 
