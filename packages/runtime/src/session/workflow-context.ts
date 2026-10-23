@@ -79,6 +79,7 @@ function deriveWorkflowPhase(context: BehaviorContext): WorkflowPhase {
   if (context.workflow.status === 'cancelled') return 'cancelled';
   if (context.workflow.status === 'failed') return 'failed';
   if (context.confirmation.state === 'required' || context.pending.kind === 'confirmation') return 'awaiting_confirmation';
+  if (context.confirmation.state === 'confirmed' && context.pending.status === 'none') return 'completed';
   if (context.collection?.kind === 'parameters' || context.pending.kind === 'slot') return 'collecting_parameters';
   if (context.collection?.kind === 'function' || context.pending.kind === 'selection') return 'function_selection';
   const stepPhase = knownStepPhase(context.workflow.currentStep);

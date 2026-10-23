@@ -43,6 +43,11 @@ test('cancellation clears the executable workflow path without executing', () =>
   assert.deepEqual(result, { ok: true, currentState: 'awaiting_confirmation', nextState: 'cancelled', event: 'workflow_cancelled' });
 });
 
+test('completed workflow can accept a new bounded input without granting execution', () => {
+  const result = transitionWorkflow('completed', decision({ userIntent: 'provide_parameter', event: 'parameter_received' }));
+  assert.deepEqual(result, { ok: true, currentState: 'completed', nextState: 'collecting_parameters', event: 'parameter_received' });
+});
+
 test('unknown runtime state fails closed instead of indexing the transition table', () => {
   const result = transitionWorkflow('untrusted_state' as WorkflowPhase, decision());
   assert.equal(result.ok, false);

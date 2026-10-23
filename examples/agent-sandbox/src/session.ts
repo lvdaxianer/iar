@@ -10,7 +10,7 @@ import type { PluginDescriptor } from '@iar/plugins';
 import { confirmationScopeHash, type RouteResult, type SemanticFrame } from '@iar/runtime';
 import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, sandboxOperationKind, summarizeAction } from './session-helpers.js';
-import { createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption, recoverContinuation } from './session-clarification.js';
+import { classifySessionWorkflowDecision, createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption, recoverContinuation, workflowDecisionReply } from './session-clarification.js';
 import { collectFunctionCandidates } from './function-collector.js';
 import { allowsContextFollowUp, applyRouteDiagnostic, deterministicFallbackReply, finishConfirmedAction, gateIncompleteSemanticFrame, logActionResult, logRouteResult, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection, semanticIncompleteClarification } from './session-turn-helpers.js';
 import { withConfirmReplySource, withReplySource, type CompactResult, type ConfirmResult, type ExecuteTurnOutcome, type ExtractFrameOutcome, type PendingActionContext, type RouteEvidence, type StreamEvent, type StructuredInput, type TurnResult } from './session-types.js';
@@ -174,6 +174,23 @@ export class IarSandboxSession extends SandboxSessionCore {
    */
   protected async routeNormalTurn(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }>; timing: TurnTimingTracker; passThroughOnNoMatch: boolean; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
     const { userText, traceId, behaviorContext, extracted, timing, passThroughOnNoMatch, selectedDescriptor } = context;
+    const workflowDecision = classifySessionWorkflowDecision(behaviorContext, extracted.frame.workflowDecision);
+    if (workflowDecision.kind === 'invalid') {
+      const evidence: RouteEvidence = { status: 'rejected', reasonCode: workflowDecision.reasonCode, semanticIntent: extracted.frame.intent, semanticConfidence: extracted.frame.confidence };
+      const reply = workflowDecisionReply(workflowDecision) ?? '当前工作流事件无效，本轮未执行任何动作。';
+      timing.skip('route.propose'); timing.skip('route.select'); timing.skip('action.execute'); timing.skip('response.generate');
+      this.replies.pushMessages(userText, reply);
+      return { status: 'clarification', reply, route: evidence, reasonCode: workflowDecision.reasonCode };
+    }
+    if (workflowDecision.kind === 'cancelled') {
+      if (this.pending !== null) await this.cancelStalePending();
+      await this.resetClarification();
+      const reply = workflowDecisionReply(workflowDecision) ?? '已取消当前流程，未执行任何动作。';
+      const route: RouteEvidence = { status: 'clarification', reasonCode: workflowDecision.event, semanticIntent: extracted.frame.intent, semanticConfidence: extracted.frame.confidence };
+      timing.skip('route.propose'); timing.skip('route.select'); timing.skip('action.execute'); timing.skip('response.generate');
+      this.replies.pushMessages(userText, reply);
+      return { status: 'clarification', reply, route, reasonCode: workflowDecision.event };
+    }
     const recovered = recoverContinuation(this.pluginHost.descriptors(), behaviorContext, extracted.frame, userText);
     const frame = recovered.frame;
     const effectiveDescriptor = recovered.descriptor ?? selectedDescriptor;

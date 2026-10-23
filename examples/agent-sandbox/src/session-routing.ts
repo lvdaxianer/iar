@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto';
 import { MAX_COLLECTION_ATTEMPTS, SCHEMA_VERSIONS, validateJsonSchemaValue, type ActionDefinition, type ActionType, type BehaviorContext, type CollectionState, type EventEnvelope, type JsonSchema, type JsonValue, type PendingReference, type PluginOperation, type PluginPolicyMetadata, type RuleExpression, type VerifiedFactRecord } from '@iar/contracts';
 import { SELF_INTRODUCTION_FUNCTION_ID, type PluginDescriptor, type PluginFunctionRecord, type PluginHost, type PluginRecord, type PluginScopeDescriptor } from '@iar/plugins';
-import { ModelGateway, SemanticExtractorAdapter, type HistoricalSemanticReference, type ModelGatewayResult, type ModelProfileRegistry, type SemanticFrame } from '@iar/runtime';
+import { ModelGateway, SemanticExtractorAdapter, projectWorkflowContext, type HistoricalSemanticReference, type ModelGatewayResult, type ModelProfileRegistry, type SemanticFrame } from '@iar/runtime';
 import { PluginFirstRouter, resolveFactRelationCandidates, type AsyncDecisionAdapter, type AsyncFunctionCallAdapter, type AsyncNestedRouteAdapter, type FactRelationCandidateReference, type RouteResult } from '@iar/runtime';
 import type { FunctionRule, IarRuntimeConfiguration, PluginRule } from '@iar/runtime';
 import type { ActionExecutor, LocalWorkflow } from '@iar/runtime';
@@ -75,7 +75,7 @@ export class SandboxSessionRouting {
    */
   public async extractFrame(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages = this.context.recentMessages, selectedDescriptor?: PluginDescriptor, pendingAction?: PendingActionContext, structuredInput?: StructuredInput): Promise<ExtractFrameOutcome> {
     const descriptors = selectedDescriptor ? this.context.pluginHost.pluginDescriptors().filter((descriptor) => descriptor.pluginId === selectedDescriptor.pluginId) : this.context.pluginHost.pluginDescriptors();
-    const input = { text: userText, behaviorContext, recentMessages, pluginDescriptors: descriptors, ...(pendingAction === undefined ? {} : { pendingAction }), ...(structuredInput === undefined ? {} : { structuredInput }) };
+    const input = { text: userText, behaviorContext, workflowContext: projectWorkflowContext(behaviorContext), recentMessages, pluginDescriptors: descriptors, ...(pendingAction === undefined ? {} : { pendingAction }), ...(structuredInput === undefined ? {} : { structuredInput }) };
     const extracted = await new SemanticExtractorAdapter(this.context.gateway).extract({ traceId, runId, input });
     if (extracted.ok) {
       const frame = selectedDescriptor ? constrainFrame(extracted.value, selectedDescriptor) : extracted.value;
@@ -116,7 +116,7 @@ export class SandboxSessionRouting {
       providers: { brain: new ScriptedModelProvider() },
       onAudit: (audit, event) => logModelAudit(audit, event.errorCode)
     });
-    return new SemanticExtractorAdapter(fallbackGateway).extract({ traceId, runId, input: { text: userText, behaviorContext, recentMessages, pluginDescriptors, ...(structuredInput === undefined ? {} : { structuredInput }) } });
+    return new SemanticExtractorAdapter(fallbackGateway).extract({ traceId, runId, input: { text: userText, behaviorContext, workflowContext: projectWorkflowContext(behaviorContext), recentMessages, pluginDescriptors, ...(structuredInput === undefined ? {} : { structuredInput }) } });
   }
 
 
