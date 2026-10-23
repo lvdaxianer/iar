@@ -4,7 +4,7 @@ import { SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
 import { allowsContextFollowUp, applyRouteDiagnostic, canPassThrough, gateIncompleteSemanticFrame, logActionResult, logRouteResult, pendingBridgeResult, resolveNoMatchTurn, runPiAgentDelegate, semanticIncompleteClarification } from './session-turn-helpers.js';
 import { hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
-import type { ActionDefinition, ActionResult, BehaviorContext, PendingReference, VerifiedFactRecord } from '@iar/contracts';
+import type { ActionDefinition, ActionResult, BehaviorContext, CollectionState, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
 import type { PluginDescriptor } from '@iar/plugins';
@@ -24,6 +24,7 @@ export type StreamTurnContext = {
   rejectSelection: (userText: string, reasonCode: string) => Promise<TurnResult>;
   collectFunctionCandidates: (context: { userText: string; route: RouteResult; frame: SemanticFrame; evidence: RouteEvidence }) => Promise<{ route?: RouteResult; result?: TurnResult }>;
   markUnresolved: (reasonCode: string, pendingReference?: PendingReference) => Promise<void>;
+  updateParameterCollection: (collection: Extract<CollectionState, { kind: 'parameters' }>) => Promise<void>;
   resetClarification: () => Promise<void>;
   /** 与普通入口共用语义抽取及路由，确保相同的策略边界。 */
   extractFrame: (traceId: string, runId: string, text: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>, selectedDescriptor?: PluginDescriptor, pendingAction?: PendingActionContext) => Promise<ExtractFrameOutcome>;
@@ -33,7 +34,7 @@ export type StreamTurnContext = {
   functionDescriptors: PluginDescriptor[];
   routeFrame: (traceId: string, runId: string, frame: SemanticFrame, behaviorContext: BehaviorContext, currentMessage: string, recentMessages: Array<{ role: string; text: string }>, selectedDescriptor?: PluginDescriptor) => Promise<RouteResult>;
   resolveReferences: (frame: SemanticFrame, behaviorContext: BehaviorContext) => ReferenceResolution;
-  prepareAndExecute: (context: { runId: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext }) => Promise<ExecuteTurnOutcome>;
+  prepareAndExecute: (context: { runId: string; traceId?: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext }) => Promise<ExecuteTurnOutcome>;
   /** 兜底与执行后回复分别保留增量回调和超限错误。 */
   fallbackReplyStreamed: (context: { traceId: string; runId: string; userText: string; reasonCode: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[]; resolvedReferences?: ResolvedFactReference[] }, onDelta: (delta: string) => void, onReasoningDelta?: (delta: string) => void) => Promise<string>;
   generateReplyStreamed: (context: { traceId: string; runId: string; userText: string; action: ActionDefinition; actionResult: ActionResult; operationKind: 'read' | 'action'; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[] }, onDelta: (delta: string) => void, onReasoningDelta?: (delta: string) => void) => Promise<string>;
@@ -197,7 +198,7 @@ export class SandboxSessionStreamTurn {
     emit({ type: 'stage', stage: 'action' });
     if (this.context.hasPending()) await this.context.cancelStalePending();
     timing.start('action.execute');
-    const outcome = await this.context.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame, route, behaviorContext: routeContext });
+    const outcome = await this.context.prepareAndExecute({ runId: SESSION_RUN_ID, traceId, userText, frame, route, behaviorContext: routeContext });
     timing.end('action.execute');
     logActionResult(traceId, outcome);
     applyRouteDiagnostic(evidence, traceId, outcome);
@@ -272,9 +273,12 @@ export class SandboxSessionStreamTurn {
       return { status: 'awaiting_confirmation', reply: outcome.reply, route: evidence, pending: summarizeAction(outcome.action) };
     }
     if (outcome.status === 'failed' || outcome.status === 'clarification') {
-      if (outcome.status === 'clarification') await this.context.markUnresolved(outcome.reasonCode);
+      if (outcome.status === 'clarification') {
+        if (outcome.collection !== undefined) await this.context.updateParameterCollection(outcome.collection);
+        else await this.context.markUnresolved(outcome.reasonCode);
+      }
       this.context.pushMessages(userText, outcome.reply);
-      return { status: outcome.status, reply: outcome.reply, route: evidence, reasonCode: outcome.reasonCode };
+      return { status: outcome.status, reply: outcome.reply, route: evidence, reasonCode: outcome.reasonCode, ...(outcome.status === 'clarification' && outcome.collection === undefined ? {} : outcome.status === 'clarification' ? { collection: outcome.collection } : {}) };
     }
     return this.finishStreamExecution({ ...context, outcome });
   }

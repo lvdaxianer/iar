@@ -21,12 +21,12 @@ export type ParameterValidationSummary = {
  * @author lvdaxianer@yeah.net
  * @date 2026-10-23
  */
-export function summarizeParameterValidation(schema: JsonSchema, value: unknown, conflictFields: readonly string[] = []): ParameterValidationSummary {
+export function summarizeParameterValidation(schema: JsonSchema, value: unknown, conflictFields: readonly string[] = [], runtimeRequiredFields: readonly string[] = []): ParameterValidationSummary {
   const record = isRecord(value) ? value : {};
   const properties = isRecord(schema.properties) ? schema.properties : {};
-  const expectedFields = Object.keys(properties);
+  const expectedFields = [...new Set([...Object.keys(properties), ...runtimeRequiredFields.filter((field) => typeof field === 'string' && field.trim().length > 0)])];
   const presentFields = Object.keys(record);
-  const missingFields = requiredFields(schema).filter((field) => !Object.hasOwn(record, field));
+  const missingFields = expectedRequiredFields(schema, runtimeRequiredFields).filter((field) => !Object.hasOwn(record, field));
   const invalidFields = invalidFieldsFromSchema(schema, value, properties, presentFields, missingFields);
   const conflicts = uniqueFields(conflictFields);
   const orderedInvalidFields = orderFields(presentFields, invalidFields);
@@ -41,8 +41,9 @@ export function summarizeParameterValidation(schema: JsonSchema, value: unknown,
 }
 
 /** 读取 Schema 的 required 字段，避免把业务语义带入收集判断。 */
-function requiredFields(schema: JsonSchema): string[] {
-  return Array.isArray(schema.required) ? schema.required.filter((field): field is string => typeof field === 'string') : [];
+function expectedRequiredFields(schema: JsonSchema, runtimeRequiredFields: readonly string[]): string[] {
+  const schemaRequired = Array.isArray(schema.required) ? schema.required.filter((field): field is string => typeof field === 'string') : [];
+  return [...new Set([...schemaRequired, ...runtimeRequiredFields.filter((field) => typeof field === 'string')])];
 }
 
 /** 根据 Schema 校验结果提取字段级错误。 */

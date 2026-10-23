@@ -6,6 +6,7 @@
  */
 import { createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import type { ModelAuditEntry } from '@iar/runtime';
 import { defaultLogWriter, SafeLogSink, type SafeLogSinkStatus, type SafeLogWriter } from './safe-log-sink.js';
 
 /** 每个请求独立的链路标识。 */
@@ -32,26 +33,26 @@ const CONTRACT_MESSAGES: Readonly<Record<string, { zh: string; en: string }>> = 
 const SAFE_CONTRACT_IDENTIFIERS = /^[A-Za-z0-9_.|:-]{1,256}$/;
 /** 日志中允许出现的枚举字符串。 */
 const SAFE_VALUES: Readonly<Record<string, readonly string[]>> = {
-  level: ['trace', 'info', 'warn', 'error', 'debug'], event: ['http.request.start', 'http.request.end', 'http.stream', 'model.http', 'iar.turn.stage', 'iar.turn.completed', 'iar.route.contract', 'iar.semantic.frame', 'iar.route.decision', 'model.reasoning', 'sandbox.start', 'sandbox.start_failed', 'sandbox.shutdown_failed', 'sandbox.snapshot'],
-  outcome: ['network_error', 'http_error', 'invalid_response', 'timeout', 'aborted', 'slow', 'success', 'stream_failed', 'stream_write_failed', 'startup_failed', 'port_in_use', 'shutdown_failed', 'invalid_mode', 'missing_api_key', 'snapshot_failed', 'contract_violation'],
-  reasonCode: [...Object.keys(CONTRACT_MESSAGES), 'semantic_incomplete', 'route_not_proposed', 'candidate_empty', 'route_contract_invalid', 'bridge_timeout', 'bridge_unavailable'],
+  level: ['trace', 'info', 'warn', 'error', 'debug'], event: ['http.request.start', 'http.request.end', 'http.stream', 'model.http', 'iar.model.audit', 'iar.parameter.boundary', 'iar.turn.stage', 'iar.turn.completed', 'iar.route.contract', 'iar.semantic.frame', 'iar.route.decision', 'iar.bridge.error', 'model.reasoning', 'sandbox.pi_agent', 'sandbox.start', 'sandbox.start_failed', 'sandbox.shutdown_failed', 'sandbox.snapshot'],
+  outcome: ['network_error', 'http_error', 'invalid_response', 'timeout', 'aborted', 'slow', 'success', 'stream_failed', 'stream_write_failed', 'bridge_error', 'agent_unavailable', 'model_fallback', 'startup_failed', 'port_in_use', 'shutdown_failed', 'invalid_mode', 'missing_api_key', 'snapshot_failed', 'contract_violation'],
+  reasonCode: [...Object.keys(CONTRACT_MESSAGES), 'semantic_incomplete', 'route_not_proposed', 'candidate_empty', 'route_matched', 'confirmation_required', 'action_failed', 'route_contract_invalid', 'function_arguments_invalid', 'parameters_required', 'parameter_missing', 'parameter_invalid', 'parameter_collected', 'bridge_timeout', 'bridge_unavailable', 'bridge_request_invalid', 'bridge_session_failed', 'bridge_internal_error', 'model.invalid_request', 'model.no_profile', 'model.no_provider', 'model.timeout', 'model.provider_failed', 'model.schema_invalid', 'model.threshold_rejected', 'model.fallback_failed'],
   target: ['model.chat.completions', 'model.jev.systemone'], method: ['GET', 'POST', 'HEAD', 'OPTIONS', 'PUT', 'PATCH', 'DELETE', 'OTHER'],
   path: ['/', '/api/chat', '/api/confirm', '/api/compact', '/api/state', '/api/reset', 'unknown',
     '/api/sessions', '/api/sessions/:sessionId', '/api/sessions/:sessionId/chat', '/api/sessions/:sessionId/confirm',
     '/api/sessions/:sessionId/compact', '/api/sessions/:sessionId/state', '/api/sessions/:sessionId/reset', '/api/sessions/:sessionId/resume',
     '/api/bridge/v1/sessions', '/api/bridge/v1/sessions/:sessionId/input', '/api/bridge/v1/sessions/:sessionId/input/stream', '/api/bridge/v1/sessions/:sessionId/confirm', '/api/bridge/v1/sessions/:sessionId/state'],
   stage: ['semantic.extract', 'route.propose', 'route.select', 'action.execute', 'response.reasoning', 'response.generate'], nextStage: ['route.propose', 'route.select', 'action.execute', 'response.generate'],
-  missingField: ['intent', 'action', 'pluginId', 'functionId', 'operation', 'parameters'], semanticAction: ['query', 'create', 'update', 'delete', 'transfer', 'execute', 'unknown'], execution: ['allowed', 'blocked', 'skipped'],
+  missingField: ['intent', 'action', 'pluginId', 'functionId', 'operation', 'parameters'], fieldState: ['expected', 'present', 'missing', 'invalid'], semanticAction: ['query', 'create', 'update', 'delete', 'transfer', 'execute', 'unknown'], execution: ['allowed', 'blocked', 'skipped'],
   status: ['completed', 'failed', 'skipped'],
   modelRole: ['semantic.extract', 'route.propose', 'function.call', 'function.select', 'plugin.select', 'context.compact', 'response.generate'],
   host: ['127.0.0.1'], mode: ['brain', 'scripted'], selection: ['explicit', 'configured', 'fallback']
 };
 /** 允许输出的数字字段。 */
-const SAFE_NUMBERS = new Set(['startTime', 'endTime', 'durationMs', 'firstTokenMs', 'status', 'candidateCount', 'allowedValueCount']);
+const SAFE_NUMBERS = new Set(['startTime', 'endTime', 'durationMs', 'firstTokenMs', 'status', 'candidateCount', 'allowedValueCount', 'attempt', 'expectedFieldCount', 'actualFieldCount', 'missingFieldCount', 'invalidFieldCount']);
 /** 只允许输出有限的布尔诊断字段。 */
-const SAFE_BOOLEAN_KEYS = new Set(['hasIntent', 'hasAction', 'hasPluginId', 'hasFunctionId', 'hasOperation']);
+const SAFE_BOOLEAN_KEYS = new Set(['hasIntent', 'hasAction', 'hasPluginId', 'hasFunctionId', 'hasOperation', 'fallbackUsed']);
 /** 语义模型输出中的稳定标识符仅允许受控字符，不输出自然语言正文。 */
-const SAFE_IDENTIFIER_KEYS = new Set(['semanticIntent', 'semanticPluginId', 'semanticFunctionId', 'pluginId', 'functionId']);
+const SAFE_IDENTIFIER_KEYS = new Set(['semanticIntent', 'semanticPluginId', 'semanticFunctionId', 'pluginId', 'functionId', 'profileId', 'modelId', 'modelVersion', 'fieldName']);
 /** HTTP 状态码的合法范围。 */
 const MIN_HTTP_STATUS = 100;
 const MAX_HTTP_STATUS = 599;
@@ -275,7 +276,7 @@ export function writeSafeLog(record: Record<string, unknown>): void {
 export function formatBilingualLogLine(record: Record<string, unknown>): string {
   const safe = Object.fromEntries(Object.entries(record).filter(isSafeEntry));
   const event = typeof safe.event === 'string' ? safe.event : 'iar.observability';
-  const label = event === 'iar.turn.stage' ? '阶段耗时 / Stage timing' : event === 'iar.turn.completed' ? '轮次完成 / Turn completed' : event === 'iar.route.contract' ? '路由契约失败 / Route contract failure' : event === 'iar.semantic.frame' ? '语义抽取 / Semantic extraction' : event === 'iar.route.decision' ? '路由决策 / Route decision' : event === 'model.reasoning' ? '模型思考 / Model reasoning' : '运行事件 / Runtime event';
+  const label = event === 'iar.turn.stage' ? '阶段耗时 / Stage timing' : event === 'iar.turn.completed' ? '轮次完成 / Turn completed' : event === 'iar.route.contract' ? '路由契约失败 / Route contract failure' : event === 'iar.semantic.frame' ? '语义抽取 / Semantic extraction' : event === 'iar.route.decision' ? '路由决策 / Route decision' : event === 'iar.model.audit' ? '模型调用审计 / Model attempt' : event === 'iar.parameter.boundary' ? '参数边界 / Parameter boundary' : event === 'iar.bridge.error' ? '桥接错误 / Bridge error' : event === 'sandbox.pi_agent' ? 'Pi 委托 / Pi Agent' : event === 'model.reasoning' ? '模型思考 / Model reasoning' : '运行事件 / Runtime event';
   const stage = typeof safe.stage === 'string' ? ` stage=${safe.stage}` : '';
   const modelRole = typeof safe.modelRole === 'string' ? ` modelRole=${safe.modelRole}` : '';
   const outcome = typeof safe.outcome === 'string' ? ` outcome=${safe.outcome}` : '';
@@ -287,6 +288,17 @@ export function formatBilingualLogLine(record: Record<string, unknown>): string 
   const reasonCode = typeof safe.reasonCode === 'string' ? ` reasonCode=${safe.reasonCode}` : '';
   const expectedOperation = typeof safe.expectedOperation === 'string' ? ` expectedOperation=${safe.expectedOperation}` : '';
   const actualOperation = typeof safe.actualOperation === 'string' ? ` actualOperation=${safe.actualOperation}` : '';
+  const profileId = typeof safe.profileId === 'string' ? ` profileId=${safe.profileId}` : '';
+  const modelId = typeof safe.modelId === 'string' ? ` modelId=${safe.modelId}` : '';
+  const modelVersion = typeof safe.modelVersion === 'string' ? ` modelVersion=${safe.modelVersion}` : '';
+  const attempt = typeof safe.attempt === 'number' ? ` attempt=${safe.attempt}` : '';
+  const fallbackUsed = safe.fallbackUsed !== undefined ? ` fallbackUsed=${String(safe.fallbackUsed)}` : '';
+  const fieldName = typeof safe.fieldName === 'string' ? ` fieldName=${safe.fieldName}` : '';
+  const fieldState = typeof safe.fieldState === 'string' ? ` fieldState=${safe.fieldState}` : '';
+  const expectedFieldCount = typeof safe.expectedFieldCount === 'number' ? ` expectedFieldCount=${safe.expectedFieldCount}` : '';
+  const actualFieldCount = typeof safe.actualFieldCount === 'number' ? ` actualFieldCount=${safe.actualFieldCount}` : '';
+  const missingFieldCount = typeof safe.missingFieldCount === 'number' ? ` missingFieldCount=${safe.missingFieldCount}` : '';
+  const invalidFieldCount = typeof safe.invalidFieldCount === 'number' ? ` invalidFieldCount=${safe.invalidFieldCount}` : '';
   const semanticIntent = typeof safe.semanticIntent === 'string' ? ` semanticIntent=${safe.semanticIntent}` : '';
   const semanticAction = typeof safe.semanticAction === 'string' ? ` semanticAction=${safe.semanticAction}` : '';
   const missingField = typeof safe.missingField === 'string' ? ` missingField=${safe.missingField}` : '';
@@ -297,7 +309,7 @@ export function formatBilingualLogLine(record: Record<string, unknown>): string 
   const hasFields = ['hasIntent', 'hasAction', 'hasPluginId', 'hasFunctionId', 'hasOperation'].filter((key) => safe[key] !== undefined).map((key) => `${key}=${String(safe[key])}`).join(' ');
   const messageZh = typeof safe.messageZh === 'string' ? ` messageZh=${safe.messageZh}` : '';
   const messageEn = typeof safe.messageEn === 'string' ? ` messageEn=${safe.messageEn}` : '';
-  return `${level} ${label}${stage}${modelRole}${status}${outcome}${reasonCode}${semanticIntent}${semanticAction}${hasFields.length === 0 ? '' : ` ${hasFields}`}${missingField}${nextStage}${candidateCount}${allowedValueCount}${execution}${expectedOperation}${actualOperation}${duration}${firstToken}${trace}${messageZh}${messageEn}`;
+  return `${level} ${label}${stage}${modelRole}${profileId}${modelId}${modelVersion}${attempt}${fallbackUsed}${status}${outcome}${reasonCode}${semanticIntent}${semanticAction}${hasFields.length === 0 ? '' : ` ${hasFields}`}${missingField}${fieldName}${fieldState}${expectedFieldCount}${actualFieldCount}${missingFieldCount}${invalidFieldCount}${nextStage}${candidateCount}${allowedValueCount}${execution}${expectedOperation}${actualOperation}${duration}${firstToken}${trace}${messageZh}${messageEn}`;
 }
 
 /** 语义抽取阶段的安全诊断字段。 */
@@ -323,6 +335,24 @@ export type RouteDecisionDiagnostic = {
   pluginId?: string;
   functionId?: string;
   durationMs?: number;
+};
+
+/** 模型单次 attempt 的安全审计字段，不记录输入、输出或思考内容。 */
+export type ModelAuditDiagnostic = Pick<ModelAuditEntry, 'traceId' | 'runId' | 'role' | 'profileId' | 'profileVersion' | 'modelId' | 'modelVersion' | 'attempt' | 'outcome' | 'fallbackUsed' | 'metadata'> & { errorCode?: string };
+
+/** Function 输入边界的字段状态，只记录 Schema 字段名和计数。 */
+export type ParameterBoundaryDiagnostic = {
+  stage: 'action.execute';
+  status: 'completed' | 'failed' | 'skipped';
+  reasonCode: string;
+  pluginId?: string;
+  functionId?: string;
+  fieldName?: string;
+  fieldState: 'expected' | 'present' | 'missing' | 'invalid';
+  expectedFieldCount?: number;
+  actualFieldCount?: number;
+  missingFieldCount?: number;
+  invalidFieldCount?: number;
 };
 
 /**
@@ -354,6 +384,27 @@ export function logRouteDecision(traceId: string, diagnostic: RouteDecisionDiagn
   writeSafeLog({
     level: diagnostic.status === 'failed' || diagnostic.execution === 'blocked' ? 'warn' : 'info', event: 'iar.route.decision', traceId: context?.origin === 'http' ? context.traceId : safeModelTraceId(traceId),
     ...diagnostic
+  });
+}
+
+/** 记录模型每次 attempt 的 profile、模型和稳定失败码，不记录原始模型内容。 */
+export function logModelAudit(audit: ModelAuditDiagnostic, errorCode?: string): void {
+  const context = contexts.getStore();
+  const traceId = context?.origin === 'http' ? context.traceId : safeModelTraceId(audit.traceId);
+  writeSafeLog({
+    level: audit.outcome === 'success' || audit.outcome === 'fallback' ? 'info' : 'warn', event: 'iar.model.audit', traceId,
+    modelRole: audit.role, profileId: audit.profileId, modelId: audit.modelId, modelVersion: audit.modelVersion,
+    attempt: audit.attempt, outcome: audit.outcome, fallbackUsed: audit.fallbackUsed,
+    ...(errorCode === undefined ? {} : { reasonCode: errorCode })
+  });
+}
+
+/** 记录 Schema 期望字段、实际字段和缺失/非法计数，不记录字段值。 */
+export function logParameterBoundary(traceId: string, diagnostic: ParameterBoundaryDiagnostic): void {
+  const context = contexts.getStore();
+  writeSafeLog({
+    level: diagnostic.status === 'failed' || diagnostic.fieldState === 'missing' || diagnostic.fieldState === 'invalid' ? 'warn' : 'info',
+    event: 'iar.parameter.boundary', traceId: context?.origin === 'http' ? context.traceId : safeModelTraceId(traceId), ...diagnostic
   });
 }
 
@@ -390,6 +441,17 @@ export function logRouteContractFailure(traceId: string, diagnostic: RouteContra
 export function logStreamFailure(outcome: 'stream_failed' | 'stream_write_failed' = 'stream_failed'): void {
   const context = contexts.getStore() ?? { traceId: randomUUID() };
   writeSafeLog({ level: 'warn', event: 'http.stream', outcome, ...context });
+}
+
+/**
+ * 记录桥接层稳定错误分类，避免客户端只看到无 trace 的通用失败。
+ * @param reasonCode - 已归并的桥接错误原因码
+ * @returns 无返回值
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+export function logBridgeFailure(reasonCode: 'bridge_timeout' | 'bridge_unavailable' | 'bridge_request_invalid' | 'bridge_session_failed' | 'bridge_internal_error'): void {
+  writeSafeLog({ level: 'error', event: 'iar.bridge.error', outcome: 'bridge_error', reasonCode, traceId: resolveSandboxTraceId(randomUUID()) });
 }
 
 /**

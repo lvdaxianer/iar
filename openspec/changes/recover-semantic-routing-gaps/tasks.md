@@ -8,7 +8,7 @@
 ## 2. Deterministic recovery clarification
 
 - [x] 2.1 Add a failing test for an incomplete action request and repeated confirmation proving the runtime returns a bounded missing-field clarification instead of invoking execution or treating Response Model text as authorization.
-- [ ] 2.2 Implement structured missing-field recovery and re-extraction gating using existing BehaviorContext/pending clarification boundaries; verify valid user-supplied fields re-enter normal route, policy and confirmation checks and invalid values remain blocked.
+- [x] 2.2 Implement structured missing-field recovery and re-extraction gating using existing BehaviorContext/pending clarification boundaries; verify valid user-supplied fields re-enter normal route, policy and confirmation checks and invalid values remain blocked.
 
 ## 3. Integration verification
 

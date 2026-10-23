@@ -94,6 +94,7 @@ export class IarSandboxSession extends SandboxSessionCore {
       rejectSelection: (text, reasonCode) => session.rejectSelection(text, reasonCode),
       collectFunctionCandidates: (context) => session.collectFunctionCandidates(context),
       markUnresolved: (reasonCode) => session.markUnresolved(reasonCode),
+      updateParameterCollection: (collection) => session.updateParameterCollection(collection),
       resetClarification: () => session.resetClarification(),
       extractFrame: (traceId, runId, text, behaviorContext, recentMessages, selectedDescriptor, pendingAction) => this.routing.extractFrame(traceId, runId, text, behaviorContext, recentMessages, selectedDescriptor, pendingAction),
       get recentMessages() { return session.recentMessages; },
@@ -215,7 +216,7 @@ export class IarSandboxSession extends SandboxSessionCore {
     }
     timing.start('action.execute');
     if (this.pending !== null) await this.cancelStalePending();
-    const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, userText, frame: extracted.frame, route, behaviorContext: routeContext });
+    const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, traceId, userText, frame: extracted.frame, route, behaviorContext: routeContext });
     timing.end('action.execute');
     logActionResult(traceId, outcome);
     applyRouteDiagnostic(evidence, traceId, outcome);
@@ -268,9 +269,12 @@ export class IarSandboxSession extends SandboxSessionCore {
       return { status: 'awaiting_confirmation', reply: outcome.reply, route: evidence, pending: summarizeAction(outcome.action) };
     }
     if (outcome.status === 'failed' || outcome.status === 'clarification') {
-      if (outcome.status === 'clarification') await this.markUnresolved(outcome.reasonCode);
+      if (outcome.status === 'clarification') {
+        if (outcome.collection !== undefined) await this.updateParameterCollection(outcome.collection);
+        else await this.markUnresolved(outcome.reasonCode);
+      }
       this.replies.pushMessages(userText, outcome.reply);
-      return { status: outcome.status, reply: outcome.reply, route: evidence, reasonCode: outcome.reasonCode };
+      return { status: outcome.status, reply: outcome.reply, route: evidence, reasonCode: outcome.reasonCode, ...(outcome.status === 'clarification' && outcome.collection === undefined ? {} : outcome.status === 'clarification' ? { collection: outcome.collection } : {}) };
     }
     return this.finishNormalExecution({ userText, traceId, timing, evidence, outcome });
   }
@@ -331,6 +335,17 @@ export class IarSandboxSession extends SandboxSessionCore {
       return;
     }
     await this.updateClarificationState({ mode: 'unresolved', unresolvedStreak: streak, reasonCode }, current.pending, pendingReference ?? null);
+  }
+
+  /** 保存已固定 Function 的参数收集状态，不升级为 Function 选择或执行授权。 */
+  public async updateParameterCollection(collection: Extract<CollectionState, { kind: 'parameters' }>): Promise<void> {
+    const current = this.projector.current();
+    await this.updateClarificationState(
+      { mode: 'unresolved', unresolvedStreak: current.clarification?.unresolvedStreak ?? 0, reasonCode: 'parameters_required' },
+      { kind: 'slot', status: 'required' },
+      null,
+      collection
+    );
   }
 
   /** 成功进入确认或执行阶段后清除旧的 unresolved 状态。 */
