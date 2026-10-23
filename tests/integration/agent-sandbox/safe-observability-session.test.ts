@@ -86,7 +86,7 @@ function scriptedFunctionCallResponse(payload: { messages?: Array<{ content: str
   return new Response(JSON.stringify({ choices: [{ message: { tool_calls: [{ type: 'function', function: { name, arguments: JSON.stringify(argumentsPayload) } }] } }] }), { status: 200 });
 }
 
-/** 未执行动作时，超限必须返回失败且 done 事件不能伪装为完整回复。
+/** 未命中路由时使用确定性澄清，不应为了生成兜底文本调用回复模型。
  * @param server - 使用超限模型替身的真实会话服务
  * @returns 无返回值
  * @author lvdaxianer@yeah.net
@@ -96,11 +96,12 @@ async function assertOversizedFallback(server: Awaited<ReturnType<ObservabilityF
   const normal = await server.session.turn('你好');
   const events: Array<{ type: string; text?: string }> = [];
   const streamed = await server.session.turnStreamed('你好', (event) => { events.push(event); });
-  assert.ok(events.some((event) => event.type === 'delta' && event.text === 'partial-private'));
-  assert.equal(normal.status, 'failed'); assert.doesNotMatch(normal.reply, /partial-private/);
-  assert.equal(streamed.status, 'failed'); assert.doesNotMatch(streamed.reply, /partial-private/);
-  assert.equal(streamed.reasonCode, 'model_response_too_large');
-  assert.ok(events.some((event) => event.type === 'done' && JSON.stringify(event).includes('model_response_too_large')));
+  assert.equal(normal.status, 'clarification');
+  assert.equal(streamed.status, 'clarification');
+  assert.doesNotMatch(normal.reply, /partial-private/);
+  assert.doesNotMatch(streamed.reply, /partial-private/);
+  assert.equal(events.some((event) => event.type === 'delta'), false);
+  assert.equal(streamed.timing?.stages.find((stage) => stage.stage === 'response.generate')?.status, 'skipped');
 }
 
 /** 动作已经执行时，超限只标记回复不完整，不能诱导用户重复动作。
@@ -173,7 +174,7 @@ async function timeoutFetch(_url: string | URL | Request, options?: RequestInit)
 }
 
 /**
- * 两个实际会话流式分支都应记录超时而不是主动取消。
+ * 两个实际会话流式动作回复分支都应记录超时而不是主动取消。
  * 注册表只覆盖测试中的回复超时时间，其他配置保持不变。
  * 分别触发澄清兜底和执行结果回复这两个真实路径。
  * 日志映射还应与网关返回的业务审计链路一致。
@@ -192,7 +193,7 @@ async function checkSessionTimeouts(fixture: ObservabilityFixture): Promise<void
     const profile = original(...args);
     return profile.role === 'response.generate' ? { ...profile, timeoutMs: 5 } : profile;
   };
-  assert.equal((await server.session.turnStreamed('你好', () => {})).status, 'clarification');
+  assert.equal((await server.session.turnStreamed('列出今天的集成任务', () => {})).status, 'executed');
   assert.equal((await server.session.turnStreamed('列出今天的集成任务', () => {})).status, 'executed');
   await flushObservabilityLogs();
   const records = fixture.records();
@@ -267,7 +268,8 @@ function installSessionCancellation(controllers: AbortController[]): () => void 
     constructor() { super(); controllers.push(this); }
   };
   globalThis.fetch = async (_url, options) => {
-    const payload = JSON.parse(String(options?.body)) as { stream?: boolean };
+    const payload = JSON.parse(String(options?.body)) as { stream?: boolean; messages?: Array<{ content: string }>; tools?: Array<{ function?: { name?: string; parameters?: { properties?: { functionId?: { enum?: unknown[] }; operation?: { enum?: unknown[] } } } } }> };
+    if (payload.messages?.[0]?.content.includes('Function Caller')) return scriptedFunctionCallResponse(payload);
     // 只对流式回复触发主动取消。
     if (!payload.stream) return new Response('response-private', { status: 503 });
     return await new Promise((_resolve, reject) => {
@@ -294,7 +296,7 @@ async function checkSessionCancellation(fixture: ObservabilityFixture): Promise<
   const restore = installSessionCancellation([]);
   try {
     const server = await fixture.start({ mode: 'brain', port: 29887, piAgentFactory: disabledPiAgentFactory });
-    assert.equal((await server.session.turnStreamed('你好', () => {})).status, 'clarification');
+    assert.equal((await server.session.turnStreamed('列出今天的集成任务', () => {})).status, 'executed');
     await flushObservabilityLogs();
     const records = fixture.records();
     assert.equal(records.filter((record) => record.event === 'model.http' && record.outcome === 'aborted').length, 1);

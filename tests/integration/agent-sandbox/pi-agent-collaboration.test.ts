@@ -5,8 +5,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SELF_INTRODUCTION_FUNCTION_ID } from '@iar/plugins';
-import { IarSandboxSession } from '../../../examples/agent-sandbox/src/session.js';
 import { FALLBACK_REPLY_TEXT } from '../../../examples/agent-sandbox/src/session-core.js';
+import { IarSandboxSession } from '../../../examples/agent-sandbox/src/session.js';
 import { createPiAgentDelegate, createSingleTextEvents, type PiAgentDelegate, type PiStreamFn } from '../../../examples/agent-sandbox/src/models/pi-agent-delegate.js';
 
 /** 记录调用轨迹的假 Pi 委托。 */
@@ -122,7 +122,9 @@ test('Pi 委托故障时回退 IAR 兜底回复，会话不中断', async () => 
   try {
     const result = await session.turn('你好');
     assert.equal(result.status, 'clarification');
-    assert.equal(result.reply, FALLBACK_REPLY_TEXT);
+    assert.ok('reply' in result);
+    assert.match(result.reply, /没有匹配到可用的 Function/);
+    assert.equal(result.timing?.stages.find((stage) => stage.stage === 'response.generate')?.status, 'skipped');
     assert.deepEqual(calls.runs, ['你好']);
     const followUp = await session.turn('现在有哪些告警');
     assert.equal(followUp.status, 'executed');

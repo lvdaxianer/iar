@@ -2,7 +2,7 @@ import { ModelResponseLimitError, trackModelResponseLimit } from './models/model
 import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
-import { allowsContextFollowUp, applyRouteDiagnostic, canPassThrough, gateIncompleteSemanticFrame, logActionResult, logRouteResult, pendingBridgeResult, resolveNoMatchTurn, runPiAgentDelegate, semanticIncompleteClarification } from './session-turn-helpers.js';
+import { allowsContextFollowUp, applyRouteDiagnostic, canPassThrough, deterministicFallbackReply, gateIncompleteSemanticFrame, logActionResult, logRouteResult, pendingBridgeResult, resolveNoMatchTurn, runPiAgentDelegate, semanticIncompleteClarification } from './session-turn-helpers.js';
 import { hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
 import type { ActionDefinition, ActionResult, BehaviorContext, CollectionState, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/runtime';
@@ -240,6 +240,13 @@ export class SandboxSessionStreamTurn {
       timing.skip('response.generate');
       this.context.pushMessages(userText, deterministicReply);
       return { status: 'clarification', reply: deterministicReply, route: evidence, reasonCode: evidence.reasonCode };
+    }
+    const canUseModelContext = hasVerifiedFactsForFollowUp(behaviorContext, evidence, userText) || matchesPendingOption(behaviorContext, userText);
+    const stableReply = canUseModelContext ? undefined : deterministicFallbackReply(evidence.reasonCode);
+    if (stableReply !== undefined) {
+      timing.skip('response.generate');
+      this.context.pushMessages(userText, stableReply);
+      return { status: 'clarification', reply: stableReply, route: evidence, reasonCode: evidence.reasonCode };
     }
     let reasoningStarted = false;
     timing.start('response.generate');

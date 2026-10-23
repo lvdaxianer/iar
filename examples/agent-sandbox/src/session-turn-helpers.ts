@@ -53,6 +53,25 @@ export function semanticIncompleteClarification(evidence: RouteEvidence): string
 }
 
 /**
+ * 为稳定路由失败生成不经过回复模型的固定说明。
+ *
+ * @param reasonCode - 已由运行时归一化的稳定原因码
+ * @returns 固定澄清文本；普通上下文追问返回 undefined
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+export function deterministicFallbackReply(reasonCode: string): string | undefined {
+  if (reasonCode === 'candidate_empty' || reasonCode === 'route_incomplete' || reasonCode === 'plugin_noul' || reasonCode === 'function_noul') {
+    return '当前没有匹配到可用的 Function。请检查已启用的 Plugin，或补充你希望处理的目标。';
+  }
+  if (reasonCode === 'bridge_timeout' || reasonCode === 'bridge_unavailable' || reasonCode === 'bridge_session_failed') {
+    return 'IAR 桥接当前不可用，本轮输入已安全阻断，请稍后重试。';
+  }
+  if (reasonCode.startsWith('model.')) return '当前模型暂时不可用，本轮未执行任何动作，请稍后重试。';
+  return undefined;
+}
+
+/**
  * 判断不完整语义帧是否可以交给结构化事实追问处理。
  * @param frame - 已通过 Schema 校验的语义帧
  * @param context - 当前会话行为上下文

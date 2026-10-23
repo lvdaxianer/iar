@@ -12,7 +12,7 @@ import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, sandboxOperationKind, summarizeAction } from './session-helpers.js';
 import { createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
 import { collectFunctionCandidates } from './function-collector.js';
-import { allowsContextFollowUp, applyRouteDiagnostic, finishConfirmedAction, gateIncompleteSemanticFrame, logActionResult, logRouteResult, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection, semanticIncompleteClarification } from './session-turn-helpers.js';
+import { allowsContextFollowUp, applyRouteDiagnostic, deterministicFallbackReply, finishConfirmedAction, gateIncompleteSemanticFrame, logActionResult, logRouteResult, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection, semanticIncompleteClarification } from './session-turn-helpers.js';
 import { withConfirmReplySource, withReplySource, type CompactResult, type ConfirmResult, type ExecuteTurnOutcome, type ExtractFrameOutcome, type PendingActionContext, type RouteEvidence, type StreamEvent, type TurnResult } from './session-types.js';
 import type { TurnTimingTracker } from './turn-timing.js';
 export type { CompactResult, ConfirmResult, PendingActionSummary, ReplySource, RouteEvidence, SandboxDecisionBackend, SandboxMode, SandboxState, StreamEvent, TurnResult, TurnStage } from './session-types.js';
@@ -239,6 +239,13 @@ export class IarSandboxSession extends SandboxSessionCore {
       timing.skip('response.generate');
       this.replies.pushMessages(userText, deterministicReply);
       return { status: 'clarification', reply: deterministicReply, route: evidence, reasonCode: evidence.reasonCode };
+    }
+    const canUseModelContext = hasVerifiedFactsForFollowUp(behaviorContext, evidence, userText) || matchesPendingOption(behaviorContext, userText);
+    const stableReply = canUseModelContext ? undefined : deterministicFallbackReply(evidence.reasonCode);
+    if (stableReply !== undefined) {
+      timing.skip('response.generate');
+      this.replies.pushMessages(userText, stableReply);
+      return { status: 'clarification', reply: stableReply, route: evidence, reasonCode: evidence.reasonCode };
     }
     // 未命中功能时只允许生成澄清回复，不能在兜底阶段隐式执行插件。
     timing.start('response.generate');
