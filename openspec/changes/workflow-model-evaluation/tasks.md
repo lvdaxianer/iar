@@ -7,7 +7,7 @@
 
 ## 2. Offline orchestration evaluation
 
-- [ ] 2.1 Add deterministic evaluation helpers that derive and assert the expected next runtime stage from validated semantic output and structured context; verify no model result can create a new Function/Plugin or bypass normal gates.
+- [x] 2.1 Add deterministic evaluation helpers that derive and assert the expected next runtime stage from validated semantic output and structured context; verify no model result can create a new Function/Plugin or bypass normal gates.
 - [ ] 2.2 Add normal and streamed session scenario tests for continuation recovery, named-field parameter merge and override, invalid field/type/enum clarification, disabled or missing Plugin/Function, confirmation/decline, user abandonment, new-topic reset, and stable-route unknown semantic frames.
 - [ ] 2.3 Add bounded evaluation reporting with stable scenario IDs and redacted summaries; verify default tests do not emit raw prompts, model responses, parameter values, or credentials.
 

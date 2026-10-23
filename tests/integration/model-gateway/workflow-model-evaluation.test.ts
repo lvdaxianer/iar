@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validateContract, type BehaviorContext } from '@iar/contracts';
+import { validateContract, type BehaviorContext, type JsonValue } from '@iar/contracts';
+import type { SemanticFrame } from '@iar/runtime';
 import { buildSemanticUserPrompt, SEMANTIC_SYSTEM_PROMPT } from '../../../examples/agent-sandbox/src/models/model-input-transport.js';
 import { DISABLED_PLUGIN, WORKFLOW_EVALUATION_SCENARIOS, type WorkflowEvaluationScenario } from './workflow-evaluation-fixtures.js';
+import { evaluateWorkflowFrame, type WorkflowEvaluationFunction } from './workflow-evaluation-oracle.js';
 
 function assertScenarioShape(scenario: WorkflowEvaluationScenario): void {
   assert.match(scenario.id, /^[a-z0-9-]+$/);
@@ -91,6 +93,86 @@ test('workflow evaluation captures confirmation and enforces bounded recent-mess
   assert.match(prompt, /<pending_action>[\s\S]*\"confirmationRequired\": true/);
   assert.match(prompt, /<recent_messages>[\s\S]*是否确认修改/);
 });
+
+test('workflow oracle restores a stable route before evaluating incomplete parameters', () => {
+  const scenario = findScenario('stable-route-unknown-frame');
+  const outcome = evaluateWorkflowFrame({
+    frame: semanticFrame({ intent: 'unknown', action: 'update', slots: { rate: 200 } }),
+    behaviorContext: scenario.behaviorContext,
+    authorizedFunctions: [rateFunction()]
+  });
+  assert.equal(outcome.nextStage, 'clarification');
+  assert.equal(outcome.execute, false);
+  assert.equal(outcome.functionId, 'function.synthetic.rate');
+  assert.equal(outcome.pluginId, 'plugin.synthetic.control');
+  assert.equal(outcome.reasonCode, 'parameters_required');
+  assert.equal(outcome.gates.descriptorMatched, true);
+  assert.equal(outcome.gates.parameterCollectionCompleted, false);
+});
+
+test('workflow oracle rejects fabricated targets and keeps high-risk actions behind confirmation', () => {
+  const fabricated = evaluateWorkflowFrame({
+    frame: semanticFrame({ intent: 'function.fabricated', pluginId: 'plugin.fabricated', action: 'update' }),
+    behaviorContext: findScenario('initial-function-missing').behaviorContext,
+    authorizedFunctions: [rateFunction()]
+  });
+  assert.equal(fabricated.nextStage, 'unavailable');
+  assert.equal(fabricated.execute, false);
+  assert.equal(fabricated.functionId, undefined);
+  assert.equal(fabricated.pluginId, undefined);
+  assert.equal(fabricated.gates.descriptorMatched, false);
+
+  const confirmationScenario = findScenario('confirmation-state-keeps-route');
+  const confirmation = evaluateWorkflowFrame({
+    frame: semanticFrame({ intent: 'function.synthetic.rate', pluginId: 'plugin.synthetic.control', action: 'update', slots: { operation: 'update', rate: 200, burst: 20 } }),
+    behaviorContext: confirmationScenario.behaviorContext,
+    authorizedFunctions: [rateFunction()]
+  });
+  assert.equal(confirmation.nextStage, 'awaiting_confirmation');
+  assert.equal(confirmation.execute, false);
+  assert.equal(confirmation.gates.policyValidated, true);
+  assert.equal(confirmation.gates.confirmationSatisfied, false);
+});
+
+test('workflow oracle marks only fully gated low-risk input as executable', () => {
+  const outcome = evaluateWorkflowFrame({
+    frame: semanticFrame({ intent: 'function.synthetic.query', pluginId: 'plugin.synthetic.query', action: 'query', slots: { operation: 'query' } }),
+    behaviorContext: findScenario('initial-function-missing').behaviorContext,
+    authorizedFunctions: [queryFunction()]
+  });
+  assert.equal(outcome.nextStage, 'executed');
+  assert.equal(outcome.execute, true);
+  assert.equal(outcome.gates.schemaValidated, true);
+  assert.equal(outcome.gates.parameterCollectionCompleted, true);
+  assert.equal(outcome.gates.policyValidated, true);
+  assert.equal(outcome.gates.idempotencyValidated, true);
+  assert.equal(outcome.gates.confirmationSatisfied, true);
+  assert.equal(outcome.gates.handlerReachable, true);
+});
+
+function semanticFrame(input: { intent: string; action: SemanticFrame['action']; pluginId?: string; slots?: Record<string, JsonValue> }): SemanticFrame {
+  return {
+    schemaVersion: 'iar.semantic-frame/v2', intent: input.intent, action: input.action,
+    slots: input.slots ?? {}, references: [], confidence: 0.95,
+    ...(input.pluginId === undefined ? {} : { pluginId: input.pluginId })
+  };
+}
+
+function rateFunction(): WorkflowEvaluationFunction {
+  return {
+    functionId: 'function.synthetic.rate', pluginId: 'plugin.synthetic.control', actionTypes: ['update'],
+    inputSchema: { type: 'object', properties: { operation: { type: 'string' }, rate: { type: 'number' }, burst: { type: 'number' } }, required: ['operation', 'rate', 'burst'], additionalProperties: false },
+    requiresConfirmation: true
+  };
+}
+
+function queryFunction(): WorkflowEvaluationFunction {
+  return {
+    functionId: 'function.synthetic.query', pluginId: 'plugin.synthetic.query', actionTypes: ['query'],
+    inputSchema: { type: 'object', properties: { operation: { type: 'string' } }, required: ['operation'], additionalProperties: false },
+    requiresConfirmation: false
+  };
+}
 
 function findScenario(id: string): WorkflowEvaluationScenario {
   const scenario = WORKFLOW_EVALUATION_SCENARIOS.find((candidate) => candidate.id === id);
