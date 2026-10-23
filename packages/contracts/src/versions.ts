@@ -23,7 +23,9 @@ export const SCHEMA_VERSIONS = {
   functionResponse: 'iar.function-response/v1',
   pluginManifest: 'iar.plugin-manifest/v1',
   rule: 'iar.rule/v1',
-  workflow: 'iar.workflow/v1'
+  workflow: 'iar.workflow/v1',
+  // Workflow decision 版本覆盖模型事件分类，不覆盖执行授权。
+  workflowDecision: 'iar.workflow-decision/v1'
 } as const;
 
 /** 表示 IAR 支持的公共 API 版本类型。 */

@@ -6,3 +6,5 @@ export * from './types-compaction.js';
 export * from './types-routing.js';
 // Action、状态与事件类型。
 export * from './types-state.js';
+// Workflow decision 非权威事件类型。
+export * from './types-workflow.js';

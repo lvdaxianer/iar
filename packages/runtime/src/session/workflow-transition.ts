@@ -1,0 +1,87 @@
+/**
+ * 提供通用 Workflow 事件到状态的确定性转换。
+ *
+ * 该模块只接受已通过 contracts 校验的 WorkflowDecision，不解析业务标识，
+ * 也不执行任何 Function。真正的执行授权仍由路由、Schema、权限、策略、
+ * 幂等和确认门禁共同决定。
+ *
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+import type { WorkflowDecision, WorkflowEvent } from '@iar/contracts';
+
+/** Runtime 派生的通用 Workflow 状态。 */
+export type WorkflowPhase =
+  | 'normal'
+  | 'function_selection'
+  | 'collecting_parameters'
+  | 'awaiting_confirmation'
+  | 'executing'
+  | 'completed'
+  | 'cancelled'
+  | 'failed';
+
+/** 状态转换成功或被安全拒绝的结果。 */
+export type WorkflowTransitionResult =
+  | { ok: true; currentState: WorkflowPhase; nextState: WorkflowPhase; event: WorkflowEvent }
+  | { ok: false; reasonCode: 'workflow_transition_invalid'; currentState: WorkflowPhase; event: WorkflowEvent };
+
+/** 终态不接受新的执行事件，只能由新输入重新进入 normal。 */
+const TERMINAL_PHASES = new Set<WorkflowPhase>(['completed', 'failed']);
+
+/** 有界的事件转换表；未声明的事件默认拒绝。 */
+const TRANSITIONS: Readonly<Record<WorkflowPhase, Partial<Record<WorkflowEvent, WorkflowPhase>>>> = {
+  normal: {
+    function_selected: 'function_selection',
+    parameter_received: 'collecting_parameters',
+    new_topic: 'normal',
+    workflow_cancelled: 'cancelled'
+  },
+  function_selection: {
+    function_selected: 'function_selection',
+    parameter_received: 'collecting_parameters',
+    workflow_cancelled: 'cancelled',
+    new_topic: 'normal'
+  },
+  collecting_parameters: {
+    parameter_received: 'collecting_parameters',
+    parameter_invalid: 'collecting_parameters',
+    workflow_cancelled: 'cancelled',
+    new_topic: 'normal'
+  },
+  awaiting_confirmation: {
+    confirmation_accepted: 'executing',
+    confirmation_rejected: 'collecting_parameters',
+    workflow_cancelled: 'cancelled',
+    new_topic: 'normal'
+  },
+  executing: {},
+  completed: {
+    new_topic: 'normal'
+  },
+  cancelled: {
+    new_topic: 'normal'
+  },
+  failed: {
+    new_topic: 'normal'
+  }
+};
+
+/**
+ * 按有限转换表计算下一状态。
+ *
+ * @param currentState - Runtime 根据 BehaviorContext 派生的当前状态
+ * @param decision - 已通过 WorkflowDecision Schema 的非权威事件
+ * @returns 确定性转换结果，不执行副作用
+ */
+export function transitionWorkflow(currentState: WorkflowPhase, decision: WorkflowDecision): WorkflowTransitionResult {
+  const event = decision.event;
+  const transitions = Object.hasOwn(TRANSITIONS, currentState) ? TRANSITIONS[currentState] : undefined;
+  if (!transitions) return { ok: false, reasonCode: 'workflow_transition_invalid', currentState, event };
+  if (TERMINAL_PHASES.has(currentState) && event !== 'new_topic') {
+    return { ok: false, reasonCode: 'workflow_transition_invalid', currentState, event };
+  }
+  const nextState = transitions[event];
+  if (!nextState) return { ok: false, reasonCode: 'workflow_transition_invalid', currentState, event };
+  return { ok: true, currentState, nextState, event };
+}
