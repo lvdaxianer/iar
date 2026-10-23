@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { ACTION_TYPES, MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGE_LIMIT, validateContract, type ActionType, type BehaviorContext, type CompactionResult, type DecisionResult, type JsonValue } from '@iar/contracts';
+import { ACTION_TYPES, MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGE_LIMIT, validateContract, type ActionType, type BehaviorContext, type CompactionResult, type DecisionResult, type JsonValue, type WorkflowDecision } from '@iar/contracts';
 import { validateDecisionOutput } from '../validation.js';
 import type { DecisionRequest } from '../types.js';
 import { MODEL_NO_PROFILE_MESSAGE, type ModelGatewayInvocationOptions, type ModelGatewayResult, type ModelInvocation, type ModelOutputValidation } from './types.js';
@@ -31,6 +31,8 @@ export type SemanticFrame = {
   references: Array<LegacySemanticReference | HistoricalSemanticReference>;
   /** 0 到 1 的模型置信度。 */
   confidence: number;
+  /** 可选的非权威 Workflow 事件分类；旧 frame 没有该字段。 */
+  workflowDecision?: WorkflowDecision;
 };
 
 /** 旧版引用结构，仅用于兼容 v1 空间。 */
@@ -338,14 +340,28 @@ export type ClarificationMetadata = {
   options?: Array<{ key: string; label: string }>;
 };
 
-/** 校验 SemanticFrame 输出并复制成稳定对象。 */
-/** 校验 SemanticFrame 输出。 @param raw - provider 原始输出 @returns 结构化验证结果 @author lvdaxianer@yeah.net @date 2026-10-17 */
+/** 校验 SemanticFrame 输出并兼容新的 workflow decision envelope。 */
 function validateSemanticFrame(raw: unknown): ModelOutputValidation<SemanticFrame> {
+  const payload = normalizeSemanticPayload(raw);
+  if (!payload) return { ok: false, message: 'SemanticFrame Schema 无效' };
+  const frame = payload.frame;
   // SemanticFrame 只允许抽取字段，未知字段不能进入规则引擎。
-  if (!isRecord(raw) || !hasOnlyKeys(raw, ['schemaVersion', 'subject', 'intent', 'pluginId', 'action', 'slots', 'references', 'confidence'])) return { ok: false, message: 'SemanticFrame Schema 无效' };
-  const schemaVersion = raw.schemaVersion;
-  if (!isSemanticFrameVersion(schemaVersion) || !isNonEmptyString(raw.intent) || (raw.pluginId !== undefined && !isNonEmptyString(raw.pluginId)) || !isRecord(raw.slots) || !isJsonValue(raw.slots) || !Array.isArray(raw.references) || !raw.references.every((reference) => isReference(reference, schemaVersion)) || typeof raw.confidence !== 'number' || !Number.isFinite(raw.confidence) || raw.confidence < 0 || raw.confidence > 1 || (raw.subject !== undefined && !isSubject(raw.subject)) || (raw.action !== undefined && !isSemanticActionType(raw.action))) return { ok: false, message: 'SemanticFrame Schema 无效' };
-  return { ok: true, value: { ...structuredClone(raw) as Omit<SemanticFrame, 'action'> & { action?: SemanticActionType }, action: raw.action ?? 'unknown' } };
+  if (!hasOnlyKeys(frame, ['schemaVersion', 'subject', 'intent', 'pluginId', 'action', 'slots', 'references', 'confidence'])) return { ok: false, message: 'SemanticFrame Schema 无效' };
+  const schemaVersion = frame.schemaVersion;
+  if (!isSemanticFrameVersion(schemaVersion) || !isNonEmptyString(frame.intent) || (frame.pluginId !== undefined && !isNonEmptyString(frame.pluginId)) || !isRecord(frame.slots) || !isJsonValue(frame.slots) || !Array.isArray(frame.references) || !frame.references.every((reference) => isReference(reference, schemaVersion)) || typeof frame.confidence !== 'number' || !Number.isFinite(frame.confidence) || frame.confidence < 0 || frame.confidence > 1 || (frame.subject !== undefined && !isSubject(frame.subject)) || (frame.action !== undefined && !isSemanticActionType(frame.action))) return { ok: false, message: 'SemanticFrame Schema 无效' };
+  return { ok: true, value: { ...structuredClone(frame) as Omit<SemanticFrame, 'action' | 'workflowDecision'> & { action?: SemanticActionType }, action: frame.action ?? 'unknown', ...(payload.workflowDecision ? { workflowDecision: payload.workflowDecision } : {}) } };
+}
+
+/** Semantic envelope 的内部归一化结果。 */
+type SemanticPayload = { frame: Record<string, unknown>; workflowDecision?: WorkflowDecision };
+
+/** 解析旧直出 frame 或新 envelope，先拒绝未知外层字段。 */
+function normalizeSemanticPayload(raw: unknown): SemanticPayload | undefined {
+  if (!isRecord(raw)) return undefined;
+  if (!Object.hasOwn(raw, 'semanticFrame')) return { frame: raw };
+  if (!hasOnlyKeys(raw, ['semanticFrame', 'workflowDecision']) || !isRecord(raw.semanticFrame) || !Object.hasOwn(raw, 'workflowDecision')) return undefined;
+  const validation = validateContract('workflowDecision', raw.workflowDecision);
+  return validation.ok ? { frame: raw.semanticFrame, workflowDecision: structuredClone(validation.value) as WorkflowDecision } : undefined;
 }
 
 /** 只允许固定动作类型进入路由事实，避免模型动态创造动作语义。 */
