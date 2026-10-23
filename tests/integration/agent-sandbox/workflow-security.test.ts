@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { SCHEMA_VERSIONS, type CollectionState } from '@iar/contracts';
 import { classifySessionWorkflowDecision, recoverContinuation } from '../../../examples/agent-sandbox/src/session-clarification.js';
+import { constrainFrame } from '../../../examples/agent-sandbox/src/session-routing.js';
 import { IarSandboxSession } from '../../../examples/agent-sandbox/src/session.js';
 import type { PluginDescriptor } from '@iar/plugins';
 import { createInitialContext, type SemanticFrame } from '@iar/runtime';
@@ -38,6 +39,50 @@ test('continuation recovery ignores model-created Function and Plugin identifier
   assert.equal(recovered.pluginId, 'verified.plugin');
   assert.equal(recovered.frame.intent, 'verified.function');
   assert.equal(recovered.frame.pluginId, 'verified.plugin');
+});
+
+test('verified Function without Plugin resolves its unique authorized Plugin', () => {
+  const context = createInitialContext('function-only-route');
+  context.route = { functionId: 'verified.function' };
+  const descriptor = { functionId: 'verified.function', pluginId: 'verified.plugin', actionTypes: ['update'] } as unknown as PluginDescriptor;
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'unknown', action: 'unknown', slots: {}, references: [], confidence: 0.2,
+    workflowDecision: { schemaVersion: SCHEMA_VERSIONS.workflowDecision, userIntent: 'provide_parameter', event: 'parameter_received' }
+  };
+  const recovered = recoverContinuation([descriptor], context, frame, '补充参数');
+  assert.equal(recovered.functionId, 'verified.function');
+  assert.equal(recovered.pluginId, 'verified.plugin');
+  assert.equal(recovered.reasonCode, undefined);
+});
+
+test('Plugin-only continuation with multiple Functions returns candidates for clarification', () => {
+  const context = createInitialContext('plugin-only-route');
+  context.route = { pluginId: 'verified.plugin' };
+  const descriptors = [
+    { functionId: 'verified.first', pluginId: 'verified.plugin', actionTypes: ['query'] },
+    { functionId: 'verified.second', pluginId: 'verified.plugin', actionTypes: ['query'] }
+  ] as unknown as PluginDescriptor[];
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'unknown', action: 'unknown', slots: {}, references: [], confidence: 0.2,
+    workflowDecision: { schemaVersion: SCHEMA_VERSIONS.workflowDecision, userIntent: 'select_function', event: 'function_selected' }
+  };
+  const recovered = recoverContinuation(descriptors, context, frame, '选择一个功能');
+  assert.equal(recovered.reasonCode, 'function_ambiguous');
+  assert.deepEqual(recovered.candidateDescriptors?.map((item) => item.functionId), ['verified.first', 'verified.second']);
+});
+
+test('ambiguous or invalid actions never default to the first descriptor action', () => {
+  const descriptor = { functionId: 'verified.function', pluginId: 'verified.plugin', actionTypes: ['query', 'update'] } as unknown as PluginDescriptor;
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'model.created.function', pluginId: 'model.created.plugin', action: 'unknown', slots: {}, references: [], confidence: 0.99
+  };
+  assert.equal(constrainFrame(frame, descriptor).action, 'unknown');
+
+  const context = createInitialContext('invalid-action');
+  context.route = { functionId: descriptor.functionId, pluginId: descriptor.pluginId };
+  const invalidFrame = { ...frame, action: 'create' as const };
+  const recovered = recoverContinuation([descriptor], context, invalidFrame, '继续');
+  assert.equal(recovered.frame.action, 'unknown');
 });
 
 test('ordinary and streamed high-risk turns wait for confirmation before execution', async () => {

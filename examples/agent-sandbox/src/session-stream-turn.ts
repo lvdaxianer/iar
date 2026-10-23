@@ -3,7 +3,7 @@ import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
 import { allowsContextFollowUp, applyRouteDiagnostic, canPassThrough, deterministicFallbackReply, gateIncompleteSemanticFrame, logActionResult, logRouteResult, pendingBridgeResult, resolveNoMatchTurn, runPiAgentDelegate, semanticIncompleteClarification } from './session-turn-helpers.js';
-import { classifySessionWorkflowDecision, hasVerifiedFactsForFollowUp, matchesPendingOption, recoverContinuation, workflowDecisionReply } from './session-clarification.js';
+import { classifySessionWorkflowDecision, hasVerifiedFactsForFollowUp, matchesPendingOption, recoverContinuation, recoverFunctionCandidates, workflowDecisionReply } from './session-clarification.js';
 import type { ActionDefinition, ActionResult, BehaviorContext, CollectionState, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
@@ -173,6 +173,8 @@ export class SandboxSessionStreamTurn {
     const effectiveDescriptor = recovered.descriptor ?? selectedDescriptor;
     if (recovered.reasonCode !== undefined) {
       const evidence: RouteEvidence = { status: 'rejected', reasonCode: recovered.reasonCode, semanticIntent: frame.intent, semanticConfidence: frame.confidence, ...(recovered.functionId === undefined ? {} : { functionId: recovered.functionId }), ...(recovered.pluginId === undefined ? {} : { pluginId: recovered.pluginId }) };
+      const candidates = await recoverFunctionCandidates({ userText, recovery: recovered, frame, evidence, collect: (candidateContext) => this.context.collectFunctionCandidates(candidateContext) });
+      if (candidates) return candidates;
       return this.finishStreamFallback({ userText, traceId, emit, behaviorContext, timing, evidence });
     }
     const references = this.context.resolveReferences(frame, behaviorContext);

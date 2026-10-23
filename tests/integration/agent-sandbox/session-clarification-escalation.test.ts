@@ -106,7 +106,7 @@ test('有效动态候选重新进入正常路由和执行门禁', async () => {
     await session.turn('这是一条无法判断用途的输入');
     await session.turn('蓝色的云朵正在窗外发光');
     const before = await session.state();
-    const key = before.context.clarification?.candidateKeys?.[0];
+    const key = findSingleActionCandidate(session, before.context.clarification?.candidateKeys);
     assert.ok(key);
     const result = await session.turn(key);
     assert.notEqual(result.status, 'failed');
@@ -146,7 +146,7 @@ test('流式入口与普通入口共享动态选择和 unresolved 状态机', as
     const second = await session.turnStreamed('另一条仍然无法判断用途的输入', (event) => events.push(event));
     assert.equal(second.status, 'clarification');
     const state = await session.state();
-    const key = state.context.clarification?.candidateKeys?.[0];
+    const key = findSingleActionCandidate(session, state.context.clarification?.candidateKeys);
     assert.ok(key);
     const selected = await session.turnStreamed(key, (event) => events.push(event));
     assert.notEqual(selected.status, 'failed');
@@ -189,4 +189,18 @@ function assertOptionLabel(options: Array<{ key: string; label: string }> | unde
   const label = options?.find((option) => option.key === key)?.label;
   assert.ok(label);
   return label;
+}
+
+/** 选择当前授权快照中动作唯一的候选，验证多动作目标不会被默认猜测。
+ * @param session - 当前 sandbox 会话
+ * @param candidateKeys - 澄清状态暴露的候选键
+ * @returns 动作唯一的候选键
+ * @author lvdaxianerplus
+ * @date 2026-10-24
+ */
+function findSingleActionCandidate(session: IarSandboxSession, candidateKeys: string[] | undefined): string {
+  const host = (session as unknown as { pluginHost: { descriptors: () => Array<{ candidateKey: string; actionTypes: string[] }> } }).pluginHost;
+  const descriptor = host.descriptors().find((item) => candidateKeys?.includes(item.candidateKey) && item.actionTypes.length === 1);
+  assert.ok(descriptor);
+  return descriptor.candidateKey;
 }

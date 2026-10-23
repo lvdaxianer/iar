@@ -10,7 +10,7 @@ import type { PluginDescriptor } from '@iar/plugins';
 import { confirmationScopeHash, type RouteResult, type SemanticFrame } from '@iar/runtime';
 import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, sandboxOperationKind, summarizeAction } from './session-helpers.js';
-import { classifySessionWorkflowDecision, createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption, recoverContinuation, workflowDecisionReply } from './session-clarification.js';
+import { classifySessionWorkflowDecision, createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption, recoverContinuation, recoverFunctionCandidates, workflowDecisionReply } from './session-clarification.js';
 import { collectFunctionCandidates } from './function-collector.js';
 import { allowsContextFollowUp, applyRouteDiagnostic, deterministicFallbackReply, finishConfirmedAction, gateIncompleteSemanticFrame, logActionResult, logRouteResult, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection, semanticIncompleteClarification } from './session-turn-helpers.js';
 import { withConfirmReplySource, withReplySource, type CompactResult, type ConfirmResult, type ExecuteTurnOutcome, type ExtractFrameOutcome, type PendingActionContext, type RouteEvidence, type StreamEvent, type StructuredInput, type TurnResult } from './session-types.js';
@@ -139,7 +139,6 @@ export class IarSandboxSession extends SandboxSessionCore {
   public turnStreamed(text: string, emit: (event: StreamEvent) => void, structuredInput?: StructuredInput): Promise<TurnResult> {
     return this.whenReady().then(() => this.streaming.turnStreamed(text, emit, false, structuredInput)).then((result) => recordAgentExchange(this.piAgent, text, withReplySource(result)));
   }
-
   /** Bridge 流式输入保持 pass_through；@author lvdaxianer@yeah.net @date 2026-10-22 */
   public bridgeTurnStreamed(text: string, emit: (event: StreamEvent) => void): Promise<TurnResult> { return this.whenReady().then(() => this.streaming.turnStreamed(text, emit, true)).then((result) => withReplySource(result)); }
   /**
@@ -153,7 +152,6 @@ export class IarSandboxSession extends SandboxSessionCore {
   public async turn(text: string, structuredInput?: StructuredInput): Promise<TurnResult> {
     return recordAgentExchange(this.piAgent, text, withReplySource(await this.turnRunner.run(text, false, structuredInput)));
   }
-
   /**
    * 执行一轮供 Pi bridge 使用的输入。
    * IAR 明确没有业务路由时返回 pass_through；待确认状态不会被普通输入取消。
@@ -196,6 +194,8 @@ export class IarSandboxSession extends SandboxSessionCore {
     const effectiveDescriptor = recovered.descriptor ?? selectedDescriptor;
     if (recovered.reasonCode !== undefined) {
       const evidence: RouteEvidence = { status: 'rejected', reasonCode: recovered.reasonCode, semanticIntent: frame.intent, semanticConfidence: frame.confidence, ...(recovered.functionId === undefined ? {} : { functionId: recovered.functionId }), ...(recovered.pluginId === undefined ? {} : { pluginId: recovered.pluginId }) };
+      const candidates = await recoverFunctionCandidates({ userText, recovery: recovered, frame, evidence, collect: (candidateContext) => this.collectFunctionCandidates(candidateContext) });
+      if (candidates) return candidates;
       return this.finishNormalFallback({ userText, traceId, behaviorContext, timing, evidence });
     }
     const references = this.routing.resolveReferences(frame, behaviorContext);
@@ -357,7 +357,6 @@ export class IarSandboxSession extends SandboxSessionCore {
     this.replies.pushMessages(context.userText, reply);
     return { result: { status: 'clarification', reply, route: { ...context.evidence, status: 'clarification', reasonCode: 'function_collection_required' }, reasonCode: 'function_collection_required' } };
   }
-
   /** 累加未解决状态，达到阈值时将当前授权候选转换为动态选择。 */
   public async markUnresolved(reasonCode: string, pendingReference?: PendingReference): Promise<void> {
     const current = this.projector.current();
@@ -370,7 +369,6 @@ export class IarSandboxSession extends SandboxSessionCore {
     }
     await this.updateClarificationState({ mode: 'unresolved', unresolvedStreak: streak, reasonCode }, current.pending, pendingReference ?? null);
   }
-
   /** 保存已固定 Function 的参数收集状态，不升级为 Function 选择或执行授权。 */
   public async updateParameterCollection(collection: Extract<CollectionState, { kind: 'parameters' }>): Promise<void> {
     const current = this.projector.current();
@@ -381,12 +379,10 @@ export class IarSandboxSession extends SandboxSessionCore {
       collection
     );
   }
-
   /** 成功进入确认或执行阶段后清除旧的 unresolved 状态。 */
   public async resetClarification(): Promise<void> {
     await this.updateClarificationState({ mode: 'none', unresolvedStreak: 0 }, { kind: 'input', status: 'none' }, null, null);
   }
-
   /** 解析待选择的候选键，只接受当前启用且授权的候选快照。 */
   public resolveSelection(text: string, context: BehaviorContext): { descriptor?: PluginDescriptor; invalid: boolean; reasonCode: string } { return resolveSelection(this.pluginHost.descriptors(), text, context); }
   /** 对过期或非法候选选择 fail-closed，不触发语义路由或插件执行。 */

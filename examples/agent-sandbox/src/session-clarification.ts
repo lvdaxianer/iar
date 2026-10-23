@@ -1,8 +1,8 @@
 import { MAX_CANDIDATE_VERSION_LENGTH, MAX_CLARIFICATION_LABEL_LENGTH, MAX_CLARIFICATION_OPTIONS, type BehaviorContext, type ClarificationState, type PendingInput } from '@iar/contracts';
 import type { PluginDescriptor } from '@iar/plugins';
-import { classifyWorkflowDecision, projectWorkflowContext, type SemanticFrame, type WorkflowDecisionDisposition } from '@iar/runtime';
+import { classifyWorkflowDecision, projectWorkflowContext, type RouteResult, type SemanticFrame, type WorkflowDecisionDisposition } from '@iar/runtime';
 import type { WorkflowDecision } from '@iar/contracts';
-import type { RouteEvidence } from './session-types.js';
+import type { RouteEvidence, TurnResult } from './session-types.js';
 
 const GENERIC_CONTINUATION_PATTERN = /(继续|修改|改成|调整|调到|设为|提高|降低|执行这个|按这个|照这个|重试|再试|重新|proceed|retry|change|update|adjust|set|run)/iu;
 const UPDATE_CONTINUATION_PATTERN = /(修改|改成|调整|调到|设为|提高|降低|change|update|adjust|set)/iu;
@@ -40,8 +40,25 @@ export type ContinuationRecovery = {
   descriptor?: PluginDescriptor;
   functionId?: string;
   pluginId?: string;
-  reasonCode?: 'function_unavailable' | 'plugin_unavailable';
+  candidateDescriptors?: PluginDescriptor[];
+  reasonCode?: ContinuationRecoveryReasonCode;
 };
+
+export type ContinuationRecoveryReasonCode = 'function_unavailable' | 'plugin_unavailable' | 'function_ambiguous' | 'plugin_ambiguous';
+
+/** 将恢复后的多候选目标统一转换为可选择澄清，供普通与流式入口复用。
+ * @param input - 当前输入、恢复结果、路由证据和候选收集器
+ * @returns 候选收集器生成的澄清结果；无候选时返回 undefined
+ * @author lvdaxianerplus
+ * @date 2026-10-24
+ */
+export async function recoverFunctionCandidates(input: { userText: string; recovery: ContinuationRecovery; frame: SemanticFrame; evidence: RouteEvidence; collect: (context: { userText: string; route: RouteResult; frame: SemanticFrame; evidence: RouteEvidence }) => Promise<{ result?: TurnResult }> }): Promise<TurnResult | undefined> {
+  const { recovery } = input;
+  if (recovery.candidateDescriptors === undefined || recovery.reasonCode === undefined) return undefined;
+  const evidence = { ...input.evidence, status: 'clarification' };
+  const candidates = await input.collect({ userText: input.userText, route: { status: 'needs_clarification', reasonCode: recovery.reasonCode, ...(recovery.functionId === undefined ? {} : { functionId: recovery.functionId }), ...(recovery.pluginId === undefined ? {} : { pluginId: recovery.pluginId }) }, frame: input.frame, evidence });
+  return candidates.result;
+}
 
 /** 让普通与流式入口共享同一套模型事件校验和取消分类。 */
 export function classifySessionWorkflowDecision(context: BehaviorContext, decision: WorkflowDecision | undefined): WorkflowDecisionDisposition {
@@ -65,10 +82,11 @@ export function recoverContinuation(descriptors: readonly PluginDescriptor[], co
       ? { functionId: context.route.functionId, pluginId: context.route.pluginId }
       : undefined;
   if (target === undefined) return { frame };
-  if (target.functionId === undefined || target.pluginId === undefined) return { frame, ...(target.functionId === undefined ? {} : { functionId: target.functionId }), ...(target.pluginId === undefined ? {} : { pluginId: target.pluginId }), reasonCode: target.pluginId === undefined ? 'plugin_unavailable' : 'function_unavailable' };
-  const descriptor = findExactDescriptor(descriptors, target.functionId, target.pluginId);
-  if (descriptor === undefined) return { frame, functionId: target.functionId, pluginId: target.pluginId, reasonCode: 'plugin_unavailable' };
-  return { frame: recoverContinuationFrame(frame, context, descriptor, userText), descriptor, functionId: target.functionId, pluginId: target.pluginId };
+  const matches = findMatchingDescriptors(descriptors, target.functionId, target.pluginId);
+  if (matches.length !== 1) return { frame, ...(target.functionId === undefined ? {} : { functionId: target.functionId }), ...(target.pluginId === undefined ? {} : { pluginId: target.pluginId }), ...(matches.length > 1 ? { candidateDescriptors: matches } : {}), reasonCode: resolveRecoveryReason(descriptors, target, matches.length) };
+  const descriptor = matches[0];
+  if (descriptor === undefined) return { frame, reasonCode: resolveRecoveryReason(descriptors, target, matches.length) };
+  return { frame: recoverContinuationFrame(frame, context, descriptor, userText), descriptor, functionId: descriptor.functionId, pluginId: descriptor.pluginId };
 }
 
 /**
@@ -85,16 +103,22 @@ export function recoverContinuationFrame(frame: SemanticFrame, context: Behavior
   return { ...frame, intent: descriptor.functionId, pluginId: descriptor.pluginId, action: recoverAction(frame.action, descriptor, context, userText) };
 }
 
-/** 查找同时匹配 Function 和可选 Plugin 的唯一描述，避免跨实现猜测。 */
-function findExactDescriptor(descriptors: readonly PluginDescriptor[], functionId: string | undefined, pluginId: string | undefined): PluginDescriptor | undefined {
-  if (!functionId) return undefined;
-  const matches = descriptors.filter((descriptor) => descriptor.functionId === functionId && (pluginId === undefined || descriptor.pluginId === pluginId));
-  return matches.length === 1 ? matches[0] : undefined;
+/** 查找匹配已验证目标的当前授权描述。 */
+function findMatchingDescriptors(descriptors: readonly PluginDescriptor[], functionId: string | undefined, pluginId: string | undefined): PluginDescriptor[] {
+  return descriptors.filter((descriptor) => (functionId === undefined || descriptor.functionId === functionId) && (pluginId === undefined || descriptor.pluginId === pluginId));
+}
+
+/** 将零个或多个匹配归一化为稳定的不可执行原因。 */
+function resolveRecoveryReason(descriptors: readonly PluginDescriptor[], target: { functionId: string | undefined; pluginId: string | undefined }, matchCount: number): ContinuationRecoveryReasonCode {
+  if (matchCount > 1) return target.functionId === undefined ? 'function_ambiguous' : 'plugin_ambiguous';
+  if (target.pluginId !== undefined) return 'plugin_unavailable';
+  if (target.functionId === undefined) return 'function_unavailable';
+  return descriptors.some((descriptor) => descriptor.functionId === target.functionId) ? 'plugin_unavailable' : 'function_unavailable';
 }
 
 /** 在 descriptor 声明范围内恢复当前轮动作，无法唯一确定时保留 unknown。 */
 function recoverAction(frameAction: SemanticFrame['action'], descriptor: PluginDescriptor, context: BehaviorContext, userText: string): SemanticFrame['action'] {
-  if (isDeclaredAction(frameAction, descriptor)) return frameAction;
+  if (frameAction !== 'unknown') return isDeclaredAction(frameAction, descriptor) ? frameAction : 'unknown';
   const inferred = inferContinuationAction(userText, descriptor);
   if (inferred !== undefined) return inferred;
   const operation = context.collection?.kind === 'parameters' ? context.collection.collected.operation : context.slots.operation?.value;

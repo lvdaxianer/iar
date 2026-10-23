@@ -501,8 +501,16 @@ function higherRisk(left: NonNullable<FunctionRule['riskLevel']>, right: PluginD
   return (left && rank[left] >= rank[right] ? left : right);
 }
 
-/** 将模型语义限制在用户已选择的当前候选范围内，不直接创建 Action。 */
-function constrainFrame(frame: SemanticFrame, descriptor: PluginDescriptor): SemanticFrame {
-  const action = frame.action !== undefined && descriptor.actionTypes.includes(frame.action as ActionType) ? frame.action : (descriptor.actionTypes[0] ?? 'unknown');
+/**
+ * 将模型语义限制在用户已选择的当前候选范围内，不直接创建 Action。
+ *
+ * @param frame - 已通过语义契约校验的模型帧
+ * @param descriptor - 当前已验证且已授权的 Function 描述
+ * @returns 保留合法动作、唯一恢复动作或 unknown 的语义帧
+ */
+export function constrainFrame(frame: SemanticFrame, descriptor: PluginDescriptor): SemanticFrame {
+  const action = frame.action !== 'unknown'
+    ? (descriptor.actionTypes.includes(frame.action as ActionType) ? frame.action : 'unknown')
+    : descriptor.actionTypes.length === 1 ? descriptor.actionTypes[0] ?? 'unknown' : 'unknown';
   return { ...frame, intent: descriptor.functionId, action };
 }
