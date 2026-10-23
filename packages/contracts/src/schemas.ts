@@ -46,6 +46,7 @@ import {
   // 状态转移 Schema。
   WorkflowTransitionSchema
 } from './schema-routing.js';
+import { WorkflowDecisionSchema, WorkflowEventSchema, WorkflowUserIntentSchema } from './schema-workflow.js';
 import {
   // Function 定义 Schema。
   FunctionDefinitionSchema,
@@ -93,7 +94,9 @@ export const CONTRACT_SCHEMAS = {
   // Function/Plugin 规则。
   rule: RuleDefinitionSchema,
   // 本地工作流状态机。
-  workflow: WorkflowDefinitionSchema
+  workflow: WorkflowDefinitionSchema,
+  // 模型 Workflow 事件分类，不包含执行标识。
+  workflowDecision: WorkflowDecisionSchema
 } as const satisfies Record<string, TSchema>;
 
 // 验证器只从该映射取得公共 Schema，避免散落的动态名称。
@@ -131,6 +134,9 @@ export {
   WorkflowDefinitionSchema,
   WorkflowTransitionSchema
 };
+
+/** 重新导出 Workflow decision Schema。 */
+export { WorkflowDecisionSchema, WorkflowEventSchema, WorkflowUserIntentSchema };
 
 /** 重新导出状态与事件 Schema，供存储和运行时复用。 */
 export {
