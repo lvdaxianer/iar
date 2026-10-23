@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import type { ActionType, FunctionResponse, JsonValue, RiskLevel } from './types-base.js';
+import { MAX_TRUSTED_FACT_KEY_LENGTH, type ActionType, type FunctionResponse, type JsonValue, type RiskLevel } from './types-base.js';
 import type { WorkflowStatus } from './types-routing.js';
 
 /** 最近消息窗口允许的最大消息数量。 */
@@ -30,6 +30,12 @@ export const MAX_CLARIFICATION_REASON_LENGTH = 120;
 export const MAX_CANDIDATE_VERSION_LENGTH = 200;
 export const MAX_CANDIDATE_KEY_LENGTH = 60;
 export const MAX_CLARIFICATION_LABEL_LENGTH = 200;
+
+/** 收集器状态的有界候选、字段和值上限。 */
+export const MAX_COLLECTION_CANDIDATES = MAX_CLARIFICATION_OPTIONS;
+export const MAX_COLLECTION_FIELDS = 32;
+export const MAX_COLLECTION_ATTEMPTS = MAX_UNRESOLVED_STREAK;
+export const MAX_COLLECTION_FIELD_LENGTH = MAX_TRUSTED_FACT_KEY_LENGTH;
 
 /** 待解析引用原文和候选记录的边界。 */
 export const MAX_PENDING_REFERENCE_TEXT_LENGTH = 300;
@@ -200,6 +206,45 @@ export type ClarificationState = {
   candidateKeys?: string[];
 };
 
+/** 可恢复的通用 Function/参数收集状态，不代表授权或执行。 */
+export type CollectionState =
+  | {
+      /** Function 尚未唯一确定。 */
+      kind: 'function';
+      /** 已确定 Plugin 时只在该 Plugin 范围内收集。 */
+      pluginId?: string;
+      /** 当前允许模型和用户选择的不透明 Function ID 集合。 */
+      candidateFunctionIds: string[];
+      /** 用于区分同名 Function 实现的不透明候选键集合。 */
+      candidateKeys?: string[];
+      /** 收集触发原因。 */
+      reasonCode: 'function_missing' | 'function_ambiguous';
+      /** 当前收集轮次。 */
+      attempt: number;
+    }
+  | {
+      /** Function 已确定，但输入参数还未满足 Schema。 */
+      kind: 'parameters';
+      /** 执行边界固定为该 Function。 */
+      functionId: string;
+      /** 可选的具体 Plugin 实现归属。 */
+      pluginId?: string;
+      /** 用于检测 Schema 演进。 */
+      schemaVersion: string;
+      /** 只保存已经通过字段边界的结构化值。 */
+      collected: Record<string, JsonValue>;
+      /** required 或其他契约要求但尚未满足的字段。 */
+      missingFields: string[];
+      /** 类型、枚举或未知字段校验失败的字段。 */
+      invalidFields: string[];
+      /** 同一字段出现互相冲突的值。 */
+      conflictFields: string[];
+      /** 当前收集轮次。 */
+      attempt: number;
+      /** 仅用于界面渲染的可选字段展示元数据，不授予执行权限。 */
+      presentation?: Record<string, { label?: string; control?: 'text' | 'number' | 'boolean' | 'select' | 'multi-select' | 'object' }>;
+    };
+
 /** 高风险动作的确认状态及绑定范围。 */
 export type ConfirmationState = {
   // state 是动作确认的唯一来源。
@@ -289,6 +334,8 @@ export type BehaviorContext = {
   recentMessagePolicy?: RecentMessagePolicy;
   // clarification 保存连续未解决和待选择候选的结构化状态。
   clarification?: ClarificationState;
+  // collection 保存 Function/参数收集的有限状态，不代表授权。
+  collection?: CollectionState;
   // pendingReference 保存事实关系消歧所需的有限候选，不包含执行授权。
   pendingReference?: PendingReference;
   // confirmation 记录确认范围和状态。

@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import { createHash } from 'node:crypto';
-import { ERROR_CODES, MAX_CANDIDATE_KEY_LENGTH, MAX_CANDIDATE_VERSION_LENGTH, MAX_CLARIFICATION_REASON_LENGTH, MAX_CLARIFICATION_OPTIONS, MAX_FACT_RECORD_ID_LENGTH, MAX_FACT_RECORD_VALUES, MAX_PENDING_REFERENCE_CANDIDATES, MAX_PENDING_REFERENCE_OFFSET, MAX_PENDING_REFERENCE_TEXT_LENGTH, MAX_UNRESOLVED_STREAK, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, validateContract, type BehaviorContext, type ClarificationState, type ContractErrorResult, type EventEnvelope, type PendingReference, type RoutingScope, type VerifiedFactHistory, type TrustedFactValue, type VerifiedFactRecord } from '@iar/contracts';
+import { ERROR_CODES, MAX_CANDIDATE_KEY_LENGTH, MAX_CANDIDATE_VERSION_LENGTH, MAX_CLARIFICATION_REASON_LENGTH, MAX_CLARIFICATION_OPTIONS, MAX_COLLECTION_ATTEMPTS, MAX_COLLECTION_CANDIDATES, MAX_COLLECTION_FIELD_LENGTH, MAX_COLLECTION_FIELDS, MAX_FACT_RECORD_ID_LENGTH, MAX_FACT_RECORD_VALUES, MAX_PENDING_REFERENCE_CANDIDATES, MAX_PENDING_REFERENCE_OFFSET, MAX_PENDING_REFERENCE_TEXT_LENGTH, MAX_UNRESOLVED_STREAK, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, validateContract, type BehaviorContext, type ClarificationState, type CollectionState, type ContractErrorResult, type EventEnvelope, type PendingReference, type RoutingScope, type VerifiedFactHistory, type TrustedFactValue, type VerifiedFactRecord } from '@iar/contracts';
 
 /** 关键字段哈希固定使用 SHA-256，避免实现更换导致快照不可恢复。 */
 const HASH_ALGORITHM = 'sha256';
@@ -59,6 +59,7 @@ export function criticalFieldHash(context: BehaviorContext): string {
     workflow: context.workflow,
     pending: context.pending,
     ...(context.clarification ? { clarification: context.clarification } : {}),
+    ...(context.collection ? { collection: context.collection } : {}),
     ...(context.pendingReference ? { pendingReference: context.pendingReference } : {}),
     confirmation: context.confirmation,
     idempotencyKey: context.idempotencyKey,
@@ -181,7 +182,7 @@ export class BehaviorContextProjector {
       this.applyCompactedState(payload);
       return;
     }
-    if (event.eventName === 'context.clarification.updated' && (!isPendingInput(payload.pending) || (payload.clarification !== undefined && !isClarificationState(payload.clarification)) || (payload.pendingReference !== undefined && payload.pendingReference !== null && !isPendingReference(payload.pendingReference)))) {
+    if (event.eventName === 'context.clarification.updated' && (!isPendingInput(payload.pending) || (payload.clarification !== undefined && !isClarificationState(payload.clarification)) || (payload.collection !== undefined && payload.collection !== null && !isCollectionState(payload.collection)) || (payload.pendingReference !== undefined && payload.pendingReference !== null && !isPendingReference(payload.pendingReference)))) {
       throw new Error('澄清 pending 状态无效');
     }
     // workflow.started 固定主语、意图和运行状态。
@@ -235,6 +236,8 @@ export class BehaviorContextProjector {
     if (isSlotMap(payload.slots)) this.state.slots = structuredClone(payload.slots);
     if (isPendingInput(payload.pending)) this.state.pending = { ...payload.pending };
     if (isClarificationState(payload.clarification)) this.state.clarification = structuredClone(payload.clarification);
+    if (isCollectionState(payload.collection)) this.state.collection = structuredClone(payload.collection);
+    if (payload.collection === null) delete this.state.collection;
     if (isPendingReference(payload.pendingReference)) this.state.pendingReference = structuredClone(payload.pendingReference);
     if (payload.pendingReference === null) delete this.state.pendingReference;
     if (isConfirmationState(payload.confirmation)) this.state.confirmation = { ...payload.confirmation };
@@ -410,6 +413,42 @@ function isClarificationState(value: unknown): value is ClarificationState {
   if (!Array.isArray(value.candidateKeys) || value.candidateKeys.length > MAX_CLARIFICATION_OPTIONS) return false;
   const keys = new Set<string>();
   return value.candidateKeys.every((key) => typeof key === 'string' && key.length > 0 && key.length <= MAX_CANDIDATE_KEY_LENGTH && !keys.has(key) && (keys.add(key), true));
+}
+
+/** 判断事件中的 Function/参数收集状态是否满足有界契约。 */
+function isCollectionState(value: unknown): value is CollectionState {
+  if (!isRecord(value) || !Number.isSafeInteger(value.attempt) || Number(value.attempt) < 1 || Number(value.attempt) > MAX_COLLECTION_ATTEMPTS) return false;
+  if (value.kind === 'function') {
+    return (value.pluginId === undefined || typeof value.pluginId === 'string')
+      && (value.reasonCode === 'function_missing' || value.reasonCode === 'function_ambiguous')
+      && Array.isArray(value.candidateFunctionIds)
+      && value.candidateFunctionIds.length > 0
+      && value.candidateFunctionIds.length <= MAX_COLLECTION_CANDIDATES
+      && new Set(value.candidateFunctionIds).size === value.candidateFunctionIds.length
+      && value.candidateFunctionIds.every((id) => typeof id === 'string' && id.length > 0 && id.length <= MAX_COLLECTION_FIELD_LENGTH)
+      && (value.candidateKeys === undefined || (Array.isArray(value.candidateKeys)
+        && value.candidateKeys.length <= MAX_COLLECTION_CANDIDATES
+        && new Set(value.candidateKeys).size === value.candidateKeys.length
+        && value.candidateKeys.every((key) => typeof key === 'string' && key.length > 0 && key.length <= MAX_CANDIDATE_KEY_LENGTH)));
+  }
+  if (value.kind !== 'parameters' || typeof value.functionId !== 'string' || value.functionId.length === 0 || value.functionId.length > MAX_COLLECTION_FIELD_LENGTH || (value.pluginId !== undefined && typeof value.pluginId !== 'string') || typeof value.schemaVersion !== 'string' || value.schemaVersion.length === 0 || value.schemaVersion.length > MAX_COLLECTION_FIELD_LENGTH) return false;
+  if (!isBoundedCollectionObject(value.collected) || !isFieldList(value.missingFields) || !isFieldList(value.invalidFields) || !isFieldList(value.conflictFields)) return false;
+  return value.presentation === undefined || isCollectionPresentation(value.presentation);
+}
+
+function isFieldList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length <= MAX_COLLECTION_FIELDS && new Set(value).size === value.length && value.every((field) => typeof field === 'string' && field.length > 0 && field.length <= MAX_COLLECTION_FIELD_LENGTH);
+}
+
+function isBoundedCollectionObject(value: unknown): value is Record<string, unknown> {
+  return isRecord(value) && Object.keys(value).length <= MAX_COLLECTION_FIELDS && Object.keys(value).every((field) => field.length > 0 && field.length <= MAX_COLLECTION_FIELD_LENGTH);
+}
+
+function isCollectionPresentation(value: unknown): boolean {
+  if (!isRecord(value) || Object.keys(value).length > MAX_COLLECTION_FIELDS) return false;
+  return Object.values(value).every((item) => isRecord(item)
+    && (item.label === undefined || typeof item.label === 'string')
+    && (item.control === undefined || ['text', 'number', 'boolean', 'select', 'multi-select', 'object'].includes(String(item.control))));
 }
 
 /** 判断确认状态是否完整。 */
