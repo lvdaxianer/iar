@@ -17,7 +17,7 @@
 
 ## 4. Verification and completion
 
-- [ ] 4.1 Add parity and security regression tests for ordinary/streamed outcomes, illegal model transitions, forged Function/Plugin IDs and no-execution-before-confirmation.
+- [x] 4.1 Add parity and security regression tests for ordinary/streamed outcomes, illegal model transitions, forged Function/Plugin IDs and no-execution-before-confirmation.
 - [ ] 4.2 Run build, lint, focused tests, full test suite and strict OpenSpec validation; perform plan consistency, backend reliability and code review audits, then update this checklist.
 
 ## Workflow follow-up
