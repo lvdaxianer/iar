@@ -2,7 +2,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { ActionDefinition, BehaviorContext, JsonValue, PluginOperation, SlotValue } from '@iar/contracts';
+import type { ActionDefinition, BehaviorContext, JsonSchema, JsonValue, PluginOperation, SlotValue } from '@iar/contracts';
 import { SELF_INTRODUCTION_FUNCTION_ID, type PluginDescriptor } from '@iar/plugins';
 import type { SemanticActionType, SemanticFrame } from '@iar/runtime';
 import type { FunctionCallProposal, RouteResult } from '@iar/runtime';
@@ -91,7 +91,7 @@ export function buildActionInput(functionId: string, slots: Record<string, JsonV
   if (functionId.trim().length === 0) return { missing: ['functionId'], reasonCode: 'function_missing' };
   if (actionType === 'unknown') return { missing: ['actionType'], reasonCode: 'action_type_missing' };
   const rawOperation = stringSlot(slots, 'operation');
-  const query = stringSlot(slots, 'query') ?? (userText.length > 0 ? userText : undefined);
+  const query = userText.length > 0 ? userText : stringSlot(slots, 'query');
   const expectedKind = actionType === 'query' ? 'read' : 'action';
   const operation = chooseCompatibleOperation(operations, rawOperation, expectedKind);
   const params = inheritFactParams(functionId, paramsSlot(slots), behaviorContext);
@@ -102,6 +102,32 @@ export function buildActionInput(functionId: string, slots: Record<string, JsonV
   if (query) input.query = query.slice(0, 500);
   if (params) input.params = params;
   return { input };
+}
+
+/** 只把当前 Function Schema 已声明且已验证的上下文槽位作为补参基线。 */
+export function mergeVerifiedFunctionSlots(slots: Record<string, JsonValue>, behaviorContext: BehaviorContext, schema: JsonSchema): Record<string, JsonValue> {
+  const properties = isRecord(schema.properties) ? schema.properties : {};
+  const inherited: Record<string, JsonValue> = {};
+  for (const [field, slot] of Object.entries(behaviorContext.slots)) {
+    if ((slot.status === 'resolved' || slot.status === 'confirmed') && Object.hasOwn(properties, field)) inherited[field] = slot.value;
+  }
+  return mergeNamedJsonValues(inherited, slots);
+}
+
+/** 按字段名递归合并结构化参数，当前轮值覆盖上下文值。 */
+function mergeNamedJsonValues(previous: Record<string, JsonValue>, incoming: Record<string, JsonValue>): Record<string, JsonValue> {
+  const merged = { ...previous };
+  for (const [field, value] of Object.entries(incoming)) {
+    const previousValue = merged[field];
+    if (isRecord(previousValue) && isRecord(value)) merged[field] = mergeNamedJsonValues(previousValue, value);
+    else merged[field] = value;
+  }
+  return merged;
+}
+
+/** 判断值是否为可递归的 JSON 对象。 */
+function isRecord(value: unknown): value is Record<string, JsonValue> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** 将 Function Calling 的已校验 arguments 转成唯一 Action 输入。 */

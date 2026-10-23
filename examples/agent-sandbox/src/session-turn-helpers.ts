@@ -61,7 +61,7 @@ export function semanticIncompleteClarification(evidence: RouteEvidence): string
  * @date 2026-10-23
  */
 export function deterministicFallbackReply(reasonCode: string): string | undefined {
-  if (reasonCode === 'candidate_empty' || reasonCode === 'route_incomplete' || reasonCode === 'plugin_noul' || reasonCode === 'function_noul') {
+  if (reasonCode === 'candidate_empty' || reasonCode === 'route_incomplete' || reasonCode === 'plugin_noul' || reasonCode === 'function_noul' || reasonCode === 'plugin_unavailable' || reasonCode === 'function_unavailable') {
     return '当前没有匹配到可用的 Function。请检查已启用的 Plugin，或补充你希望处理的目标。';
   }
   if (reasonCode === 'bridge_timeout' || reasonCode === 'bridge_unavailable' || reasonCode === 'bridge_session_failed') {

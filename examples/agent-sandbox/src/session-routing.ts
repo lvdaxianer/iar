@@ -16,7 +16,7 @@ import { ScriptedModelProvider } from './models/scripted-provider.js';
 import { logModelAudit, logParameterBoundary, logSemanticFrame, type SemanticFrameDiagnostic } from './safe-log.js';
 import { SESSION_RUN_ID, SESSION_CORRELATION_ID, TURN_DEFINITION } from './session-core.js';
 import type { CompactionContext } from './session-compaction.js';
-import { buildActionInput, buildFacts, buildFunctionCallInput, buildSelfIntroductionInput, describeAction, sandboxOperationKind, toSlotMap } from './session-helpers.js';
+import { buildActionInput, buildFacts, buildFunctionCallInput, buildSelfIntroductionInput, describeAction, mergeVerifiedFunctionSlots, sandboxOperationKind, toSlotMap } from './session-helpers.js';
 import { collectParameters, parameterCollectionReply } from './parameter-collector.js';
 import type { ExecuteTurnOutcome, ExtractFrameOutcome, PendingActionContext, ReferenceResolution, ResolvedFactReference, RouteEvidence, SandboxMode, StructuredInput } from './session-types.js';
 
@@ -224,12 +224,13 @@ export class SandboxSessionRouting {
    */
   private prepareFunctionInput(context: { traceId: string; route: RouteResult; frame: SemanticFrame; behaviorContext: BehaviorContext; userText: string; functionRecord: PluginFunctionRecord }): { ok: true; input: JsonValue } | { ok: false; result: ExecuteTurnOutcome } {
     const { traceId, route, frame, behaviorContext, userText, functionRecord } = context;
-    const built = route.functionId === SELF_INTRODUCTION_FUNCTION_ID ? { input: buildSelfIntroductionInput(this.context.pluginHost.allDescriptors(), this.context.configuration.selfIntroduction.extraPrompt) } : route.functionCallProposal ? buildFunctionCallInput(route.functionCallProposal) : buildActionInput(route.functionId!, frame.slots, userText, frame.action, behaviorContext, functionRecord.operations);
-    if ('reasonCode' in built && built.reasonCode === 'operation_conflict') return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: frame.slots, requiredFields: ['operation'], conflictFields: ['operation'], fallback: { reasonCode: 'parameters_required', reply: '操作信息不一致，请确认后再试。' } });
+    const slots = mergeVerifiedFunctionSlots(frame.slots, behaviorContext, functionRecord.definition.inputSchema);
+    const built = route.functionId === SELF_INTRODUCTION_FUNCTION_ID ? { input: buildSelfIntroductionInput(this.context.pluginHost.allDescriptors(), this.context.configuration.selfIntroduction.extraPrompt) } : route.functionCallProposal ? buildFunctionCallInput(route.functionCallProposal) : buildActionInput(route.functionId!, slots, userText, frame.action, behaviorContext, functionRecord.operations);
+    if ('reasonCode' in built && built.reasonCode === 'operation_conflict') return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: slots, requiredFields: ['operation'], conflictFields: ['operation'], fallback: { reasonCode: 'parameters_required', reply: '操作信息不一致，请确认后再试。' } });
     if ('missing' in built) {
       const requiredFields = schemaFields(functionRecord.definition.inputSchema, built.missing);
       if (requiredFields.length === 0) return { ok: false, result: { status: 'clarification', reply: `还缺少必要信息（${built.missing.join('、')}），请补充完整后再试。`, reasonCode: built.reasonCode } };
-      return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: frame.slots, requiredFields });
+      return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: slots, requiredFields });
     }
     if (!validateJsonSchemaValue(functionRecord.definition.inputSchema, built.input).ok) return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: built.input });
     return { ok: true, input: built.input };

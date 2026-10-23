@@ -10,7 +10,7 @@ import type { PluginDescriptor } from '@iar/plugins';
 import { confirmationScopeHash, type RouteResult, type SemanticFrame } from '@iar/runtime';
 import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, sandboxOperationKind, summarizeAction } from './session-helpers.js';
-import { createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
+import { createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption, recoverContinuation } from './session-clarification.js';
 import { collectFunctionCandidates } from './function-collector.js';
 import { allowsContextFollowUp, applyRouteDiagnostic, deterministicFallbackReply, finishConfirmedAction, gateIncompleteSemanticFrame, logActionResult, logRouteResult, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection, semanticIncompleteClarification } from './session-turn-helpers.js';
 import { withConfirmReplySource, withReplySource, type CompactResult, type ConfirmResult, type ExecuteTurnOutcome, type ExtractFrameOutcome, type PendingActionContext, type RouteEvidence, type StreamEvent, type StructuredInput, type TurnResult } from './session-types.js';
@@ -174,36 +174,45 @@ export class IarSandboxSession extends SandboxSessionCore {
    */
   protected async routeNormalTurn(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }>; timing: TurnTimingTracker; passThroughOnNoMatch: boolean; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
     const { userText, traceId, behaviorContext, extracted, timing, passThroughOnNoMatch, selectedDescriptor } = context;
-    const references = this.routing.resolveReferences(extracted.frame, behaviorContext);
-    if (!references.ok) return this.finishNormalFallback({ userText, traceId, behaviorContext, timing, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: extracted.frame.intent, semanticConfidence: extracted.frame.confidence }, ...(references.pendingReference === undefined ? {} : { pendingReference: references.pendingReference }), ...(references.candidates === undefined ? {} : { referenceCandidates: references.candidates }) });
+    const recovered = recoverContinuation(this.pluginHost.descriptors(), behaviorContext, extracted.frame, userText);
+    const frame = recovered.frame;
+    const effectiveDescriptor = recovered.descriptor ?? selectedDescriptor;
+    if (recovered.reasonCode !== undefined) {
+      const evidence: RouteEvidence = { status: 'rejected', reasonCode: recovered.reasonCode, semanticIntent: frame.intent, semanticConfidence: frame.confidence, ...(recovered.functionId === undefined ? {} : { functionId: recovered.functionId }), ...(recovered.pluginId === undefined ? {} : { pluginId: recovered.pluginId }) };
+      return this.finishNormalFallback({ userText, traceId, behaviorContext, timing, evidence });
+    }
+    const references = this.routing.resolveReferences(frame, behaviorContext);
+    if (!references.ok) return this.finishNormalFallback({ userText, traceId, behaviorContext, timing, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: frame.intent, semanticConfidence: frame.confidence }, ...(references.pendingReference === undefined ? {} : { pendingReference: references.pendingReference }), ...(references.candidates === undefined ? {} : { referenceCandidates: references.candidates }) });
     if (behaviorContext.pendingReference !== undefined) await this.resetClarification();
     const routeContext = this.projector.current();
-    const incomplete = gateIncompleteSemanticFrame(extracted.frame, traceId, timing, userText, allowsContextFollowUp(extracted.frame, routeContext, userText) || this.piAgent !== undefined || this.mode === 'brain');
+    const incomplete = gateIncompleteSemanticFrame(frame, traceId, timing, userText, allowsContextFollowUp(frame, routeContext, userText) || this.piAgent !== undefined || this.mode === 'brain');
     if (incomplete) {
-      const resolved = await resolveNoMatchTurn({ piAgent: this.piAgent, pushMessages: this.replies.pushMessages.bind(this.replies), passThroughOnNoMatch, userText, evidence: incomplete, behaviorContext: routeContext, selectedDescriptor, functionDescriptors: this.pluginHost.descriptors() });
+      if (recovered.functionId !== undefined) incomplete.functionId = recovered.functionId;
+      if (recovered.pluginId !== undefined) incomplete.pluginId = recovered.pluginId;
+      const resolved = await resolveNoMatchTurn({ piAgent: this.piAgent, pushMessages: this.replies.pushMessages.bind(this.replies), passThroughOnNoMatch, userText, evidence: incomplete, behaviorContext: routeContext, selectedDescriptor: effectiveDescriptor, functionDescriptors: this.pluginHost.descriptors() });
       return resolved ?? this.finishNormalFallback({ userText, traceId, behaviorContext: routeContext, timing, evidence: incomplete, resolvedReferences: references.references });
     }
     timing.start('route.select');
-    const usesNestedRoute = extracted.frame.action !== 'unknown' && extracted.frame.intent !== 'unknown';
+    const usesNestedRoute = frame.action !== 'unknown' && frame.intent !== 'unknown';
     if (usesNestedRoute) timing.start('route.propose');
     let route: Awaited<ReturnType<SandboxSessionRouting['routeFrame']>>;
     let routeCompleted = false;
     try {
-      route = await this.routing.routeFrame(traceId, SESSION_RUN_ID, extracted.frame, routeContext, userText, this.recentMessages, selectedDescriptor);
+      route = await this.routing.routeFrame(traceId, SESSION_RUN_ID, frame, routeContext, userText, this.recentMessages, effectiveDescriptor);
       routeCompleted = true;
     } finally {
       if (usesNestedRoute) timing.end('route.propose', routeCompleted ? 'completed' : 'failed');
     }
     timing.end('route.select');
     logRouteResult(traceId, route);
-    const evidence = buildEvidence(route, extracted.frame);
+    const evidence = buildEvidence(route, frame);
     // 抽取降级须保留在返回的路由证据中。
     if (extracted.semanticFallback) evidence.semanticFallback = true;
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
-      const recovered = await this.collectFunctionCandidates({ userText, route, frame: extracted.frame, evidence });
-      if (recovered.result) return recovered.result;
-      if (recovered.route) {
-        route = recovered.route;
+      const candidates = await this.collectFunctionCandidates({ userText, route, frame, evidence });
+      if (candidates.result) return candidates.result;
+      if (candidates.route) {
+        route = candidates.route;
         evidence.status = route.status;
         evidence.reasonCode = route.reasonCode;
         if (route.functionId === undefined) delete evidence.functionId; else evidence.functionId = route.functionId;
@@ -211,13 +220,13 @@ export class IarSandboxSession extends SandboxSessionCore {
         logRouteResult(traceId, route);
       }
       else {
-      const resolved = await resolveNoMatchTurn({ piAgent: this.piAgent, pushMessages: this.replies.pushMessages.bind(this.replies), passThroughOnNoMatch, userText, evidence, behaviorContext, selectedDescriptor, functionDescriptors: this.pluginHost.descriptors() });
+      const resolved = await resolveNoMatchTurn({ piAgent: this.piAgent, pushMessages: this.replies.pushMessages.bind(this.replies), passThroughOnNoMatch, userText, evidence, behaviorContext, selectedDescriptor: effectiveDescriptor, functionDescriptors: this.pluginHost.descriptors() });
       return resolved ?? this.finishNormalFallback({ userText, traceId, behaviorContext: routeContext, timing, evidence, resolvedReferences: references.references });
       }
     }
     timing.start('action.execute');
     if (this.pending !== null) await this.cancelStalePending();
-    const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, traceId, userText, frame: extracted.frame, route, behaviorContext: routeContext });
+    const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, traceId, userText, frame, route, behaviorContext: routeContext });
     timing.end('action.execute');
     logActionResult(traceId, outcome);
     applyRouteDiagnostic(evidence, traceId, outcome);

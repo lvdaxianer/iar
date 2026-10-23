@@ -3,7 +3,7 @@ import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
 import { allowsContextFollowUp, applyRouteDiagnostic, canPassThrough, deterministicFallbackReply, gateIncompleteSemanticFrame, logActionResult, logRouteResult, pendingBridgeResult, resolveNoMatchTurn, runPiAgentDelegate, semanticIncompleteClarification } from './session-turn-helpers.js';
-import { hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
+import { hasVerifiedFactsForFollowUp, matchesPendingOption, recoverContinuation } from './session-clarification.js';
 import type { ActionDefinition, ActionResult, BehaviorContext, CollectionState, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
@@ -151,16 +151,24 @@ export class SandboxSessionStreamTurn {
   protected async routeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }>; timing: TurnTimingTracker; bridgeMode: boolean; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
     const { userText, traceId, emit, behaviorContext, extracted, timing, bridgeMode, selectedDescriptor } = context;
     emit({ type: 'stage', stage: 'route' });
-    const frame = extracted.frame;
+    const recovered = recoverContinuation(this.context.functionDescriptors, behaviorContext, extracted.frame, userText);
+    const frame = recovered.frame;
+    const effectiveDescriptor = recovered.descriptor ?? selectedDescriptor;
+    if (recovered.reasonCode !== undefined) {
+      const evidence: RouteEvidence = { status: 'rejected', reasonCode: recovered.reasonCode, semanticIntent: frame.intent, semanticConfidence: frame.confidence, ...(recovered.functionId === undefined ? {} : { functionId: recovered.functionId }), ...(recovered.pluginId === undefined ? {} : { pluginId: recovered.pluginId }) };
+      return this.finishStreamFallback({ userText, traceId, emit, behaviorContext, timing, evidence });
+    }
     const references = this.context.resolveReferences(frame, behaviorContext);
     if (!references.ok) return this.finishStreamFallback({ userText, traceId, emit, behaviorContext, timing, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: frame.intent, semanticConfidence: frame.confidence }, ...(references.pendingReference === undefined ? {} : { pendingReference: references.pendingReference }), ...(references.candidates === undefined ? {} : { referenceCandidates: references.candidates }) });
     if (behaviorContext.pendingReference !== undefined) await this.context.resetClarification();
     const routeContext = this.context.currentBehaviorContext();
     const incomplete = gateIncompleteSemanticFrame(frame, traceId, timing, userText, allowsContextFollowUp(frame, routeContext, userText) || bridgeMode || this.context.piAgent !== undefined || this.context.mode === 'brain');
     if (incomplete) {
-      const bridgeResult = bridgeMode ? await resolveNoMatchTurn({ piAgent: undefined, pushMessages: this.context.pushMessages, passThroughOnNoMatch: true, userText, evidence: incomplete, behaviorContext: routeContext, selectedDescriptor, functionDescriptors: this.context.functionDescriptors }) : undefined;
+      if (recovered.functionId !== undefined) incomplete.functionId = recovered.functionId;
+      if (recovered.pluginId !== undefined) incomplete.pluginId = recovered.pluginId;
+      const bridgeResult = bridgeMode ? await resolveNoMatchTurn({ piAgent: undefined, pushMessages: this.context.pushMessages, passThroughOnNoMatch: true, userText, evidence: incomplete, behaviorContext: routeContext, selectedDescriptor: effectiveDescriptor, functionDescriptors: this.context.functionDescriptors }) : undefined;
       if (bridgeResult) return bridgeResult;
-      const agentResult = await this.runStreamAgent({ userText, emit, timing, evidence: incomplete, behaviorContext: routeContext, selectedDescriptor });
+      const agentResult = await this.runStreamAgent({ userText, emit, timing, evidence: incomplete, behaviorContext: routeContext, selectedDescriptor: effectiveDescriptor });
       if (agentResult !== undefined) return agentResult;
       return this.finishStreamFallback({ userText, traceId, emit, behaviorContext: routeContext, timing, evidence: incomplete, resolvedReferences: references.references });
     }
@@ -170,7 +178,7 @@ export class SandboxSessionStreamTurn {
     let route: RouteResult;
     let routeCompleted = false;
     try {
-      route = await this.context.routeFrame(traceId, SESSION_RUN_ID, frame, routeContext, userText, this.context.recentMessages, selectedDescriptor);
+      route = await this.context.routeFrame(traceId, SESSION_RUN_ID, frame, routeContext, userText, this.context.recentMessages, effectiveDescriptor);
       routeCompleted = true;
     } finally {
       if (usesNestedRoute) timing.end('route.propose', routeCompleted ? 'completed' : 'failed');
@@ -180,10 +188,10 @@ export class SandboxSessionStreamTurn {
     const evidence = buildEvidence(route, frame);
     if (extracted.semanticFallback) evidence.semanticFallback = true;
     if (route.status !== 'matched' || !route.functionId || !route.pluginId) {
-      const recovered = await this.context.collectFunctionCandidates({ userText, route, frame, evidence });
-      if (recovered.result) return recovered.result;
-      if (recovered.route) {
-        route = recovered.route;
+      const candidates = await this.context.collectFunctionCandidates({ userText, route, frame, evidence });
+      if (candidates.result) return candidates.result;
+      if (candidates.route) {
+        route = candidates.route;
         evidence.status = route.status;
         evidence.reasonCode = route.reasonCode;
         if (route.functionId === undefined) delete evidence.functionId; else evidence.functionId = route.functionId;
@@ -191,9 +199,9 @@ export class SandboxSessionStreamTurn {
         logRouteResult(traceId, route);
       }
       else {
-      const bridgeResult = bridgeMode ? await resolveNoMatchTurn({ piAgent: undefined, pushMessages: this.context.pushMessages, passThroughOnNoMatch: true, userText, evidence, behaviorContext, selectedDescriptor, functionDescriptors: this.context.functionDescriptors }) : undefined;
+      const bridgeResult = bridgeMode ? await resolveNoMatchTurn({ piAgent: undefined, pushMessages: this.context.pushMessages, passThroughOnNoMatch: true, userText, evidence, behaviorContext, selectedDescriptor: effectiveDescriptor, functionDescriptors: this.context.functionDescriptors }) : undefined;
       if (bridgeResult) return bridgeResult;
-      const agentResult = await this.runStreamAgent({ userText, emit, timing, evidence, behaviorContext, selectedDescriptor });
+      const agentResult = await this.runStreamAgent({ userText, emit, timing, evidence, behaviorContext, selectedDescriptor: effectiveDescriptor });
       if (agentResult !== undefined) return agentResult;
       return this.finishStreamFallback({ userText, traceId, emit, behaviorContext: routeContext, timing, evidence, resolvedReferences: references.references });
       }
