@@ -12,7 +12,7 @@
 
 ## 3. Unified session integration
 
-- [ ] 3.1 Add RED integration tests for parameter collection recovery, current-field precedence, invalid fields, disabled Plugin/unavailable Function, cancellation and new-topic transitions.
+- [x] 3.1 Add RED integration tests for parameter collection recovery, current-field precedence, invalid fields, disabled Plugin/unavailable Function, cancellation and new-topic transitions.
 - [ ] 3.2 Integrate one shared workflow decision/recovery path into ordinary and streamed turns before the semantic incomplete/pass-through gate, preserving Schema, authorization, policy, idempotency and confirmation gates.
 
 ## 4. Verification and completion
