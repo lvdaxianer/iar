@@ -11,6 +11,7 @@ export type { CompactionResult } from '@iar/contracts';
 export * from './session/replay.js';
 export * from './session/action-idempotency.js';
 export * from './session/workflow-transition.js';
+export * from './session/workflow-context.js';
 export * from './routing.js';
 export * from './bootstrap/index.js';
 export * from './intent/decision/index.js';
