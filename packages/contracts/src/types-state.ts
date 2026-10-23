@@ -242,7 +242,7 @@ export type CollectionState =
       /** 当前收集轮次。 */
       attempt: number;
       /** 仅用于界面渲染的可选字段展示元数据，不授予执行权限。 */
-      presentation?: Record<string, { label?: string; control?: 'text' | 'number' | 'boolean' | 'select' | 'multi-select' | 'object' }>;
+      presentation?: Record<string, { label?: string; description?: string; control?: 'text' | 'number' | 'boolean' | 'select' | 'multi-select' | 'object'; options?: Array<{ value: string; label: string }> }>;
     };
 
 /** 高风险动作的确认状态及绑定范围。 */

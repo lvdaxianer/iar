@@ -244,6 +244,16 @@
   #compactResult.fail { background: var(--err-soft); color: var(--err); border: 1px solid #fecaca; }
   .hint { font-size: 12px; color: var(--muted); line-height: 1.7; }
 
+  /* 参数收集只渲染 Schema 提供的字段，不包含业务动作授权。 */
+  .collection-panel { display: flex; flex-direction: column; gap: 8px; }
+  .collection-form { display: flex; flex-direction: column; gap: 8px; }
+  .collection-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; }
+  .collection-field input, .collection-field select, .collection-field textarea { width: 100%; padding: 7px 8px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--text); font: inherit; font-size: 12px; line-height: 1.5; }
+  .collection-field input[type="checkbox"] { width: auto; align-self: flex-start; }
+  .collection-field select[multiple] { min-height: 72px; }
+  .collection-help, .collection-status { color: var(--muted); font-size: 11px; font-weight: 400; line-height: 1.5; }
+  .collection-code { display: block; padding: 6px 8px; border: 1px solid var(--border); border-radius: 7px; background: #fff; color: var(--accent); font: 11px var(--mono); word-break: break-all; }
+
   /* 会话列表面板收在调试侧栏顶部，作为一张普通分区卡片；
      列表数据来自服务端摘要，当前会话始终置顶并高亮。 */
   .sessions-panel { display: flex; flex-direction: column; gap: 8px; }

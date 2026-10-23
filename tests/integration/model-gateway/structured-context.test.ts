@@ -85,6 +85,17 @@ test('语义与回复模型接收当前问题、结构化上下文和有界最�
   assert.match(fallback, /candidate-opaque/);
 });
 
+test('参数收集器提交的结构化值进入语义抽取输入', () => {
+  const prompt = buildSemanticUserPrompt({
+    text: '补充参数',
+    structuredInput: { query: '结构化查询', limit: 20 },
+    behaviorContext: createInitialContext('run-structured-input')
+  });
+  assert.match(prompt, /<structured_input>/);
+  assert.match(prompt, /结构化查询/);
+  assert.match(prompt, /"limit": 20/);
+});
+
 test('历史关系使用不透明记录并与动态能力和最近消息同时进入模型输入', () => {
   const context = createInitialContext('run-relation-prompt');
   context.factHistory = {
@@ -163,6 +174,17 @@ test('semantic prompt routes identity questions to enabled self-introduction', (
     pluginDescriptors: [{ pluginId: 'iar.self-introduction', description: '介绍当前 Agent 能力', actionTypes: ['query'] }]
   });
   assert.match(prompt, /iar\.self-introduction/u);
+});
+
+test('semantic prompt preserves a stable route for explicit clarification follow-up', () => {
+  const prompt = buildSemanticUserPrompt({
+    text: '补充这个动作的参数',
+    behaviorContext: { route: { functionId: 'function.synthetic', pluginId: 'plugin.synthetic' }, routingScope: { activePluginId: 'plugin.synthetic' } },
+    pendingAction: { functionId: 'function.synthetic', pluginId: 'plugin.synthetic', input: { operation: 'update', query: '已有结构化上下文' } }
+  });
+  assert.match(prompt, /稳定路由/u);
+  assert.match(prompt, /function\.synthetic/u);
+  assert.match(prompt, /不得据此直接执行/u);
 });
 
 test('JEV and Intent Model receive the same structured context without changing the decision contract', async () => {
@@ -355,50 +377,15 @@ test('scripted fallback answers a generic ranking follow-up from structured fact
   }
 });
 
-test('model clarification options are projected, asynchronously snapshotted and restored for the next short input', async () => {
-  const originalFetch = globalThis.fetch;
-  const originalKey = process.env.IAR_LLM_API_KEY;
-  const originalUrl = process.env.IAR_LLM_BASE_URL;
-  const prompts: string[] = [];
-  let responseCount = 0;
-  process.env.IAR_LLM_API_KEY = 'test-key';
-  process.env.IAR_LLM_BASE_URL = 'http://127.0.0.1:1';
-  globalThis.fetch = async (_url, options) => {
-    const payload = JSON.parse(String(options?.body)) as { messages?: Array<{ role: string; content: string }> };
-    const system = payload.messages?.[0]?.content ?? '';
-    const user = payload.messages?.[1]?.content ?? '';
-    prompts.push(user);
-    if (system.includes('Semantic Extractor')) {
-      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ schemaVersion: 'iar.semantic-frame/v1', intent: 'unknown', action: 'unknown', slots: {}, references: [], confidence: 0.2 }) } }] }), { status: 200 });
-    }
-    responseCount += 1;
-    const response = responseCount === 1
-      ? { schemaVersion: 'iar.response/v1', text: '请告诉我你要查询哪一个对象。', clarification: { kind: 'selection', status: 'required', options: [{ key: '1', label: '第一个对象' }, { key: '2', label: '第二个对象' }] } }
-      : { schemaVersion: 'iar.response/v1', text: '已根据你选择的对象继续处理。' };
-    return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(response) } }] }), { status: 200 });
-  };
-  const snapshotStore = new InMemorySnapshotStore();
-  const first = new IarSandboxSession({ mode: 'brain', sessionId: 'clarification-session', snapshotStore });
+test('候选为空时使用确定性兜底，不把回复模型的澄清选项当作路由候选', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted' });
   try {
-    assert.equal((await first.turn('我想知道排队位置')).status, 'clarification');
-    const state = await first.state();
-    assert.deepEqual(state.context.pending.options, [{ key: '1', label: '第一个对象' }, { key: '2', label: '第二个对象' }]);
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    first.dispose();
-    const second = new IarSandboxSession({ mode: 'brain', sessionId: 'clarification-session', snapshotStore });
-    try {
-      await second.whenReady();
-      assert.deepEqual((await second.state()).context.pending.options, [{ key: '1', label: '第一个对象' }, { key: '2', label: '第二个对象' }]);
-      assert.equal((await second.turn('1')).status, 'clarification');
-      assert.equal((await second.state()).context.pending.status, 'none');
-      assert.ok(prompts.some((prompt) => prompt.includes('"options"') && prompt.includes('第一个对象') && prompt.includes('当前用户问题')));
-    } finally {
-      second.dispose();
-    }
+    const result = await session.turn('无法确定目标');
+    assert.equal(result.status, 'clarification');
+    assert.equal(result.route.reasonCode, 'semantic_incomplete');
+    assert.equal(result.timing?.stages.find((stage) => stage.stage === 'response.generate')?.status, 'skipped');
   } finally {
-    globalThis.fetch = originalFetch;
-    if (originalKey === undefined) delete process.env.IAR_LLM_API_KEY; else process.env.IAR_LLM_API_KEY = originalKey;
-    if (originalUrl === undefined) delete process.env.IAR_LLM_BASE_URL; else process.env.IAR_LLM_BASE_URL = originalUrl;
+    session.dispose();
   }
 });
 

@@ -23,6 +23,9 @@ export type SandboxDecisionBackend = DecisionBackend;
 /** 用户可观测的回复来源，值域与 Pi bridge 保持稳定。 */
 export type ReplySource = 'direct_function' | 'response_model' | 'pi_agent' | 'none';
 
+/** 页面参数收集器提交的有界结构化值，不包含执行授权。 */
+export type StructuredInput = Record<string, JsonValue>;
+
 /** 运行时选中的 Function Operation 类型。 */
 export type OperationKind = 'read' | 'action';
 

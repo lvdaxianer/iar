@@ -14,6 +14,7 @@
   let TAB_KEY = SESSION_KEY + '-tab';
   let sessionLease = null;
   let tabId = null;
+  let latestTimingSummary = null;
 
   /** 关闭过期会话入口，保留用户输入且绝不重试先前操作。
    * 服务重启和会话过期都由同一个 404 状态处理。

@@ -8,11 +8,14 @@ import type { ActionDefinition, ActionResult, BehaviorContext, CollectionState, 
 import type { SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
 import type { PluginDescriptor } from '@iar/plugins';
-import { withReplySource, type ExecuteTurnOutcome, type ExtractFrameOutcome, type PendingActionContext, type ReferenceResolution, type ResolvedFactReference, type RouteEvidence, type StreamEvent, type TurnResult } from './session-types.js';
+import { withReplySource, type ExecuteTurnOutcome, type ExtractFrameOutcome, type PendingActionContext, type ReferenceResolution, type ResolvedFactReference, type RouteEvidence, type StreamEvent, type StructuredInput, type TurnResult } from './session-types.js';
 import { recordTurnTiming, TurnTimingTracker } from './turn-timing.js';
+import type { SandboxMode } from './session-types.js';
 
 /** 流式编排所需的会话能力，状态和资源仍由宿主唯一持有。 */
 export type StreamTurnContext = {
+  /** 当前会话模式决定未知语义是否交给 Response Model。 */
+  mode: SandboxMode;
   /** 新路由确认后撤销被替换的待确认动作。 */
   cancelStalePending: () => Promise<void>;
   hasPending: () => boolean;
@@ -27,7 +30,7 @@ export type StreamTurnContext = {
   updateParameterCollection: (collection: Extract<CollectionState, { kind: 'parameters' }>) => Promise<void>;
   resetClarification: () => Promise<void>;
   /** 与普通入口共用语义抽取及路由，确保相同的策略边界。 */
-  extractFrame: (traceId: string, runId: string, text: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>, selectedDescriptor?: PluginDescriptor, pendingAction?: PendingActionContext) => Promise<ExtractFrameOutcome>;
+  extractFrame: (traceId: string, runId: string, text: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>, selectedDescriptor?: PluginDescriptor, pendingAction?: PendingActionContext, structuredInput?: StructuredInput) => Promise<ExtractFrameOutcome>;
   /** 当前会话的有界原文窗口，普通与流式入口必须读取同一份状态。 */
   recentMessages: Array<{ role: string; text: string }>;
   /** 当前启用 Plugin 的动态能力描述。 */
@@ -74,12 +77,12 @@ export class SandboxSessionStreamTurn {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public async turnStreamed(text: string, emit: (event: StreamEvent) => void, bridgeMode = false): Promise<TurnResult> {
+  public async turnStreamed(text: string, emit: (event: StreamEvent) => void, bridgeMode = false, structuredInput?: StructuredInput): Promise<TurnResult> {
     const userText = text.trim();
     const traceId = this.context.nextTraceId();
     const timing = new TurnTimingTracker(traceId);
     try {
-      const result = await this.executeStreamTurn({ userText, traceId, emit, timing, bridgeMode });
+      const result = await this.executeStreamTurn({ userText, traceId, emit, timing, bridgeMode, ...(structuredInput === undefined ? {} : { structuredInput }) });
       return this.finishStreamResult(result, timing, emit);
     } catch (error) {
       this.finishStreamFailure(timing, emit);
@@ -87,8 +90,8 @@ export class SandboxSessionStreamTurn {
     }
   }
 
-  private async executeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; timing: TurnTimingTracker; bridgeMode: boolean }): Promise<TurnResult> {
-    const { userText, traceId, emit, timing, bridgeMode } = context;
+  private async executeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; timing: TurnTimingTracker; bridgeMode: boolean; structuredInput?: StructuredInput }): Promise<TurnResult> {
+    const { userText, traceId, emit, timing, bridgeMode, structuredInput } = context;
     emit({ type: 'stage', stage: 'semantic' });
     if (bridgeMode && this.context.hasPending()) return withReplySource(pendingBridgeResult());
     const pendingAction = this.context.pendingAction();
@@ -96,7 +99,7 @@ export class SandboxSessionStreamTurn {
     const selection = this.context.resolveSelection(userText, behaviorContext);
     if (selection.invalid) return withReplySource(await this.context.rejectSelection(userText, selection.reasonCode));
     timing.start('semantic.extract');
-    const extracted = await this.context.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext, this.context.recentMessages, selection.descriptor, pendingAction);
+    const extracted = await this.context.extractFrame(traceId, SESSION_RUN_ID, userText, behaviorContext, this.context.recentMessages, selection.descriptor, pendingAction, structuredInput);
     timing.end('semantic.extract');
     return withReplySource(await this.finishStreamExtraction({ userText, traceId, emit, behaviorContext, extracted, timing, bridgeMode, ...(selection.descriptor === undefined ? {} : { selectedDescriptor: selection.descriptor }) }));
   }
@@ -153,7 +156,7 @@ export class SandboxSessionStreamTurn {
     if (!references.ok) return this.finishStreamFallback({ userText, traceId, emit, behaviorContext, timing, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: frame.intent, semanticConfidence: frame.confidence }, ...(references.pendingReference === undefined ? {} : { pendingReference: references.pendingReference }), ...(references.candidates === undefined ? {} : { referenceCandidates: references.candidates }) });
     if (behaviorContext.pendingReference !== undefined) await this.context.resetClarification();
     const routeContext = this.context.currentBehaviorContext();
-    const incomplete = gateIncompleteSemanticFrame(frame, traceId, timing, userText, allowsContextFollowUp(frame, routeContext, userText) || bridgeMode || this.context.piAgent !== undefined);
+    const incomplete = gateIncompleteSemanticFrame(frame, traceId, timing, userText, allowsContextFollowUp(frame, routeContext, userText) || bridgeMode || this.context.piAgent !== undefined || this.context.mode === 'brain');
     if (incomplete) {
       const bridgeResult = bridgeMode ? await resolveNoMatchTurn({ piAgent: undefined, pushMessages: this.context.pushMessages, passThroughOnNoMatch: true, userText, evidence: incomplete, behaviorContext: routeContext, selectedDescriptor, functionDescriptors: this.context.functionDescriptors }) : undefined;
       if (bridgeResult) return bridgeResult;

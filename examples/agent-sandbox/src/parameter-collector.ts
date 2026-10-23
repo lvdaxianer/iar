@@ -1,4 +1,4 @@
-import { MAX_CLARIFICATION_LABEL_LENGTH, MAX_COLLECTION_ATTEMPTS, MAX_COLLECTION_FIELD_LENGTH, MAX_COLLECTION_FIELDS, type CollectionState, type JsonSchema, type JsonValue } from '@iar/contracts';
+import { MAX_CLARIFICATION_LABEL_LENGTH, MAX_CLARIFICATION_OPTIONS, MAX_COLLECTION_ATTEMPTS, MAX_COLLECTION_FIELD_LENGTH, MAX_COLLECTION_FIELDS, type CollectionState, type JsonSchema, type JsonValue } from '@iar/contracts';
 import { summarizeParameterValidation, type ParameterValidationSummary } from './collection-types.js';
 
 /** 参数收集器的结构化输入，值来源必须已经经过模型输出边界。 */
@@ -114,10 +114,25 @@ function buildPresentation(schema: JsonSchema, expectedFields: readonly string[]
   const properties = isRecord(schema.properties) ? schema.properties : {};
   return Object.fromEntries(expectedFields.slice(0, MAX_COLLECTION_FIELDS).map((field) => {
     const property = isRecord(properties[field]) ? properties[field] : {};
+    const title = typeof property.title === 'string' ? property.title.slice(0, MAX_CLARIFICATION_LABEL_LENGTH) : undefined;
     const description = typeof property.description === 'string' ? property.description.slice(0, MAX_CLARIFICATION_LABEL_LENGTH) : undefined;
     const control = controlFor(property);
-    return [field.slice(0, MAX_COLLECTION_FIELD_LENGTH), { ...(description === undefined ? {} : { label: description }), ...(control === undefined ? {} : { control }) }];
+    const options = optionValues(property);
+    return [field.slice(0, MAX_COLLECTION_FIELD_LENGTH), { ...(title === undefined ? {} : { label: title }), ...(description === undefined ? {} : { description }), ...(control === undefined ? {} : { control }), ...(options === undefined ? {} : { options }) }];
   }));
+}
+
+/**
+ * 将 Schema 枚举值转换为有限的可读选项，不改变传入值。
+ * @param property - Schema 属性定义
+ * @returns 有界的可读选项，未声明枚举时返回 undefined
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-23
+ */
+function optionValues(property: Record<string, unknown>): Array<{ value: string; label: string }> | undefined {
+  if (!Array.isArray(property.enum)) return undefined;
+  const options = property.enum.filter((value): value is string => typeof value === 'string').slice(0, MAX_CLARIFICATION_OPTIONS);
+  return options.length === 0 ? undefined : options.map((value) => ({ value, label: value }));
 }
 
 /** 将 JSON Schema 基础类型映射为有限界面控件。 */

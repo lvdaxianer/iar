@@ -102,6 +102,8 @@
     document.getElementById('sessionsBtn').disabled = disabled;
     document.getElementById('sessionsRefreshBtn').disabled = disabled;
     document.getElementById('sessionsMoreBtn').disabled = disabled;
+    document.getElementById('copyContextBtn').disabled = disabled;
+    document.querySelectorAll('.collection-panel button, .collection-panel input, .collection-panel select, .collection-panel textarea').forEach(function (control) { control.disabled = disabled; });
     document.querySelectorAll('.confirm-box button').forEach(function (button) { button.disabled = disabled; });
     document.querySelectorAll('.sessions-list button').forEach(function (button) { button.disabled = disabled; });
   }

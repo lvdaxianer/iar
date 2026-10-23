@@ -13,7 +13,7 @@ import { buildEvidence, sandboxOperationKind, summarizeAction } from './session-
 import { createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption } from './session-clarification.js';
 import { collectFunctionCandidates } from './function-collector.js';
 import { allowsContextFollowUp, applyRouteDiagnostic, deterministicFallbackReply, finishConfirmedAction, gateIncompleteSemanticFrame, logActionResult, logRouteResult, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection, semanticIncompleteClarification } from './session-turn-helpers.js';
-import { withConfirmReplySource, withReplySource, type CompactResult, type ConfirmResult, type ExecuteTurnOutcome, type ExtractFrameOutcome, type PendingActionContext, type RouteEvidence, type StreamEvent, type TurnResult } from './session-types.js';
+import { withConfirmReplySource, withReplySource, type CompactResult, type ConfirmResult, type ExecuteTurnOutcome, type ExtractFrameOutcome, type PendingActionContext, type RouteEvidence, type StreamEvent, type StructuredInput, type TurnResult } from './session-types.js';
 import type { TurnTimingTracker } from './turn-timing.js';
 export type { CompactResult, ConfirmResult, PendingActionSummary, ReplySource, RouteEvidence, SandboxDecisionBackend, SandboxMode, SandboxState, StreamEvent, TurnResult, TurnStage } from './session-types.js';
 /** 公开会话对话和确认入口。 */
@@ -86,6 +86,7 @@ export class IarSandboxSession extends SandboxSessionCore {
   private createStreaming(): SandboxSessionStreamTurn {
     const session = this;
     return new SandboxSessionStreamTurn({
+      get mode() { return session.mode; },
       cancelStalePending: () => this.cancelStalePending(),
       hasPending: () => session.pending !== null,
       pendingAction: (): PendingActionContext | undefined => session.pending === null ? undefined : summarizeAction(session.pending.action),
@@ -96,7 +97,7 @@ export class IarSandboxSession extends SandboxSessionCore {
       markUnresolved: (reasonCode) => session.markUnresolved(reasonCode),
       updateParameterCollection: (collection) => session.updateParameterCollection(collection),
       resetClarification: () => session.resetClarification(),
-      extractFrame: (traceId, runId, text, behaviorContext, recentMessages, selectedDescriptor, pendingAction) => this.routing.extractFrame(traceId, runId, text, behaviorContext, recentMessages, selectedDescriptor, pendingAction),
+      extractFrame: (traceId, runId, text, behaviorContext, recentMessages, selectedDescriptor, pendingAction, structuredInput) => this.routing.extractFrame(traceId, runId, text, behaviorContext, recentMessages, selectedDescriptor, pendingAction, structuredInput),
       get recentMessages() { return session.recentMessages; },
       get functionDescriptors() { return session.pluginHost.descriptors(); },
       routeFrame: (traceId, runId, frame, behaviorContext, currentMessage, recentMessages, selectedDescriptor) => this.routing.routeFrame(traceId, runId, frame, behaviorContext, currentMessage, recentMessages, selectedDescriptor),
@@ -121,7 +122,7 @@ export class IarSandboxSession extends SandboxSessionCore {
       currentBehaviorContext: () => session.projector.current(),
       resolveSelection: (text, context) => session.resolveSelection(text, context),
       rejectSelection: (text, reasonCode) => session.rejectSelection(text, reasonCode),
-      extractFrame: (traceId, text, context, recentMessages, selectedDescriptor, pendingAction) => session.routing.extractFrame(traceId, SESSION_RUN_ID, text, context, recentMessages, selectedDescriptor, pendingAction),
+      extractFrame: (traceId, text, context, recentMessages, selectedDescriptor, pendingAction, structuredInput) => session.routing.extractFrame(traceId, SESSION_RUN_ID, text, context, recentMessages, selectedDescriptor, pendingAction, structuredInput),
       recentMessages: () => session.recentMessages,
       markUnresolved: (reasonCode, pendingReference) => session.markUnresolved(reasonCode, pendingReference),
       pushMessage: (text, reply) => session.replies.pushMessages(text, reply),
@@ -135,8 +136,8 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-19
    */
-  public turnStreamed(text: string, emit: (event: StreamEvent) => void): Promise<TurnResult> {
-    return this.whenReady().then(() => this.streaming.turnStreamed(text, emit)).then((result) => recordAgentExchange(this.piAgent, text, withReplySource(result)));
+  public turnStreamed(text: string, emit: (event: StreamEvent) => void, structuredInput?: StructuredInput): Promise<TurnResult> {
+    return this.whenReady().then(() => this.streaming.turnStreamed(text, emit, false, structuredInput)).then((result) => recordAgentExchange(this.piAgent, text, withReplySource(result)));
   }
 
   /** Bridge 流式输入保持 pass_through；@author lvdaxianer@yeah.net @date 2026-10-22 */
@@ -149,8 +150,8 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public async turn(text: string): Promise<TurnResult> {
-    return recordAgentExchange(this.piAgent, text, withReplySource(await this.turnRunner.run(text, false)));
+  public async turn(text: string, structuredInput?: StructuredInput): Promise<TurnResult> {
+    return recordAgentExchange(this.piAgent, text, withReplySource(await this.turnRunner.run(text, false, structuredInput)));
   }
 
   /**
@@ -177,7 +178,7 @@ export class IarSandboxSession extends SandboxSessionCore {
     if (!references.ok) return this.finishNormalFallback({ userText, traceId, behaviorContext, timing, evidence: { status: 'rejected', reasonCode: references.reasonCode, semanticIntent: extracted.frame.intent, semanticConfidence: extracted.frame.confidence }, ...(references.pendingReference === undefined ? {} : { pendingReference: references.pendingReference }), ...(references.candidates === undefined ? {} : { referenceCandidates: references.candidates }) });
     if (behaviorContext.pendingReference !== undefined) await this.resetClarification();
     const routeContext = this.projector.current();
-    const incomplete = gateIncompleteSemanticFrame(extracted.frame, traceId, timing, userText, allowsContextFollowUp(extracted.frame, routeContext, userText) || this.piAgent !== undefined);
+    const incomplete = gateIncompleteSemanticFrame(extracted.frame, traceId, timing, userText, allowsContextFollowUp(extracted.frame, routeContext, userText) || this.piAgent !== undefined || this.mode === 'brain');
     if (incomplete) {
       const resolved = await resolveNoMatchTurn({ piAgent: this.piAgent, pushMessages: this.replies.pushMessages.bind(this.replies), passThroughOnNoMatch, userText, evidence: incomplete, behaviorContext: routeContext, selectedDescriptor, functionDescriptors: this.pluginHost.descriptors() });
       return resolved ?? this.finishNormalFallback({ userText, traceId, behaviorContext: routeContext, timing, evidence: incomplete, resolvedReferences: references.references });

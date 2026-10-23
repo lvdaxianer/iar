@@ -62,6 +62,10 @@
       <ul id="timingList" class="events" style="margin-top:8px"></ul>
     </div>
     <div>
+      <h2>参数收集 / Collection</h2>
+      <div id="collectionPanel" class="collection-panel" style="margin-top:8px"></div>
+    </div>
+    <div>
       <h2>子系统（10）</h2>
       <ul id="subsystemList" style="list-style:none;display:flex;flex-direction:column;gap:4px;margin-top:8px;font-size:12px"></ul>
     </div>
@@ -73,6 +77,8 @@
     <!-- 原生折叠控件保留键盘操作；长 JSON 在内部滚动。 -->
     <details>
       <summary>BehaviorContext（点击查看 JSON）</summary>
+      <button id="copyContextBtn" class="ghost" type="button" style="margin-top:8px">复制结构化上下文</button>
+      <div id="copyContextStatus" class="hint" role="status" aria-live="polite" style="margin-top:6px"></div>
       <pre id="contextJson">{}</pre>
     </details>
     <div>

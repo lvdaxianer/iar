@@ -175,9 +175,11 @@ export const CollectionStateSchema = Type.Union([
     attempt: Type.Integer({ minimum: 1, maximum: MAX_COLLECTION_ATTEMPTS }),
     presentation: Type.Optional(Type.Record(Type.String({ minLength: 1, maxLength: MAX_COLLECTION_FIELD_LENGTH }), Type.Object({
       label: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_CLARIFICATION_LABEL_LENGTH })),
+      description: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_CLARIFICATION_LABEL_LENGTH })),
       control: Type.Optional(Type.Union([
         Type.Literal('text'), Type.Literal('number'), Type.Literal('boolean'), Type.Literal('select'), Type.Literal('multi-select'), Type.Literal('object')
-      ]))
+      ])),
+      options: Type.Optional(Type.Array(Type.Object({ value: Type.String({ minLength: 1, maxLength: MAX_COLLECTION_FIELD_LENGTH }), label: Type.String({ minLength: 1, maxLength: MAX_CLARIFICATION_LABEL_LENGTH }) }, { additionalProperties: false }), { maxItems: MAX_CLARIFICATION_OPTIONS, uniqueItems: true }))
     }, { additionalProperties: false }), { maxProperties: MAX_COLLECTION_FIELDS }))
   }, { additionalProperties: false })
 ]);
