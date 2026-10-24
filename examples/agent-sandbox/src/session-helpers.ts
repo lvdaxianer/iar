@@ -9,6 +9,11 @@ import type { FunctionCallProposal, RouteResult } from '@iar/runtime';
 import type { RuleEvaluationFacts } from '@iar/runtime';
 import type { PendingActionSummary, RouteEvidence } from './session-types.js';
 
+const API_GATEWAY_FUNCTION_ID = 'api.gateway';
+const GATEWAY_LIMIT_OPERATION = 'limit';
+const GATEWAY_RATE_FACT_KEY = 'newLimit';
+const RATE_DECIMAL_PLACES = 6;
+
 /**
  * 从 provider 输出中读取 iar.response/v1 的 text 字段。
  *
@@ -84,27 +89,94 @@ export function buildEvidence(route: RouteResult, frame: SemanticFrame): RouteEv
  */
 export type ActionInputBuildResult =
   | { input: JsonValue }
-  | { missing: string[]; reasonCode: 'function_missing' | 'action_type_missing' | 'operation_missing' | 'query_missing'; expectedOperation?: string; actualOperation?: string }
+  | { missing: string[]; reasonCode: 'function_missing' | 'action_type_missing' | 'operation_missing' | 'query_missing' | 'increment_base_missing'; expectedOperation?: string; actualOperation?: string }
   | { reasonCode: 'operation_conflict'; expectedOperation: string; actualOperation: string };
 
 export function buildActionInput(functionId: string, slots: Record<string, JsonValue>, userText: string, actionType: SemanticActionType = 'unknown', behaviorContext?: BehaviorContext, operations: readonly PluginOperation[] = []): ActionInputBuildResult {
   if (functionId.trim().length === 0) return { missing: ['functionId'], reasonCode: 'function_missing' };
   if (actionType === 'unknown') return { missing: ['actionType'], reasonCode: 'action_type_missing' };
-  const rawOperation = stringSlot(slots, 'operation');
+  const historicalOperation = behaviorContext?.slots.operation?.value;
+  const rawOperation = stringSlot(slots, 'operation') ?? (typeof historicalOperation === 'string' ? historicalOperation.trim() : undefined);
   // Action Handler 的 query 仍是统一协议中的原始补充文本，但在当前轮存在
   // 明确自我纠正时必须移除已撤回的旧值。否则下游只按 query 做通用解析时，
   // 可能把第一个数字误认为最终值。该处理只识别通用纠正结构，不读取业务词。
   const query = userText.length > 0 ? normalizeCorrectedActionQuery(userText) : stringSlot(slots, 'query');
   const expectedKind = actionType === 'query' ? 'read' : 'action';
-  const operation = chooseCompatibleOperation(operations, rawOperation, expectedKind, userText);
+  const continuationOperation = functionId === API_GATEWAY_FUNCTION_ID && parseRateAdjustment(userText) !== undefined ? GATEWAY_LIMIT_OPERATION : rawOperation;
+  const operation = chooseCompatibleOperation(operations, continuationOperation, expectedKind, userText);
   const params = inheritFactParams(functionId, paramsSlot(slots), userText, behaviorContext);
+  const adjusted = resolveIncrementalRate(functionId, params, userText, behaviorContext);
+  if (adjusted.missing) return { missing: ['params'], reasonCode: 'increment_base_missing' };
   if (!operation) return { missing: ['operation'], reasonCode: 'operation_missing', expectedOperation: (operations.filter((item) => item.kind === expectedKind).map((item) => item.name).join('|') || 'unknown').slice(0, 256), actualOperation: 'missing' };
   if (operation === 'search' && !query) return { missing: ['query'], reasonCode: 'query_missing' };
   const input: Record<string, JsonValue> = {};
   input.operation = operation.slice(0, 60);
   if (query) input.query = query.slice(0, 500);
-  if (params) input.params = params;
+  if (adjusted.params) input.params = adjusted.params;
   return { input };
+}
+
+type IncrementalRateResult = { params?: Record<string, string>; missing?: boolean };
+
+/**
+ * 将网关限流的相对调整转换为基于最新可信事实的绝对值。
+ *
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-24
+ */
+function resolveIncrementalRate(functionId: string, params: Record<string, string> | undefined, userText: string, context: BehaviorContext | undefined): IncrementalRateResult {
+  // 非网关或已有明确 rate 时保留当前轮参数，不覆盖用户最新输入。
+  if (functionId !== API_GATEWAY_FUNCTION_ID || params?.rate !== undefined) return params === undefined ? {} : { params };
+  const adjustment = parseRateAdjustment(userText);
+  // 没有相对表达时沿用原有参数构建流程。
+  if (adjustment === undefined) return params === undefined ? {} : { params };
+  const base = latestGatewayRate(context);
+  // 缺少可信基线时拒绝猜测，避免把增量当作绝对值执行。
+  if (base === undefined) return { missing: true };
+  const delta = adjustment.percent ? base * adjustment.value / 100 : adjustment.value;
+  const next = adjustment.direction === 'up' ? base + delta : base - delta;
+  if (!Number.isFinite(next) || next < 0) return { missing: true };
+  return { params: { ...(params ?? {}), rate: `${formatRate(next)}/s` } };
+}
+
+/**
+ * 读取“上调/下调 N”或百分比表达，无法识别时保持原始输入。
+ *
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-24
+ */
+function parseRateAdjustment(text: string): { direction: 'up' | 'down'; value: number; percent: boolean } | undefined {
+  const match = text.match(/(上调|往上调|提高|增加|加上|下调|往下调|降低|减少|减去)\s*(\d+(?:\.\d+)?)\s*(%)?/u);
+  // 未命中相对调整句式时不改变输入语义。
+  if (match === null) return undefined;
+  const value = Number(match[2]);
+  if (!Number.isFinite(value)) return undefined;
+  return { direction: /下调|往下调|降低|减少|减去/u.test(match[1]!) ? 'down' : 'up', value, percent: match[3] === '%' };
+}
+
+/**
+ * 从最新 api.gateway 事实中读取可用于相对调整的限流基线。
+ *
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-24
+ */
+function latestGatewayRate(context: BehaviorContext | undefined): number | undefined {
+  const records = context?.factHistory?.records ?? [];
+  const record = [...records].reverse().find((item) => item.functionId === API_GATEWAY_FUNCTION_ID && typeof item.values[GATEWAY_RATE_FACT_KEY] === 'string');
+  const value = record?.values[GATEWAY_RATE_FACT_KEY];
+  const match = typeof value === 'string' ? value.match(/\d+(?:\.\d+)?/u) : null;
+  // 事实缺失或格式非法时交由上层执行 fail-closed。
+  return match === null ? undefined : Number(match[0]);
+}
+
+/**
+ * 把计算结果规范化到有限的小数位，避免把浮点误差带入 Handler。
+ *
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-24
+ */
+function formatRate(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(RATE_DECIMAL_PLACES).replace(/0+$/u, '').replace(/\.$/u, '');
 }
 
 /** 将同一 Function 的已解析列表事实按字段名并入参数，当前轮槽位保持最高优先级。 */
