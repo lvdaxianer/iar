@@ -6,7 +6,7 @@
  * @date 2026-10-18
  */
 import { randomUUID } from 'node:crypto';
-import { MAX_COLLECTION_ATTEMPTS, SCHEMA_VERSIONS, validateJsonSchemaValue, type ActionDefinition, type ActionType, type BehaviorContext, type CollectionState, type EventEnvelope, type JsonSchema, type JsonValue, type PendingReference, type PluginOperation, type PluginPolicyMetadata, type RuleExpression, type VerifiedFactRecord } from '@iar/contracts';
+import { MAX_COLLECTION_ATTEMPTS, SCHEMA_VERSIONS, validateJsonSchemaValue, type ActionDefinition, type ActionType, type BehaviorContext, type CollectionState, type ConversationTurn, type EventEnvelope, type JsonSchema, type JsonValue, type PendingReference, type PluginOperation, type PluginPolicyMetadata, type RuleExpression, type VerifiedFactRecord } from '@iar/contracts';
 import { SELF_INTRODUCTION_FUNCTION_ID, type PluginDescriptor, type PluginFunctionRecord, type PluginHost, type PluginRecord } from '@iar/plugins';
 import { ModelGateway, SemanticExtractorAdapter, projectWorkflowContext, resolveOrderedReferenceCandidates, type HistoricalSemanticReference, type ModelGatewayResult, type ModelProfileRegistry, type OrderedReference, type SemanticFrame } from '@iar/runtime';
 import { PluginFirstRouter, type AsyncDecisionAdapter, type AsyncFunctionCallAdapter, type AsyncNestedRouteAdapter, type RouteResult } from '@iar/runtime';
@@ -176,7 +176,14 @@ export class SandboxSessionRouting {
         return { ok: false, reasonCode: 'reference_unresolved' };
       }
       const history = restrictToPendingCandidates(behaviorContext.factHistory, behaviorContext.pendingReference);
-      if (!history || history.records.length === 0) return { ok: false, reasonCode: 'reference_unresolved' };
+      if (!history || history.records.length === 0) {
+        const cancelledTurn = resolveCancelledConversationTurn(reference, behaviorContext.conversationTurns);
+        if (cancelledTurn !== undefined) {
+          resolved.push({ text: reference.text, turn: cancelledTurn });
+          continue;
+        }
+        return { ok: false, reasonCode: 'reference_unresolved' };
+      }
       const result = resolveOrderedReferenceCandidates({
         items: history.records.map((record) => ({ id: record.recordId, sequence: record.sequence, record })),
         ...(history.focusRecordId === undefined ? {} : { focusId: history.focusRecordId })
@@ -430,6 +437,25 @@ export class SandboxSessionRouting {
     return payload;
   }
 
+}
+
+/**
+ * 在没有成功事实时，仅解析最近已取消的会话轮次作为只读状态依据。
+ *
+ * @param reference - 模型声明的历史关系
+ * @param history - 有序会话轮次
+ * @returns 已取消轮次或 undefined
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-24
+ */
+function resolveCancelledConversationTurn(reference: HistoricalSemanticReference, history: BehaviorContext['conversationTurns']): ConversationTurn | undefined {
+  const cancelledTurns = (history?.turns ?? []).filter((turn) => turn.outcome === 'cancelled');
+  if (cancelledTurns.length === 0) return undefined;
+  const result = resolveOrderedReferenceCandidates({
+    items: cancelledTurns.map((turn) => ({ id: turn.turnId, sequence: turn.sequence, turn })),
+    ...(history?.focusTurnId === undefined ? {} : { focusId: history.focusTurnId })
+  }, orderedReference(reference, 'conversation_turn'));
+  return result.status === 'resolved' ? result.item.turn : undefined;
 }
 
 /**

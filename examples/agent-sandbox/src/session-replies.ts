@@ -171,6 +171,8 @@ export class SandboxSessionReplies {
     }
     if (reasonCode === 'reference_ambiguous' && referenceCandidates.length > 0) return { text: `我找到多个可能的记录，请明确选择第 ${referenceCandidates.map((record) => record.sequence).join('、')} 条中的哪一条。` };
     if (isFactFollowUp(text)) {
+      const cancelledTurn = resolvedReferences.find((reference) => 'turn' in reference && reference.turn.outcome === 'cancelled');
+      if (cancelledTurn !== undefined) return { text: '刚才的申请已取消，未提交。' };
       const records = resolvedReferences.length > 0 ? resolvedReferences.filter(isResolvedFactReference).map((item) => item.record) : reasonCode === 'reference_unresolved' ? [] : currentFactRecords(behaviorContext);
       if (records.length > 0) return { text: `根据当前会话已确认的信息：${records.flatMap((record) => Object.entries(record.values).map(([field, value]) => `${field}=${String(value ?? '空')}`)).join('、')}。` };
       return { text: '当前会话没有足够的已确认事实。请说明你想查询的对象或需要补充的信息。' };

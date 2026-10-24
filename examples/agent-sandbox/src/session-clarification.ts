@@ -29,7 +29,7 @@ export function createSelectionState(descriptors: readonly PluginDescriptor[], u
 export function hasVerifiedFactsForFollowUp(context: BehaviorContext, evidence: RouteEvidence, userText = ''): boolean {
   return evidence.semanticIntent === 'unknown'
     && evidence.reasonCode !== 'reference_unresolved'
-    && (context.factHistory?.records.length ?? 0) > 0
+    && ((context.factHistory?.records.length ?? 0) > 0 || hasCancelledConversationTurn(context, userText))
     && (userText.length === 0 || isLikelyFactFollowUp(context, userText));
 }
 
@@ -75,11 +75,25 @@ function isLikelyFactFollowUp(context: BehaviorContext, userText: string): boole
 
 /** 只把有历史指代且没有副作用动作的当前输入视为事实追问候选。 */
 function isContextFollowUpCandidate(context: BehaviorContext, frame: SemanticFrame, userText: string): boolean {
-  return (context.factHistory?.records.length ?? 0) > 0
+  return ((context.factHistory?.records.length ?? 0) > 0 || hasCancelledConversationTurn(context, userText))
     && (frame.action === 'query' || frame.action === 'unknown')
     && !CONFIRMATION_ONLY_PATTERN.test(userText.trim())
     && (!EXPLICIT_SIDE_EFFECT_PATTERN.test(userText) || QUERY_CONTINUATION_PATTERN.test(userText))
     && isLikelyFactFollowUp(context, userText);
+}
+
+/**
+ * 判断当前输入是否可追问最近已取消的会话轮次。
+ *
+ * @param context - 当前结构化会话上下文
+ * @param userText - 当前用户输入
+ * @returns 是否存在可追问的取消状态
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-24
+ */
+function hasCancelledConversationTurn(context: BehaviorContext, userText: string): boolean {
+  return (context.conversationTurns?.turns ?? []).some((turn) => turn.outcome === 'cancelled')
+    && (userText.length === 0 || isLikelyFactFollowUp(context, userText));
 }
 
 /** 用户正在回答已有澄清选项时视为进展，不增加新的 unresolved 次数。 */
