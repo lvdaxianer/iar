@@ -78,21 +78,21 @@
 - Modify: `examples/agent-sandbox/src/pi-host/web/pi-host.fragment.js`
 - Test: `tests/integration/pi-host/pi-host-page.test.ts`
 
-- [ ] **Step 1: Write the failing page-template test**
+- [x] **Step 1: Write the failing page-template test**
 
   Assert the assembled Pi Host adapter posts/deletes `/api/pi-host/session/` with the old session ID before rotating the browser ID, and handles an initial `confirm` event with `null` by clearing stale cards.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
   Run: `node --test --import tsx tests/integration/pi-host/pi-host-page.test.ts`
 
   Expected: FAIL because the current clear action only removes browser storage and the reconnect handler has no explicit initial-state contract.
 
-- [ ] **Step 3: Implement clear and reconnect handling**
+- [x] **Step 3: Implement clear and reconnect handling**
 
   Add a bounded DELETE helper, make clear disable during busy state and call the helper before closing the old EventSource, then rotate the ID and reconnect. Keep local cleanup even when DELETE fails, display a recoverable message, and ensure `confirm: null` removes stale UI without creating a history entry.
 
-- [ ] **Step 4: Run focused page and integration tests**
+- [x] **Step 4: Run focused page and integration tests**
 
   Run: `node --test --import tsx tests/integration/pi-host/pi-host-page.test.ts tests/integration/pi-host/pi-host-session.test.ts`
 

@@ -128,11 +128,22 @@ test('Pi host 只展示最终回复思考并在答案开始时收起', () => {
 test('Pi host 页面交互入口按职责拆分且有界', () => {
   const adapter = readFileSync(join(PAGE_DIR, 'pi-host.fragment.js'), 'utf8');
   for (const name of ['appendMsg', 'renderPiHostEntry', 'showPiHostConfirmBox', 'finalizePiHostBubble', 'clearPiHostSession']) {
-    const method = new RegExp(`  function ${name}\\([\\s\\S]*?\\n  \\}`).exec(adapter);
+    const method = new RegExp(`  (?:async )?function ${name}\\([\\s\\S]*?\\n  \\}`).exec(adapter);
     assert.ok(method, `${name} 应存在`);
     assert.ok(method[0].split('\n').length <= 20, `${name} 为 ${method[0].split('\n').length} 行`);
   }
   assert.match(adapter, /clearSessionBtn'\)\.onclick = clearPiHostSession/);
   assert.match(adapter, /copyContextBtn'\)\.onclick = copyPiHostContext/);
   assert.match(adapter, /navigator\.clipboard/);
+});
+
+/* 清空会话必须同时释放服务端上下文；DELETE 失败时仍要完成本地切换并给出回收提示。 */
+test('Pi host 清空会话调用服务端 DELETE 并保留失败恢复路径', () => {
+  const adapter = readFileSync(join(PAGE_DIR, 'pi-host.fragment.js'), 'utf8');
+  assert.match(adapter, /async function clearPiHostSession\(\)/);
+  assert.match(adapter, /function piHostDelete\(path\)/);
+  assert.match(adapter, /piHostDelete\('\/api\/pi-host\/session\/' \+ encodeURIComponent\(oldSessionId\)\)/);
+  assert.match(adapter, /setPiHostBusy\(true\)/);
+  assert.match(adapter, /旧会话服务端清理失败/);
+  assert.match(adapter, /sessionStorage\.removeItem\(PI_HOST_SESSION_KEY\)/);
 });
