@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { SCHEMA_VERSIONS, validateContract, type ActionDefinition, type ActionResult, type ClarificationState, type CollectionState, type EventEnvelope, type JsonValue, type PendingInput, type PendingReference } from '@iar/contracts';
+import { SCHEMA_VERSIONS, validateContract, type ActionDefinition, type ActionResult, type ClarificationState, type CollectionState, type ConversationTurn, type EventEnvelope, type JsonValue, type PendingInput, type PendingReference } from '@iar/contracts';
 import type { WorkflowRun } from './types.js';
 
 /** WorkflowEventLog 的时钟和链路配置。 */
@@ -132,6 +132,18 @@ export class WorkflowEventLog {
   /** 记录已解析的事实焦点，供下一轮“这个/当前”指代使用。 */
   public factFocused(runId: string, recordId: string): void {
     this.append('context.fact.focused', runId, { recordId });
+  }
+
+  /**
+   * 记录用户输入和完整助手回复组成的会话轮次。
+   * @param runId - 运行实例标识
+   * @param turn - 已完成且有界的会话轮次
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-24
+   */
+  public conversationTurnCompleted(runId: string, turn: ConversationTurn): void {
+    this.append('conversation.turn.completed', runId, { turn: structuredClone(turn) as JsonValue });
   }
 
   /**

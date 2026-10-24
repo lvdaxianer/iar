@@ -28,7 +28,7 @@ export class ReplayValidationError extends Error {
  */
 export function replayEvents(events: readonly EventEnvelope[], initial?: BehaviorContext): BehaviorContext {
   validateReplayEvents(events);
-  const projector = new BehaviorContextProjector(initial ?? createInitialContext(events[0]?.runId));
+  const projector = new BehaviorContextProjector(initial ?? createInitialContext(events[0]?.runId), events[0]?.runId);
   for (const event of events) {
     try {
       projector.apply(event);

@@ -1,7 +1,7 @@
 ## 1. Contracts and event projection
 
 - [x] 1.1 Add bounded `ConversationTurn`, `ConversationTurnHistory`, schema, event name/payload, and backward-compatible optional fields to `BehaviorContext`; include the turn history in critical-state hashing and initial context creation. Verify with contract schema tests and a RED/GREEN compatibility test for old snapshots.
-- [ ] 1.2 Add `conversation.turn.completed` event creation and projection. Enforce session ownership, monotonic sequence, bounded text, duplicate turn-id idempotency, and independent turn focus without changing fact focus. Verify with unit and replay tests for valid, duplicate, stale, foreign, and malformed events.
+- [x] 1.2 Add `conversation.turn.completed` event creation and projection. Enforce session ownership, monotonic sequence, bounded text, duplicate turn-id idempotency, and independent turn focus without changing fact focus. Verify with unit and replay tests for valid, duplicate, stale, foreign, and malformed events.
 
 ## 2. Session completion and recovery integration
 

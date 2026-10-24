@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 import { createHash } from 'node:crypto';
-import { ERROR_CODES, MAX_CANDIDATE_KEY_LENGTH, MAX_CANDIDATE_VERSION_LENGTH, MAX_CLARIFICATION_REASON_LENGTH, MAX_CLARIFICATION_OPTIONS, MAX_COLLECTION_ATTEMPTS, MAX_COLLECTION_CANDIDATES, MAX_COLLECTION_FIELD_LENGTH, MAX_COLLECTION_FIELDS, MAX_FACT_RECORD_ID_LENGTH, MAX_FACT_RECORD_VALUES, MAX_PENDING_REFERENCE_CANDIDATES, MAX_PENDING_REFERENCE_OFFSET, MAX_PENDING_REFERENCE_TEXT_LENGTH, MAX_UNRESOLVED_STREAK, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, validateContract, type BehaviorContext, type ClarificationState, type CollectionState, type ContractErrorResult, type EventEnvelope, type PendingReference, type RoutingScope, type VerifiedFactHistory, type TrustedFactValue, type VerifiedFactRecord } from '@iar/contracts';
+import { ERROR_CODES, MAX_CANDIDATE_KEY_LENGTH, MAX_CANDIDATE_VERSION_LENGTH, MAX_CLARIFICATION_REASON_LENGTH, MAX_CLARIFICATION_OPTIONS, MAX_COLLECTION_ATTEMPTS, MAX_COLLECTION_CANDIDATES, MAX_COLLECTION_FIELD_LENGTH, MAX_COLLECTION_FIELDS, MAX_CONVERSATION_TURNS, MAX_FACT_RECORD_ID_LENGTH, MAX_FACT_RECORD_VALUES, MAX_PENDING_REFERENCE_CANDIDATES, MAX_PENDING_REFERENCE_OFFSET, MAX_PENDING_REFERENCE_TEXT_LENGTH, MAX_UNRESOLVED_STREAK, MAX_TRUSTED_FACTS, MAX_TRUSTED_FACT_KEY_LENGTH, MAX_TRUSTED_FACT_STRING_LENGTH, TRUSTED_FACT_KEY_PATTERN, validateContract, type BehaviorContext, type ClarificationState, type CollectionState, type ContractErrorResult, type ConversationTurn, type EventEnvelope, type PendingReference, type RoutingScope, type VerifiedFactHistory, type TrustedFactValue, type VerifiedFactRecord } from '@iar/contracts';
 
 /** 关键字段哈希固定使用 SHA-256，避免实现更换导致快照不可恢复。 */
 const HASH_ALGORITHM = 'sha256';
@@ -104,15 +104,19 @@ export function createInitialContext(runId = 'unknown-run'): BehaviorContext {
 export class BehaviorContextProjector {
   /** 当前投影只通过事件或完整校验替换。 */
   private state: BehaviorContext;
+  /** 可选的运行边界，直接投影时用于拒绝跨会话事件。 */
+  private readonly expectedRunId: string | undefined;
 
   /**
    * 从已有上下文创建投影器。
    *
    * @param initial - 已可信的初始行为上下文
+   * @param expectedRunId - 可选的会话运行边界
    * @author lvdaxianer@yeah.net
    * @date 2026-10-17
    */
-  public constructor(initial: BehaviorContext = createInitialContext()) {
+  public constructor(initial: BehaviorContext = createInitialContext(), expectedRunId?: string) {
+    this.expectedRunId = expectedRunId;
     const snapshot = structuredClone(initial);
     if (!validateContract('behaviorContext', snapshot).ok) {
       throw new Error('BehaviorContext 初始契约无效');
@@ -144,6 +148,8 @@ export class BehaviorContextProjector {
    * @date 2026-10-17
    */
   public apply(event: EventEnvelope): BehaviorContext {
+    if (!validateContract('event', event).ok) throw new Error('事件契约无效');
+    if (this.expectedRunId !== undefined && event.runId !== this.expectedRunId) throw new Error('事件 runId 与当前会话不匹配');
     const previous = this.state;
     this.state = structuredClone(previous);
     try {
@@ -189,6 +195,10 @@ export class BehaviorContextProjector {
       const history = this.state.factHistory;
       if (typeof recordId !== 'string' || history === undefined || !history.records.some((record) => record.recordId === recordId)) throw new Error('事实焦点无效');
       this.state.factHistory = { ...history, focusRecordId: recordId };
+      return;
+    }
+    if (event.eventName === 'conversation.turn.completed') {
+      this.applyConversationTurn(payload);
       return;
     }
     if (event.eventName === 'context.clarification.updated' && (!isPendingInput(payload.pending) || (payload.clarification !== undefined && !isClarificationState(payload.clarification)) || (payload.collection !== undefined && payload.collection !== null && !isCollectionState(payload.collection)) || (payload.pendingReference !== undefined && payload.pendingReference !== null && !isPendingReference(payload.pendingReference)))) {
@@ -285,6 +295,27 @@ export class BehaviorContextProjector {
     if (nextHistory.records.length > history.records.length) this.state.factHistory = nextHistory;
   }
 
+  /**
+   * 投影完整会话轮次并维持独立的轮次焦点。
+   * @param payload - 已通过事件 Schema 校验的事件载荷
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-24
+   */
+  private applyConversationTurn(payload: Record<string, unknown>): void {
+    const turn = readConversationTurn(payload.turn);
+    if (turn === undefined) throw new Error('会话轮次载荷无效');
+    const history = this.state.conversationTurns ?? { turns: [] };
+    const duplicate = history.turns.find((item) => item.turnId === turn.turnId);
+    if (duplicate !== undefined) {
+      if (JSON.stringify(canonicalize(duplicate)) !== JSON.stringify(canonicalize(turn))) throw new Error('重复会话轮次内容不一致');
+      return;
+    }
+    const previous = history.turns.at(-1);
+    if (previous !== undefined && turn.sequence <= previous.sequence) throw new Error('会话轮次 sequence 必须递增');
+    this.state.conversationTurns = { turns: [...history.turns, turn].slice(-MAX_CONVERSATION_TURNS), focusTurnId: turn.turnId };
+  }
+
   /** 确保每个事实事件都不能把投影推进到非法状态。 */
   private assertValidState(): void {
     if (!validateContract('behaviorContext', this.state).ok) throw new Error('事件投影产生非法 BehaviorContext');
@@ -299,6 +330,17 @@ function projectionError(message: string): ContractErrorResult {
 /** 判断事件中的对象是否为普通 JSON 对象。 */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * 从已校验的事件载荷读取会话轮次。
+ * @param value - 事件中的未知轮次字段
+ * @returns 合法轮次或 undefined
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-24
+ */
+function readConversationTurn(value: unknown): ConversationTurn | undefined {
+  return isRecord(value) ? value as unknown as ConversationTurn : undefined;
 }
 
 /** 判断事件中的路由范围是否满足运行时的有界结构。 */
