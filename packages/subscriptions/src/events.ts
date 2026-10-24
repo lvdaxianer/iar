@@ -5,7 +5,7 @@
  * @date 2026-10-17
  */
 const KNOWN_EVENT_NAMES = [
-  'message.received', 'message.sent', 'session.restored', 'context.updated',
+  'message.received', 'message.sent', 'conversation.turn.completed', 'session.restored', 'context.updated',
   'semantic.extract.before', 'semantic.extracted', 'function.route.before',
   'function.selected', 'plugin.select.before', 'plugin.selected',
   'policy.evaluate.before', 'policy.evaluated', 'decision.created',

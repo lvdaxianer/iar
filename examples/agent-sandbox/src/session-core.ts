@@ -8,12 +8,12 @@
  * @date 2026-10-18
  */
 import { randomUUID } from 'node:crypto';
-import { DEFAULT_RECENT_MESSAGE_LIMIT, MAX_CONVERSATION_TURN_TEXT_LENGTH, MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGE_LIMIT, SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type ClarificationState, type CollectionState, type ConversationTurn, type EventName, type JsonValue, type PendingInput, type PendingReference, type WorkflowDefinition } from '@iar/contracts';
-import { ModelGateway, ModelProfileRegistry, type IarRuntimeConfiguration, type SelfIntroductionOptions } from '@iar/runtime';
+import { DEFAULT_RECENT_MESSAGE_LIMIT, MAX_CONVERSATION_TURN_TEXT_LENGTH, MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGE_LIMIT, SCHEMA_VERSIONS, validateContract, type ActionDefinition, type ActionResult, type ClarificationState, type CollectionState, type ConversationTurn, type EventName, type JsonValue, type PendingInput, type PendingReference, type WorkflowDefinition } from '@iar/contracts';
+import { BehaviorContextProjector, createInitialContext, ModelGateway, ModelProfileRegistry, type IarRuntimeConfiguration, type SelfIntroductionOptions } from '@iar/runtime';
 import { PersistenceSubscriptionBridge } from '@iar/storage';
 import type { SessionMessage, SessionPersistenceProvider } from '@iar/storage';
 import { PluginHost } from '@iar/plugins';
-import { BehaviorContextProjector, type AsyncDecisionAdapter, type AsyncFunctionCallAdapter, type AsyncNestedRouteAdapter } from '@iar/runtime';
+import { type AsyncDecisionAdapter, type AsyncFunctionCallAdapter, type AsyncNestedRouteAdapter } from '@iar/runtime';
 import { SubscriptionDispatcher, SubscriptionRegistry, type DispatchEvent } from '@iar/subscriptions';
 import { InMemoryEventStore, type SnapshotStore } from '@iar/storage';
 import { LocalWorkflow, WorkflowEventLog, type ActionExecutor } from '@iar/runtime';
@@ -376,6 +376,7 @@ export class SandboxSessionCore {
     if (!this.snapshotStore && !this.persistenceProvider) return;
     const snapshot = await this.loadSnapshotSafely();
     const restored = snapshot === undefined ? false : this.restoreStructuredSnapshot(snapshot);
+    await this.restoreConversationTurnEvents(restored);
     await this.restoreRecentMessages();
     if (restored && snapshot) this.enqueuePersistenceEvent({ eventName: 'session.restored', runId: SESSION_RUN_ID, payload: { revision: snapshot.revision, eventId: snapshot.eventId } as JsonValue, eventId: `session-restored-${snapshot.eventId}` });
   }
@@ -400,6 +401,27 @@ export class SandboxSessionCore {
     } catch {
       writeSafeLog({ level: 'warn', event: 'sandbox.snapshot', outcome: 'snapshot_invalid' });
       return false;
+    }
+  }
+
+  /** 从持久化轮次事件补齐缺失或落后快照中的有序会话上下文。 */
+  private async restoreConversationTurnEvents(hasSnapshot: boolean): Promise<void> {
+    if (!this.persistenceProvider) return;
+    try {
+      const events = await this.persistenceProvider.listEvents(this.sessionId);
+      const current = hasSnapshot ? this.projector.current() : createInitialContext(SESSION_RUN_ID);
+      const projector = new BehaviorContextProjector(current, SESSION_RUN_ID);
+      const lastSequence = current.conversationTurns?.turns.at(-1)?.sequence ?? 0;
+      for (const event of events.filter((item) => item.eventName === 'conversation.turn.completed')) {
+        if (!validateContract('event', event).ok) throw new Error('会话轮次事件契约无效');
+        const sequence = conversationEventSequence(event);
+        if (sequence === undefined) throw new Error('会话轮次事件序号无效');
+        if (sequence <= lastSequence) continue;
+        projector.apply(event);
+      }
+      this.projector = projector;
+    } catch {
+      writeSafeLog({ level: 'warn', event: 'sandbox.conversation_turns', outcome: 'restore_failed' });
     }
   }
 
@@ -567,4 +589,13 @@ function conversationOutcome(result: TurnResult | ConfirmResult): ConversationTu
 /** 从当前有序历史计算下一个轮次序号。 */
 function nextConversationSequence(turns: ConversationTurn[] | undefined): number {
   return (turns?.at(-1)?.sequence ?? 0) + 1;
+}
+
+/** 从已通过通用事件契约的持久化事件读取轮次序号。 */
+function conversationEventSequence(event: import('@iar/contracts').EventEnvelope): number | undefined {
+  if (typeof event.payload !== 'object' || event.payload === null || Array.isArray(event.payload)) return undefined;
+  const turn = (event.payload as { turn?: unknown }).turn;
+  if (typeof turn !== 'object' || turn === null || Array.isArray(turn)) return undefined;
+  const sequence = (turn as { sequence?: unknown }).sequence;
+  return typeof sequence === 'number' ? sequence : undefined;
 }

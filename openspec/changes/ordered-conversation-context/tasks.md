@@ -6,7 +6,7 @@
 ## 2. Session completion and recovery integration
 
 - [x] 2.1 Record exactly one completed conversation turn at the shared final-reply boundary for normal, confirmation, clarification, failed, and streaming paths. Do not commit partial/interrupted streams, and do not double-record retries or message writes. Verify with session integration tests covering each completion path.
-- [ ] 2.2 Persist and restore the ordered turn collection through snapshots, event replay, and compaction while retaining the existing bounded raw-message window and fact history. Verify restart, refresh, compaction, and legacy-snapshot tests.
+- [x] 2.2 Persist and restore the ordered turn collection through snapshots, event replay, and compaction while retaining the existing bounded raw-message window and fact history. Verify restart, refresh, compaction, and legacy-snapshot tests.
 
 ## 3. Scope-aware references and model context
 

@@ -25,6 +25,7 @@ import type {
 const PERSISTENCE_EVENT_NAMES = [
   'message.received',
   'message.sent',
+  'conversation.turn.completed',
   'context.updated',
   'context.compacted',
   'session.restored',
