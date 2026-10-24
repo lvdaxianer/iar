@@ -77,6 +77,24 @@ test('stale new-topic event cannot block a current explicit Function request', (
   assert.equal(normalizeCurrentTurnWorkflowDecision(frame, '换个话题，导出销售日报')?.event, 'new_topic');
 });
 
+test('stale new-topic event is ignored even when the current semantic frame is incomplete', () => {
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'unknown', action: 'unknown', slots: {}, references: [], confidence: 0.2,
+    workflowDecision: { schemaVersion: SCHEMA_VERSIONS.workflowDecision, userIntent: 'new_topic', event: 'new_topic' }
+  };
+  assert.equal(normalizeCurrentTurnWorkflowDecision(frame, '那如果要申请提升配额，流程是什么？'), undefined);
+  assert.equal(normalizeCurrentTurnWorkflowDecision(frame, '换个话题，申请提升配额')?.event, 'new_topic');
+  assert.equal(normalizeCurrentTurnWorkflowDecision(frame, '换个话题')?.event, 'new_topic');
+});
+
+test('stale non-cancel workflow event cannot block a current explicit semantic request', () => {
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'api.gateway', action: 'query', slots: {}, references: [], confidence: 0.9,
+    workflowDecision: { schemaVersion: SCHEMA_VERSIONS.workflowDecision, userIntent: 'provide_parameter', event: 'parameter_received' }
+  };
+  assert.equal(normalizeCurrentTurnWorkflowDecision(frame, '那认证方式是哪种？'), undefined);
+});
+
 test('continuation recovery ignores model-created Function and Plugin identifiers', () => {
   const context = createInitialContext('forged-route');
   context.route = { functionId: 'verified.function', pluginId: 'verified.plugin' };
@@ -174,4 +192,154 @@ test('parameter collection security state remains bounded and cannot be promoted
   } finally {
     session.dispose();
   }
+});
+
+test('completed route is not reused when the current turn requires an unsupported action type', () => {
+  const context = createInitialContext('run-stale-route-action');
+  context.workflow = { currentStep: 'completed', status: 'completed' };
+  context.route = { functionId: 'function.previous', pluginId: 'plugin.previous' };
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'function.previous', action: 'unknown', slots: {}, references: [], confidence: 0.9
+  };
+  const descriptor = {
+    functionId: 'function.previous', pluginId: 'plugin.previous', actionTypes: ['query'], operationMetadata: { operations: [] }
+  } as unknown as PluginDescriptor;
+
+  const recovered = recoverContinuation([descriptor], context, frame, '把新的对象调整到新的值');
+
+  assert.equal(recovered.descriptor, undefined);
+  assert.equal(recovered.frame.intent, 'unknown');
+  assert.equal(recovered.frame.action, 'unknown');
+});
+
+test('stable route is not reused when the current turn has a different verified Function', () => {
+  const context = createInitialContext('run-current-function-wins');
+  context.workflow = { currentStep: 'completed', status: 'completed' };
+  context.route = { functionId: 'function.previous', pluginId: 'plugin.previous' };
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'function.current', action: 'update', slots: {}, references: [], confidence: 0.9
+  };
+  const previous = {
+    functionId: 'function.previous', pluginId: 'plugin.previous', actionTypes: ['query'], operationMetadata: { operations: [] }
+  } as unknown as PluginDescriptor;
+  const current = {
+    functionId: 'function.current', pluginId: 'plugin.current', actionTypes: ['update'], operationMetadata: { operations: [] }
+  } as unknown as PluginDescriptor;
+  const recovered = recoverContinuation([previous, current], context, frame, '把新的对象调整到新的值');
+  assert.equal(recovered.descriptor, undefined);
+  assert.equal(recovered.frame.intent, 'function.current');
+  assert.equal(recovered.frame.action, 'update');
+});
+
+test('unregistered semantic alias is normalized only to a unique authorized Function', () => {
+  const context = createInitialContext('run-alias-normalization');
+  context.workflow = { currentStep: 'completed', status: 'completed' };
+  context.route = { functionId: 'function.previous', pluginId: 'plugin.previous' };
+  const descriptors = [
+    { functionId: 'function.previous', pluginId: 'plugin.previous', actionTypes: ['query'], operationMetadata: { operations: [] } },
+    { functionId: 'api.current', pluginId: 'plugin.current', actionTypes: ['update'], operationMetadata: { operations: [] } }
+  ] as unknown as PluginDescriptor[];
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'current.control', action: 'update', slots: {}, references: [], confidence: 0.9
+  };
+  const recovered = recoverContinuation(descriptors, context, frame, '把新的对象调整到新的值');
+  assert.equal(recovered.descriptor, undefined);
+  assert.equal(recovered.frame.intent, 'api.current');
+  assert.equal(recovered.frame.pluginId, 'plugin.current');
+  assert.equal(recovered.frame.action, 'update');
+});
+
+test('unique current descriptor evidence replaces a stale completed route', () => {
+  const context = createInitialContext('run-current-evidence');
+  context.workflow = { currentStep: 'completed', status: 'completed' };
+  context.route = { functionId: 'function.previous', pluginId: 'plugin.previous' };
+  const descriptors = [
+    { functionId: 'function.previous', pluginId: 'plugin.previous', description: 'previous capability', actionTypes: ['query'], operationMetadata: { operations: [] } },
+    { functionId: 'function.current', pluginId: 'plugin.current', description: 'current capability provides unique-token adjustment', actionTypes: ['update'], operationMetadata: { operations: [] } }
+  ] as unknown as PluginDescriptor[];
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'function.previous', action: 'update', slots: {}, references: [], confidence: 0.9
+  };
+  const recovered = recoverContinuation(descriptors, context, frame, '请进行 unique-token adjustment');
+  assert.equal(recovered.descriptor, undefined);
+  assert.equal(recovered.frame.intent, 'function.current');
+  assert.equal(recovered.frame.pluginId, 'plugin.current');
+});
+
+test('confirmation-only input cannot revive a completed route without a pending action', () => {
+  const context = createInitialContext('run-no-pending-confirmation');
+  context.workflow = { currentStep: 'completed', status: 'completed' };
+  context.route = { functionId: 'function.previous', pluginId: 'plugin.previous' };
+  const descriptor = {
+    functionId: 'function.previous', pluginId: 'plugin.previous', actionTypes: ['execute'], operationMetadata: { operations: [] }
+  } as unknown as PluginDescriptor;
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'unknown', action: 'unknown', slots: {}, references: [], confidence: 0.1,
+    workflowDecision: { schemaVersion: SCHEMA_VERSIONS.workflowDecision, userIntent: 'confirm', event: 'function_selected' }
+  };
+
+  const recovered = recoverContinuation([descriptor], context, frame, '直接确认上一个操作');
+
+  assert.equal(recovered.descriptor, undefined);
+  assert.equal(recovered.frame.intent, 'unknown');
+  assert.equal(recovered.frame.action, 'unknown');
+});
+
+test('confirmation-only input is not rewritten as a historical fact follow-up', () => {
+  const context = createInitialContext('run-no-pending-confirmation-fact');
+  context.factHistory = {
+    records: [{
+      recordId: 'fact-001', sequence: 1, sourceEventId: 'event-001',
+      functionId: 'verified.function', pluginId: 'verified.plugin', values: { result: 'done' }, createdAt: '2026-10-20T00:00:00.000Z'
+    }],
+    focusRecordId: 'fact-001'
+  };
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'unknown', action: 'query', slots: {}, references: [], confidence: 0.4
+  };
+
+  const normalized = normalizeContextFollowUpFrame(context, frame, '直接确认上一个操作');
+
+  assert.equal(normalized.workflowDecision, undefined);
+  assert.equal(normalized.intent, 'unknown');
+  assert.equal(normalized.action, 'query');
+});
+
+test('ambiguous current descriptor evidence cannot inherit the previous Function', () => {
+  const context = createInitialContext('run-ambiguous-current-evidence');
+  context.workflow = { currentStep: 'completed', status: 'completed' };
+  context.route = { functionId: 'api.gateway', pluginId: 'api-gateway-v1' };
+  const descriptors = [
+    { functionId: 'api.gateway', pluginId: 'api-gateway-v1', description: '网关调用统计查看与限流配额调整', actionTypes: ['update'], operationMetadata: { operations: [] } },
+    { functionId: 'report.center', pluginId: 'report-center-v1', description: '报表目录查看与受控导出', actionTypes: ['execute'], operationMetadata: { operations: [] } }
+  ] as unknown as PluginDescriptor[];
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'api.gateway', action: 'update', slots: {}, references: [], confidence: 0.9
+  };
+
+  const recovered = recoverContinuation(descriptors, context, frame, '把限流调到每秒100，顺便导出今天的销售报表');
+
+  assert.equal(recovered.descriptor, undefined);
+  assert.equal(recovered.frame.intent, 'unknown');
+  assert.equal(recovered.frame.pluginId, undefined);
+});
+
+test('unique current descriptor evidence replaces a stale route when the model returns unknown', () => {
+  const context = createInitialContext('run-unknown-current-evidence');
+  context.workflow = { currentStep: 'completed', status: 'completed' };
+  context.route = { functionId: 'api.gateway', pluginId: 'api-gateway-v1' };
+  const descriptors = [
+    { functionId: 'api.gateway', pluginId: 'api-gateway-v1', description: '网关调用统计查看与限流配额调整', actionTypes: ['update'], operationMetadata: { operations: [] } },
+    { functionId: 'ticket.create', pluginId: 'ticket-create-v1', description: '工单进度查询与工单创建', actionTypes: ['create'], operationMetadata: { operations: [] } }
+  ] as unknown as PluginDescriptor[];
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'unknown', action: 'unknown', slots: {}, references: [], confidence: 0.2,
+    workflowDecision: { schemaVersion: SCHEMA_VERSIONS.workflowDecision, userIntent: 'select_function', event: 'function_selected' }
+  };
+
+  const recovered = recoverContinuation(descriptors, context, frame, '还是创建一张工单，说网络很卡');
+
+  assert.equal(recovered.descriptor, undefined);
+  assert.equal(recovered.frame.intent, 'ticket.create');
+  assert.equal(recovered.frame.pluginId, 'ticket-create-v1');
 });

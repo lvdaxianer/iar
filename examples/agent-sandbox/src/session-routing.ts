@@ -7,7 +7,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { MAX_COLLECTION_ATTEMPTS, SCHEMA_VERSIONS, validateJsonSchemaValue, type ActionDefinition, type ActionType, type BehaviorContext, type CollectionState, type EventEnvelope, type JsonSchema, type JsonValue, type PendingReference, type PluginOperation, type PluginPolicyMetadata, type RuleExpression, type VerifiedFactRecord } from '@iar/contracts';
-import { SELF_INTRODUCTION_FUNCTION_ID, type PluginDescriptor, type PluginFunctionRecord, type PluginHost, type PluginRecord, type PluginScopeDescriptor } from '@iar/plugins';
+import { SELF_INTRODUCTION_FUNCTION_ID, type PluginDescriptor, type PluginFunctionRecord, type PluginHost, type PluginRecord } from '@iar/plugins';
 import { ModelGateway, SemanticExtractorAdapter, projectWorkflowContext, type HistoricalSemanticReference, type ModelGatewayResult, type ModelProfileRegistry, type SemanticFrame } from '@iar/runtime';
 import { PluginFirstRouter, resolveFactRelationCandidates, type AsyncDecisionAdapter, type AsyncFunctionCallAdapter, type AsyncNestedRouteAdapter, type FactRelationCandidateReference, type RouteResult } from '@iar/runtime';
 import type { FunctionRule, IarRuntimeConfiguration, PluginRule } from '@iar/runtime';
@@ -74,7 +74,8 @@ export class SandboxSessionRouting {
    * @date 2026-10-18
    */
   public async extractFrame(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages = this.context.recentMessages, selectedDescriptor?: PluginDescriptor, pendingAction?: PendingActionContext, structuredInput?: StructuredInput): Promise<ExtractFrameOutcome> {
-    const descriptors = selectedDescriptor ? this.context.pluginHost.pluginDescriptors().filter((descriptor) => descriptor.pluginId === selectedDescriptor.pluginId) : this.context.pluginHost.pluginDescriptors();
+    // Semantic Extractor 必须看到 FunctionId 与 PluginId 的同一授权快照；Plugin 级描述无法满足闭集 intent 契约。
+    const descriptors = selectedDescriptor ? this.context.pluginHost.descriptors().filter((descriptor) => descriptor.pluginId === selectedDescriptor.pluginId) : this.context.pluginHost.descriptors();
     const input = { text: userText, behaviorContext, workflowContext: projectWorkflowContext(behaviorContext), recentMessages, pluginDescriptors: descriptors, ...(pendingAction === undefined ? {} : { pendingAction }), ...(structuredInput === undefined ? {} : { structuredInput }) };
     const extracted = await new SemanticExtractorAdapter(this.context.gateway).extract({ traceId, runId, input });
     if (extracted.ok) {
@@ -110,7 +111,7 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected async retrySemanticWithScripted(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>, pluginDescriptors: PluginScopeDescriptor[], structuredInput?: StructuredInput): Promise<ModelGatewayResult<SemanticFrame>> {
+  protected async retrySemanticWithScripted(traceId: string, runId: string, userText: string, behaviorContext: BehaviorContext, recentMessages: Array<{ role: string; text: string }>, pluginDescriptors: PluginDescriptor[], structuredInput?: StructuredInput): Promise<ModelGatewayResult<SemanticFrame>> {
     const fallbackGateway = new ModelGateway({
       registry: this.context.registry,
       providers: { brain: new ScriptedModelProvider() },
