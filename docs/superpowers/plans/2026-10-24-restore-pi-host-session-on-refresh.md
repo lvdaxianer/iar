@@ -103,18 +103,18 @@
 **Files:**
 - Modify: `openspec/changes/restore-pi-host-session-on-refresh/tasks.md`
 
-- [ ] **Step 1: Run OpenSpec and code checks**
+- [x] **Step 1: Run OpenSpec and code checks**
 
   Run: `openspec validate restore-pi-host-session-on-refresh --strict`, `git diff --check`, and the focused Pi Host tests.
 
-- [ ] **Step 2: Run build and full suite**
+- [x] **Step 2: Run build and full suite**
 
   Run: `pnpm build` and `pnpm test` from the task worktree; resolve any regression before marking tasks complete.
 
-- [ ] **Step 3: Review the diff against the design and interaction checklist**
+- [x] **Step 3: Review the diff against the design and interaction checklist**
 
   Confirm no task-owned file is outside scope, comments remain Chinese and multiline JSDoc, clear is guarded while busy, session cleanup is bounded, and no sensitive payload is stored or emitted.
 
-- [ ] **Step 4: Run the final OpenSpec verification and commit task markers**
+- [x] **Step 4: Run the final OpenSpec verification and commit task markers**
 
   Run `openspec validate ... --strict` again, mark only verified checkboxes complete, then commit with the required Chinese Conventional Commit body/footer.
