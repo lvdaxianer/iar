@@ -5,7 +5,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-20
  */
-import { PI_BRIDGE_VERSION, isBridgeDisposition, isBridgeReplySource, type BridgeCapabilityContext, type BridgeConfirmRequest, type BridgeConfirmResponse, type BridgeInputRequest, type BridgeInputResponse, type BridgeInputStreamEvent, type BridgeOpenRequest, type BridgeOpenResponse, type BridgePendingAction, type BridgeRouteEvidence, type BridgeStateResponse, type BridgeTimingSummary, type IarSessionId } from './protocol.js';
+import { PI_BRIDGE_VERSION, isBridgeDisposition, isBridgeReplySource, type BridgeCapabilityContext, type BridgeConfirmRequest, type BridgeConfirmResponse, type BridgeInputRequest, type BridgeInputResponse, type BridgeInputStreamEvent, type BridgeOpenRequest, type BridgeOpenResponse, type BridgePendingAction, type BridgeRouteEvidence, type BridgeStateResponse, type BridgeStructuredAction, type BridgeStructuredCollection, type BridgeStructuredContext, type BridgeStructuredFactRecord, type BridgeStructuredSlot, type BridgeStructuredSubject, type BridgeStructuredTurn, type BridgeStructuredWorkflow, type BridgeTimingSummary, type BridgeWorkflowState, type IarSessionId } from './protocol.js';
 
 // 覆盖真实模型的一次完整 Bridge 请求：语义抽取、路由/回复生成和 SSE 收尾可能各自耗时，10 秒会在模型仍处于思考阶段时提前截断单会话。
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -395,7 +395,193 @@ function isDuration(value: unknown): value is number { return typeof value === '
 /** 校验状态响应。 */
 function validateStateResponse(value: unknown): BridgeStateResponse {
   const record = validateCommonResponse(value);
-  return { version: PI_BRIDGE_VERSION, iarSessionId: record.iarSessionId, ...(record.pending === undefined ? {} : { pending: validatePending(record.pending) }) };
+  const structuredContext = record.structuredContext === undefined ? undefined : validateStructuredContext(record.structuredContext);
+  const workflowState = record.workflowState === undefined ? undefined : validateWorkflowState(record.workflowState);
+  return { version: PI_BRIDGE_VERSION, iarSessionId: record.iarSessionId, ...(record.pending === undefined ? {} : { pending: validatePending(record.pending) }), ...(structuredContext === undefined ? {} : { structuredContext }), ...(workflowState === undefined ? {} : { workflowState }) };
+}
+
+/** 校验状态响应中的安全结构化上下文，拒绝原始消息和授权字段。 */
+function validateStructuredContext(value: unknown): BridgeStructuredContext {
+  const record = requiredRecord(value);
+  if (record.schemaVersion !== 'iar.pi-structured-context/v1') throw invalidResponse();
+  const subject = validateStructuredSubject(record.subject);
+  const action = validateStructuredAction(record.action);
+  const workflow = validateStructuredWorkflow(record.workflow);
+  const route = validateStructuredRoute(record.route);
+  const slots = validateStructuredSlots(record.slots);
+  const pending = validatePendingState(record.pending);
+  const confirmation = validateConfirmationState(record.confirmation);
+  const factHistory = validateFactHistory(record.factHistory);
+  const conversationTurns = validateConversationTurns(record.conversationTurns);
+  const routingScope = record.routingScope === undefined ? undefined : validateRoutingScope(record.routingScope);
+  const clarification = record.clarification === undefined ? undefined : validateClarification(record.clarification);
+  const collection = record.collection === undefined ? undefined : validateCollection(record.collection);
+  const pendingReference = record.pendingReference === undefined ? undefined : validatePendingReference(record.pendingReference);
+  const summary = record.summary === undefined ? undefined : validateSummary(record.summary);
+  const integrity = validateIntegrity(record.integrity);
+  return { schemaVersion: 'iar.pi-structured-context/v1', subject, intent: bounded(record.intent, 512), action, route, slots, workflow, pending, ...(routingScope ? { routingScope } : {}), ...(clarification ? { clarification } : {}), ...(collection ? { collection } : {}), ...(pendingReference ? { pendingReference } : {}), confirmation, factHistory, conversationTurns, ...(summary ? { summary } : {}), integrity };
+}
+
+/** 校验状态响应中的 Workflow 投影。 */
+function validateWorkflowState(value: unknown): BridgeWorkflowState {
+  const record = requiredRecord(value);
+  if (record.mapVersion !== 'iar.workflow-map/v1' || !isBoundedString(record.currentState, 64) || !isBoundedString(record.activeState, 64) || !['none', 'completed', 'cancelled', 'failed'].includes(String(record.outcome)) || !['pending', 'running', 'waiting', 'completed', 'failed', 'cancelled'].includes(String(record.workflowStatus)) || !boundedStringArray(record.allowedEvents, 64, 64)) throw invalidResponse();
+  const pending = validatePendingState(record.pending);
+  const confirmation = validateConfirmationState(record.confirmation);
+  const route = record.route === undefined ? undefined : validateStructuredRoute(record.route);
+  const collection = record.collection === undefined ? undefined : validateCollection(record.collection);
+  return { mapVersion: 'iar.workflow-map/v1', currentState: record.currentState, activeState: record.activeState, outcome: record.outcome as BridgeWorkflowState['outcome'], workflowStatus: record.workflowStatus as BridgeWorkflowState['workflowStatus'], allowedEvents: record.allowedEvents as string[], pending, confirmation, ...(route ? { route } : {}), ...(collection ? { collection } : {}) };
+}
+
+/** 校验结构化上下文主语、动作和工作流。 */
+function validateStructuredSubject(value: unknown): BridgeStructuredSubject {
+  const record = requiredRecord(value);
+  if (!isBoundedString(record.type, 128) || !isBoundedString(record.id, 256) || !['resolved', 'unresolved'].includes(String(record.status)) || !['input', 'context', 'event', 'plugin'].includes(String(record.source))) throw invalidResponse();
+  return { type: record.type, id: record.id, status: record.status as BridgeStructuredSubject['status'], source: record.source as BridgeStructuredSubject['source'], ...optionalBoundedString(record, 'sourceEventId', 256) };
+}
+
+function validateStructuredAction(value: unknown): BridgeStructuredAction {
+  const record = requiredRecord(value);
+  if (!isBoundedString(record.name, 256) || !['proposed', 'resolved', 'executed', 'failed'].includes(String(record.status))) throw invalidResponse();
+  return { name: record.name, status: record.status as BridgeStructuredAction['status'] };
+}
+
+function validateStructuredWorkflow(value: unknown): BridgeStructuredWorkflow {
+  const record = requiredRecord(value);
+  if (!isBoundedString(record.currentStep, 256) || !['pending', 'running', 'waiting', 'completed', 'failed', 'cancelled'].includes(String(record.status))) throw invalidResponse();
+  return { currentStep: record.currentStep, status: record.status as BridgeStructuredWorkflow['status'], ...optionalBoundedString(record, 'workflowId', 256) };
+}
+
+function validateStructuredRoute(value: unknown): { functionId?: string; pluginId?: string } {
+  const record = requiredRecord(value);
+  const functionId = optionalBoundedString(record, 'functionId', 256);
+  const pluginId = optionalBoundedString(record, 'pluginId', 256);
+  if (!functionId && !pluginId) return {};
+  return { ...functionId, ...pluginId };
+}
+
+function validateStructuredSlots(value: unknown): Record<string, BridgeStructuredSlot> {
+  const record = requiredRecord(value);
+  const entries = Object.entries(record);
+  if (entries.length > 64) throw invalidResponse();
+  return Object.fromEntries(entries.map(([key, item]) => [bounded(key, 128), validateStructuredSlot(item)]));
+}
+
+function validateStructuredSlot(value: unknown): BridgeStructuredSlot {
+  const record = requiredRecord(value);
+  if (!['unresolved', 'resolved', 'confirmed'].includes(String(record.status))) throw invalidResponse();
+  return { status: record.status as BridgeStructuredSlot['status'], ...optionalBoundedString(record, 'sourceEventId', 256) };
+}
+
+function validatePendingState(value: unknown): BridgeStructuredContext['pending'] {
+  const record = requiredRecord(value);
+  if (!['slot', 'selection', 'confirmation', 'input'].includes(String(record.kind)) || !['required', 'received', 'none'].includes(String(record.status))) throw invalidResponse();
+  return { kind: record.kind as BridgeStructuredContext['pending']['kind'], status: record.status as BridgeStructuredContext['pending']['status'] };
+}
+
+function validateConfirmationState(value: unknown): BridgeStructuredContext['confirmation'] {
+  const record = requiredRecord(value);
+  if (!['not_required', 'required', 'confirmed', 'rejected'].includes(String(record.state))) throw invalidResponse();
+  return { state: record.state as BridgeStructuredContext['confirmation']['state'] };
+}
+
+function validateRoutingScope(value: unknown): NonNullable<BridgeStructuredContext['routingScope']> {
+  const record = requiredRecord(value);
+  if (!boundedStringArray(record.candidatePluginIds, 256, 64) || !boundedStringArray(record.actionTypes, 64, 64) || !['none', 'reuse', 'replace'].includes(String(record.continuation))) throw invalidResponse();
+  return { candidatePluginIds: record.candidatePluginIds as string[], actionTypes: record.actionTypes as string[], continuation: record.continuation as 'none' | 'reuse' | 'replace', ...optionalBoundedString(record, 'activePluginId', 256) };
+}
+
+function validateClarification(value: unknown): NonNullable<BridgeStructuredContext['clarification']> {
+  const record = requiredRecord(value);
+  if (!['none', 'unresolved', 'selection'].includes(String(record.mode)) || !boundedInteger(record.unresolvedStreak, 0, 64)) throw invalidResponse();
+  const candidateKeys = record.candidateKeys === undefined ? undefined : boundedStringArray(record.candidateKeys, 128, 64) ? record.candidateKeys as string[] : undefined;
+  if (record.candidateKeys !== undefined && candidateKeys === undefined) throw invalidResponse();
+  return { mode: record.mode as 'none' | 'unresolved' | 'selection', unresolvedStreak: record.unresolvedStreak as number, ...optionalBoundedString(record, 'reasonCode', 128), ...optionalBoundedString(record, 'candidateVersion', 256), ...(candidateKeys ? { candidateKeys } : {}) };
+}
+
+function validateCollection(value: unknown): BridgeStructuredCollection {
+  const record = requiredRecord(value);
+  if (record.kind === 'function') {
+    if (!boundedInteger(record.candidateFunctionCount, 0, 128)) throw invalidResponse();
+    const candidateKeys = record.candidateKeys === undefined ? undefined : boundedStringArray(record.candidateKeys, 128, 64) ? record.candidateKeys as string[] : undefined;
+    if (record.candidateKeys !== undefined && candidateKeys === undefined) throw invalidResponse();
+    return { kind: 'function', candidateFunctionCount: record.candidateFunctionCount as number, ...optionalBoundedString(record, 'pluginId', 256), ...(candidateKeys ? { candidateKeys } : {}) };
+  }
+  if (record.kind !== 'parameters' || !isBoundedString(record.functionId, 256) || !isBoundedString(record.schemaVersion, 256) || !boundedStringArray(record.collectedFields, 128, 64) || !boundedStringArray(record.missingFields, 128, 64) || !boundedStringArray(record.invalidFields, 128, 64) || !boundedStringArray(record.conflictFields, 128, 64) || !boundedStringArray(record.presentationFields, 128, 64)) throw invalidResponse();
+  return { kind: 'parameters', functionId: record.functionId, schemaVersion: record.schemaVersion, collectedFields: record.collectedFields as string[], missingFields: record.missingFields as string[], invalidFields: record.invalidFields as string[], conflictFields: record.conflictFields as string[], presentationFields: record.presentationFields as string[], ...optionalBoundedString(record, 'pluginId', 256) };
+}
+
+function validatePendingReference(value: unknown): NonNullable<BridgeStructuredContext['pendingReference']> {
+  const record = requiredRecord(value);
+  if (!['current', 'previous', 'next', 'first', 'last', 'offset'].includes(String(record.relation)) || !boundedStringArray(record.candidateRecordIds, 256, 64)) throw invalidResponse();
+  if (record.offset !== undefined && !boundedInteger(record.offset, 0, 64)) throw invalidResponse();
+  return { relation: record.relation as NonNullable<BridgeStructuredContext['pendingReference']>['relation'], candidateRecordIds: record.candidateRecordIds as string[], ...optionalBoundedString(record, 'anchorRecordId', 256), ...(record.offset === undefined ? {} : { offset: record.offset as number }) };
+}
+
+function validateFactHistory(value: unknown): BridgeStructuredContext['factHistory'] {
+  const record = requiredRecord(value);
+  if (!Array.isArray(record.records) || record.records.length > 64) throw invalidResponse();
+  const records = record.records.map(validateFactRecord);
+  return { records, ...optionalBoundedString(record, 'focusRecordId', 256) };
+}
+
+function validateFactRecord(value: unknown): BridgeStructuredFactRecord {
+  const record = requiredRecord(value);
+  if (!isBoundedString(record.recordId, 256) || !boundedInteger(record.sequence, 0, Number.MAX_SAFE_INTEGER) || !isBoundedString(record.sourceEventId, 256) || !isBoundedString(record.functionId, 256) || !isBoundedString(record.pluginId, 256) || !isBoundedString(record.createdAt, 128)) throw invalidResponse();
+  const values = requiredRecord(record.values);
+  if (Object.keys(values).length > 64 || Object.values(values).some((value) => !['string', 'number', 'boolean'].includes(typeof value) && value !== null)) throw invalidResponse();
+  return { recordId: record.recordId, sequence: record.sequence as number, sourceEventId: record.sourceEventId, functionId: record.functionId, pluginId: record.pluginId, values: values as BridgeStructuredFactRecord['values'], createdAt: record.createdAt };
+}
+
+function validateConversationTurns(value: unknown): BridgeStructuredContext['conversationTurns'] {
+  const record = requiredRecord(value);
+  if (!Array.isArray(record.turns) || record.turns.length > 64) throw invalidResponse();
+  return { turns: record.turns.map(validateStructuredTurn), ...optionalBoundedString(record, 'focusTurnId', 256) };
+}
+
+function validateStructuredTurn(value: unknown): BridgeStructuredTurn {
+  const record = requiredRecord(value);
+  if (!isBoundedString(record.turnId, 256) || !boundedInteger(record.sequence, 0, Number.MAX_SAFE_INTEGER) || !['completed', 'awaiting_confirmation', 'needs_clarification', 'failed', 'cancelled'].includes(String(record.outcome)) || typeof record.actionTaken !== 'boolean' || !isBoundedString(record.completedAt, 128)) throw invalidResponse();
+  return { turnId: record.turnId, sequence: record.sequence as number, outcome: record.outcome as BridgeStructuredTurn['outcome'], actionTaken: record.actionTaken, completedAt: record.completedAt };
+}
+
+function validateSummary(value: unknown): NonNullable<BridgeStructuredContext['summary']> {
+  const record = requiredRecord(value);
+  if (!isBoundedString(record.version, 256) || !isBoundedString(record.eventId, 256)) throw invalidResponse();
+  return { version: record.version, eventId: record.eventId };
+}
+
+function validateIntegrity(value: unknown): BridgeStructuredContext['integrity'] {
+  const record = requiredRecord(value);
+  if (!isBoundedString(record.criticalFieldHash, 256) || !isBoundedString(record.lastEventId, 256)) throw invalidResponse();
+  return { criticalFieldHash: record.criticalFieldHash, lastEventId: record.lastEventId };
+}
+
+function bounded(value: unknown, maxLength: number): string {
+  if (!isBoundedString(value, maxLength)) throw invalidResponse();
+  return value;
+}
+
+function optionalBoundedString(record: Record<string, unknown>, key: string, maxLength: number): Record<string, string> {
+  if (record[key] === undefined) return {};
+  return { [key]: bounded(record[key], maxLength) };
+}
+
+function boundedStringArray(value: unknown, itemLength: number, maxItems: number): value is string[] {
+  return Array.isArray(value) && value.length <= maxItems && value.every((item) => isBoundedString(item, itemLength));
+}
+
+function boundedInteger(value: unknown, minimum: number, maximum: number): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= minimum && (value as number) <= maximum;
+}
+
+function invalidResponse(): never {
+  throw new BridgeClientError('invalid_bridge_response', 'IAR 桥接响应无效。', false);
+}
+
+function requiredRecord(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw invalidResponse();
+  return value as Record<string, unknown>;
 }
 
 /** 校验所有会话响应共有字段。 */
