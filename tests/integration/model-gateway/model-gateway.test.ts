@@ -244,6 +244,42 @@ test('semantic frame accepts generic historical relation references', async () =
   if (result.ok) assert.deepEqual(result.value.references[0], { text: '上一个', anchorRecordId: 'record-opaque-b', relation: 'previous', scope: 'same_fact_chain' });
 });
 
+test('semantic frame accepts explicit conversation-turn and fact-history reference scopes', async () => {
+  const provider: ModelProvider = { complete: async (request) => request.profile.role === 'semantic.extract'
+    ? {
+      schemaVersion: 'iar.semantic-frame/v2',
+      intent: 'context.lookup',
+      action: 'query',
+      confidence: 0.95,
+      slots: {},
+      references: [
+        { text: '上一个问题', scope: 'conversation_turn', relation: 'previous', anchorId: 'turn-3', anchorSequence: 3 },
+        { text: '上一个业务结果', scope: 'fact_history', relation: 'previous', anchorId: 'record-2', anchorSequence: 2 }
+      ]
+    }
+    : { schemaVersion: 'iar.response/v1', text: 'ok' } };
+  const result = await new SemanticExtractorAdapter(new ModelGateway({ registry: registry(), providers: { mock: provider } })).extract({ traceId: 'trace-reference-scopes', runId: 'run-reference-scopes', input: { text: '回答上一个问题，并说明上一个业务结果' } });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.deepEqual(result.value.references, [
+    { text: '上一个问题', scope: 'conversation_turn', relation: 'previous', anchorId: 'turn-3', anchorSequence: 3 },
+    { text: '上一个业务结果', scope: 'fact_history', relation: 'previous', anchorId: 'record-2', anchorSequence: 2 }
+  ]);
+});
+
+test('semantic frame rejects unbounded or unknown scoped references', async () => {
+  let output: JsonValue = { schemaVersion: 'iar.semantic-frame/v2', intent: 'context.lookup', action: 'query', confidence: 0.95, slots: {}, references: [{ text: '引用', scope: 'unknown_scope', relation: 'current', targetSequence: 1 }] };
+  const provider: ModelProvider = { complete: async (request) => request.profile.role === 'semantic.extract' ? output : { schemaVersion: 'iar.response/v1', text: 'ok' } };
+  const adapter = new SemanticExtractorAdapter(new ModelGateway({ registry: registry(), providers: { mock: provider } }));
+  const unknownScope = await adapter.extract({ traceId: 'trace-reference-unknown-scope', runId: 'run-reference-unknown-scope', input: { text: '引用' } });
+  assert.equal(unknownScope.ok, false);
+  output = { schemaVersion: 'iar.semantic-frame/v2', intent: 'context.lookup', action: 'query', confidence: 0.95, slots: {}, references: [{ text: '引用', scope: 'conversation_turn', relation: 'offset', anchorId: 'turn-1', anchorSequence: 1, offset: 65 }] };
+  const outOfBounds = await adapter.extract({ traceId: 'trace-reference-offset', runId: 'run-reference-offset', input: { text: '引用' } });
+  assert.equal(outOfBounds.ok, false);
+  output = { schemaVersion: 'iar.semantic-frame/v2', intent: 'context.lookup', action: 'query', confidence: 0.95, slots: {}, references: [{ text: '引用', scope: 'conversation_turn', relation: 'current', targetSequence: 0 }] };
+  const invalidSequence = await adapter.extract({ traceId: 'trace-reference-sequence', runId: 'run-reference-sequence', input: { text: '引用' } });
+  assert.equal(invalidSequence.ok, false);
+});
+
 test('semantic frame rejects direct business target values in the new reference contract', async () => {
   const provider: ModelProvider = { complete: async (request) => request.profile.role === 'semantic.extract'
     ? { schemaVersion: 'iar.semantic-frame/v2', intent: 'historical.lookup', action: 'query', confidence: 0.95, slots: {}, references: [{ text: '上一个', resolvedTo: 'business-value-001' }] }
