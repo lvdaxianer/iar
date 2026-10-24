@@ -10,6 +10,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { IarSandboxSession } from '../../../examples/agent-sandbox/src/session.js';
+import { requiresGatewayRateClarification } from '../../../examples/agent-sandbox/src/session-helpers.js';
 import type { StreamEvent } from '../../../examples/agent-sandbox/src/session.js';
 
 /* 同一脚本输入走两个公开入口，比较执行终态。
@@ -199,6 +200,76 @@ test('限流增量续问恢复已验证目标并合成为新值', async () => {
     const percentageConfirmed = await session.confirm(true);
     assert.equal(percentageConfirmed.status, 'executed');
     assert.equal(percentageConfirmed.actionResult?.output && typeof percentageConfirmed.actionResult.output === 'object' && !Array.isArray(percentageConfirmed.actionResult.output) ? percentageConfirmed.actionResult.output.newLimit : undefined, '225/s');
+  } finally { session.dispose(); }
+});
+
+test('限流缺少明确目标时只收集参数，不创建待确认动作', async () => {
+  const requests = [
+    '把订单接口限流调一下',
+    '把订单接口限流调低一点',
+    '把限流调到 100 到 200 之间，你看着办',
+    '把订单接口限流调高点，别低于100'
+  ];
+  for (const request of requests) {
+    const session = new IarSandboxSession({ mode: 'scripted' });
+    try {
+      const result = await session.turn(request);
+      assert.equal(result.status, 'clarification', request);
+      assert.equal(result.reasonCode, 'parameters_required', request);
+      assert.match(result.reply, /补充|限流|参数/u, request);
+      assert.equal((await session.state()).pending, null, request);
+    } finally { session.dispose(); }
+  }
+});
+
+test('限流参数门禁覆盖 Function Calling 漏标动作类型的路径', () => {
+  assert.equal(requiresGatewayRateClarification('把订单接口限流调低一点'), true);
+  assert.equal(requiresGatewayRateClarification('把限流调到 100 到 200 之间，你看着办'), true);
+  assert.equal(requiresGatewayRateClarification('把限流调到 1,000 次每秒'), false);
+  assert.equal(requiresGatewayRateClarification('把限流调到一千二百'), false);
+  assert.equal(requiresGatewayRateClarification('把订单接口限流调到每秒 150 次'), false);
+  assert.equal(requiresGatewayRateClarification('再提高 50%'), false);
+});
+
+test('限流目标值支持千位分隔和小数值', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    const grouped = await session.turn('把订单接口限流调到每秒1,000次');
+    assert.equal(grouped.status, 'awaiting_confirmation');
+    const groupedConfirmed = await session.confirm(true);
+    assert.equal(groupedConfirmed.status, 'executed');
+    if (groupedConfirmed.status === 'executed') {
+      assert.equal((groupedConfirmed.actionResult?.output as { newLimit?: string } | undefined)?.newLimit, '1000/s');
+    }
+
+    const decimal = await session.turn('把订单接口限流调到每秒33.3次');
+    assert.equal(decimal.status, 'awaiting_confirmation');
+    const decimalConfirmed = await session.confirm(true);
+    assert.equal(decimalConfirmed.status, 'executed');
+    if (decimalConfirmed.status === 'executed') {
+      assert.equal((decimalConfirmed.actionResult?.output as { newLimit?: string } | undefined)?.newLimit, '33.3/s');
+    }
+  } finally { session.dispose(); }
+});
+
+test('限流支持中文数字和分钟到秒的单位换算', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    const chinese = await session.turn('把订单接口限流调到一千二百');
+    assert.equal(chinese.status, 'awaiting_confirmation');
+    const chineseConfirmed = await session.confirm(true);
+    assert.equal(chineseConfirmed.status, 'executed');
+    if (chineseConfirmed.status === 'executed') {
+      assert.equal((chineseConfirmed.actionResult?.output as { newLimit?: string } | undefined)?.newLimit, '1200/s');
+    }
+
+    const perMinute = await session.turn('把订单接口限流调成每分钟 6000 次');
+    assert.equal(perMinute.status, 'awaiting_confirmation');
+    const perMinuteConfirmed = await session.confirm(true);
+    assert.equal(perMinuteConfirmed.status, 'executed');
+    if (perMinuteConfirmed.status === 'executed') {
+      assert.equal((perMinuteConfirmed.actionResult?.output as { newLimit?: string } | undefined)?.newLimit, '100/s');
+    }
   } finally { session.dispose(); }
 });
 

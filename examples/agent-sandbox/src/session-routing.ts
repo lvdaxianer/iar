@@ -16,7 +16,7 @@ import { ScriptedModelProvider } from './models/scripted-provider.js';
 import { logModelAudit, logParameterBoundary, logSemanticFrame, type SemanticFrameDiagnostic } from './safe-log.js';
 import { SESSION_RUN_ID, SESSION_CORRELATION_ID, TURN_DEFINITION } from './session-core.js';
 import type { CompactionContext } from './session-compaction.js';
-import { buildActionInput, buildFacts, buildFunctionCallInput, buildSelfIntroductionInput, describeAction, mergeResolvedReferenceParams, mergeVerifiedFunctionSlots, sandboxOperationKind, toSlotMap } from './session-helpers.js';
+import { buildActionInput, buildFacts, buildFunctionCallInput, buildSelfIntroductionInput, describeAction, mergeResolvedReferenceParams, mergeVerifiedFunctionSlots, requiresGatewayRateClarification, sandboxOperationKind, toSlotMap } from './session-helpers.js';
 import { collectParameters, parameterCollectionReply } from './parameter-collector.js';
 import type { ExecuteTurnOutcome, ExtractFrameOutcome, PendingActionContext, ReferenceResolution, ResolvedContextReference, RouteEvidence, SandboxMode, StructuredInput } from './session-types.js';
 
@@ -213,6 +213,11 @@ export class SandboxSessionRouting {
     const { route, frame, behaviorContext, userText, runId, traceId = runId, resolvedReferences = [] } = context;
     const resolved = this.resolveFunctionContext(route);
     if (!resolved.ok) return resolved.result;
+    // 这是动作执行前的最后一道统一安全边界，覆盖 semantic action 漏标、
+    // Function Calling proposal 以及上下文继承等所有输入构造路径。
+    if (route.functionId === 'api.gateway' && requiresGatewayRateClarification(userText)) {
+      return gatewayRateClarificationResult();
+    }
     const prepared = this.prepareFunctionInput({ traceId, route, frame, behaviorContext, userText, functionRecord: resolved.functionRecord, resolvedReferences });
     if (!prepared.ok) return prepared.result;
     const operationKind = sandboxOperationKind(route.functionId!, prepared.input, resolved.functionRecord.operations);
@@ -258,6 +263,11 @@ export class SandboxSessionRouting {
     const proposalOperationSlots = proposalCompatible && proposal !== undefined && !hasCurrentOperation
       ? { ...slots, operation: proposal.operation }
       : slots;
+    // Function Calling proposal 在 action=unknown 时会绕过 buildActionInput；高风险
+    // 网关限流仍必须经过同一条明确目标值门禁，不能因模型把动作类型漏标而确认猜测值。
+    if (route.functionId === 'api.gateway' && requiresGatewayRateClarification(userText)) {
+      return { ok: false, result: gatewayRateClarificationResult() };
+    }
     const built = route.functionId === SELF_INTRODUCTION_FUNCTION_ID
       ? { input: buildSelfIntroductionInput(this.context.pluginHost.allDescriptors(), this.context.configuration.selfIntroduction.extraPrompt) }
       : proposalCompatible && frame.action === 'unknown' && proposal !== undefined
@@ -437,6 +447,16 @@ export class SandboxSessionRouting {
     return payload;
   }
 
+}
+
+/** 网关限流缺少确定值时的固定澄清；不复用旧收集状态，避免历史值被误当成本轮授权。 */
+function gatewayRateClarificationResult(): ExecuteTurnOutcome {
+  return {
+    status: 'clarification',
+    reply: '请明确限流目标值（例如每秒 150 次），或说明具体的相对调整幅度；“调低一点”、范围和“你看着办”不会直接执行。',
+    reasonCode: 'parameters_required',
+    diagnostic: { reasonCode: 'parameters_required' }
+  };
 }
 
 /**

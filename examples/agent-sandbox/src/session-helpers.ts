@@ -89,7 +89,7 @@ export function buildEvidence(route: RouteResult, frame: SemanticFrame): RouteEv
  */
 export type ActionInputBuildResult =
   | { input: JsonValue }
-  | { missing: string[]; reasonCode: 'function_missing' | 'action_type_missing' | 'operation_missing' | 'query_missing' | 'increment_base_missing'; expectedOperation?: string; actualOperation?: string }
+  | { missing: string[]; reasonCode: 'function_missing' | 'action_type_missing' | 'operation_missing' | 'query_missing' | 'increment_base_missing' | 'gateway_rate_missing'; expectedOperation?: string; actualOperation?: string }
   | { reasonCode: 'operation_conflict'; expectedOperation: string; actualOperation: string };
 
 export function buildActionInput(functionId: string, slots: Record<string, JsonValue>, userText: string, actionType: SemanticActionType = 'unknown', behaviorContext?: BehaviorContext, operations: readonly PluginOperation[] = []): ActionInputBuildResult {
@@ -108,6 +108,11 @@ export function buildActionInput(functionId: string, slots: Record<string, JsonV
   const adjusted = resolveIncrementalRate(functionId, params, userText, behaviorContext);
   if (adjusted.missing) return { missing: ['params'], reasonCode: 'increment_base_missing' };
   if (!operation) return { missing: ['operation'], reasonCode: 'operation_missing', expectedOperation: (operations.filter((item) => item.kind === expectedKind).map((item) => item.name).join('|') || 'unknown').slice(0, 256), actualOperation: 'missing' };
+  // 限流动作必须携带一个明确的目标值或可计算的相对调整。模糊请求、范围
+  // 和“你看着办”不能先进入高风险确认框，否则用户确认的其实是系统猜出的值。
+  if (functionId === API_GATEWAY_FUNCTION_ID && operation === GATEWAY_LIMIT_OPERATION && requiresGatewayRateClarification(userText)) {
+    return { missing: ['params'], reasonCode: 'gateway_rate_missing' };
+  }
   if (operation === 'search' && !query) return { missing: ['query'], reasonCode: 'query_missing' };
   const input: Record<string, JsonValue> = {};
   input.operation = operation.slice(0, 60);
@@ -152,6 +157,20 @@ function parseRateAdjustment(text: string): { direction: 'up' | 'down'; value: n
   const value = Number(match[2]);
   if (!Number.isFinite(value)) return undefined;
   return { direction: /下调|往下调|降低|减少|减去/u.test(match[1]!) ? 'down' : 'up', value, percent: match[3] === '%' };
+}
+
+/** 判断限流请求是否给出了单一、可执行的目标值；范围和约束表达必须继续澄清。 */
+export function requiresGatewayRateClarification(text: string): boolean {
+  if (!/(限流|rate\s*limit)/iu.test(text) || !/(调整|调到|调低|调高|调一下|修改|设为|改成|提高|降低|上调|下调|提额)/iu.test(text)) return false;
+  return parseRateAdjustment(text) === undefined && !hasExplicitGatewayRate(text);
+}
+
+function hasExplicitGatewayRate(text: string): boolean {
+  const normalized = text.replace(/,/g, '');
+  if (/(?:之间|范围|between|and)|\d\s*(?:到|至|[-~～])\s*\d|(?:不低于|不高于|至少|最多|不超过|别低于|别高于)/iu.test(normalized)) return false;
+  const values = normalized.match(/\d+(?:\.\d+)?/g) ?? [];
+  const chineseValues = (normalized.match(/[零〇一二两三四五六七八九十百千万亿]+/gu) ?? []).filter((value) => /[十百千万亿]/u.test(value));
+  return values.length + chineseValues.length === 1;
 }
 
 /**

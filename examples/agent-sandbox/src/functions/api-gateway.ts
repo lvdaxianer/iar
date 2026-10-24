@@ -111,8 +111,15 @@ export const apiGatewayHandler: FunctionHandler = async (input) => {
     return succeed('stats', { stats: GATEWAY_STATS, summary: `网关近 5 分钟 QPS ${String(GATEWAY_STATS.qps)}，成功率 ${String(GATEWAY_STATS.successRate)}，P99 ${String(GATEWAY_STATS.p99Latency)}` });
   }
   const target = parsed.params.target ?? (/订单/.test(parsed.query) ? 'order-center' : 'user-portal');
-  const rateMatch = parsed.query.match(/(\d+)\s*(?:次|\/\s*s|\/\s*秒|qps)/i) ?? parsed.query.match(/(\d+)/);
-  const rate = parsed.params.rate ?? (rateMatch ? `${rateMatch[1]}/s` : '300/s');
+  const normalizedQuery = parsed.query.replace(/,/g, '');
+  const minuteMatch = normalizedQuery.match(/(?:每分钟\s*(\d+(?:\.\d+)?)\s*次|(\d+(?:\.\d+)?)\s*次\s*(?:每分钟|\/\s*分钟))/u);
+  const secondMatch = normalizedQuery.match(/(\d+(?:\.\d+)?)\s*(?:次|\/\s*s|\/\s*秒|qps)/iu) ?? normalizedQuery.match(/(\d+(?:\.\d+)?)/u);
+  const chineseMatch = normalizedQuery.match(/[零〇一二两三四五六七八九十百千万亿]+/u);
+  const minuteRate = minuteMatch === null ? undefined : Number(minuteMatch[1] ?? minuteMatch[2]) / 60;
+  const numericRate = minuteRate ?? (secondMatch === null ? undefined : Number(secondMatch[1]));
+  const chineseRate = numericRate === undefined && chineseMatch !== null ? parseChineseNumber(chineseMatch[0]) : undefined;
+  const rateValue = numericRate ?? chineseRate;
+  const rate = parsed.params.rate ?? (rateValue === undefined || !Number.isFinite(rateValue) ? '300/s' : `${formatRate(rateValue)}/s`);
   return succeed('limit', {
     receipt: `gateway-limit-${target}`,
     target,
@@ -120,6 +127,35 @@ export const apiGatewayHandler: FunctionHandler = async (input) => {
     summary: `已受理调整「${target}」限流配额为 ${rate}，约 5 分钟内生效`
   }, { receipt: `gateway-limit-${target}`, target, newLimit: rate });
 };
+
+/** 解析限流请求中常见的中文整数（如“一千二百”）。 */
+function parseChineseNumber(text: string): number | undefined {
+  const digits: Record<string, number> = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  const units: Record<string, number> = { 十: 10, 百: 100, 千: 1000, 万: 10_000, 亿: 100_000_000 };
+  if (!/[十百千万亿]/u.test(text)) return undefined;
+  let total = 0;
+  let section = 0;
+  let number = 0;
+  for (const char of text) {
+    if (Object.hasOwn(digits, char)) { number = digits[char]!; continue; }
+    const unit = units[char];
+    if (unit === undefined) continue;
+    if (unit >= 10_000) {
+      section += number;
+      total += section * unit;
+      section = 0;
+    } else {
+      section += (number === 0 ? 1 : number) * unit;
+    }
+    number = 0;
+  }
+  return total + section + number;
+}
+
+/** 限流展示只保留有限小数，避免分钟换算产生浮点噪声。 */
+function formatRate(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(6).replace(/0+$/u, '').replace(/\.$/u, '');
+}
 
 /** 可直接交给 PluginHost.install 的 api.gateway 注册对象。 */
 export const apiGatewayPlugin: PluginPackage = defineSandboxPlugin(apiGatewayManifest, apiGatewayFunction, apiGatewayOperations, apiGatewayHandler);
