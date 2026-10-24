@@ -40,6 +40,7 @@ const SAFE_VALUES: Readonly<Record<string, readonly string[]>> = {
   path: ['/', '/api/chat', '/api/confirm', '/api/compact', '/api/state', '/api/reset', 'unknown',
     '/api/sessions', '/api/sessions/:sessionId', '/api/sessions/:sessionId/chat', '/api/sessions/:sessionId/confirm',
     '/api/sessions/:sessionId/compact', '/api/sessions/:sessionId/state', '/api/sessions/:sessionId/reset', '/api/sessions/:sessionId/resume',
+    '/api/pi-host/session/:sessionId',
     '/api/bridge/v1/sessions', '/api/bridge/v1/sessions/:sessionId/input', '/api/bridge/v1/sessions/:sessionId/input/stream', '/api/bridge/v1/sessions/:sessionId/confirm', '/api/bridge/v1/sessions/:sessionId/state'],
   stage: ['semantic.extract', 'route.propose', 'route.select', 'action.execute', 'response.reasoning', 'response.generate'], nextStage: ['route.propose', 'route.select', 'action.execute', 'response.generate'],
   missingField: ['intent', 'action', 'pluginId', 'functionId', 'operation', 'parameters'], fieldState: ['expected', 'present', 'missing', 'invalid'], semanticAction: ['query', 'create', 'update', 'delete', 'transfer', 'execute', 'unknown'], execution: ['allowed', 'blocked', 'skipped'],

@@ -14,10 +14,11 @@ function businessRoute(): BridgeRouteEvidence {
   return { status: 'matched', reasonCode: 'none', semanticIntent: 'api.gateway', semanticConfidence: 0.92, functionId: 'api.gateway', pluginId: 'api-gateway-v1', expectedOperation: 'limit|stats', actualOperation: 'limit' };
 }
 
-function makeFakeBridge(overrides: { input?: (text: string) => BridgeInputResponse; inputStream?: (text: string, handlers: BridgeInputStreamHandlers) => BridgeInputResponse; onConfirm?: (actionId: string, accepted: boolean) => void; failOpen?: boolean } = {}): IarBridgeClientLike {
+function makeFakeBridge(overrides: { input?: (text: string) => BridgeInputResponse; inputStream?: (text: string, handlers: BridgeInputStreamHandlers) => BridgeInputResponse; onConfirm?: (actionId: string, accepted: boolean) => void; onOpen?: () => void; failOpen?: boolean } = {}): IarBridgeClientLike {
   const client: IarBridgeClientLike = {
     openSession: async () => {
       if (overrides.failOpen) throw new BridgeClientError('bridge_unavailable', 'IAR 不可用', true);
+      overrides.onOpen?.();
       return { version: PI_BRIDGE_VERSION, piSessionId: 'pi-demo', iarSessionId: 'iar-demo', resumed: false };
     },
     input: async (_sessionId, text) => {
@@ -183,7 +184,7 @@ test('Pi host session fails closed when the bridge is unavailable', async () => 
 test('Pi host app serves the page and processes chat over HTTP', async t => {
   const probeBridge = makeFakeBridge();
   const { app, closeClients } = buildPiHostApp({ mode: 'scripted', client: probeBridge, pageHtml: '<html><body><div id="transcript"></div></body></html>' });
-  t.after(async () => { closeClients(); await app.close(); });
+  t.after(async () => { await closeClients(); await app.close(); });
   const page = await app.inject({ method: 'GET', url: '/' });
   assert.equal(page.statusCode, 200);
   assert.match(page.body, /transcript/);
@@ -198,7 +199,7 @@ test('Pi host app serves the page and processes chat over HTTP', async t => {
 
 test('Pi host app serves assembled shared page by default', async t => {
   const { app, closeClients } = buildPiHostApp({ mode: 'scripted', client: makeFakeBridge() });
-  t.after(async () => { closeClients(); await app.close(); });
+  t.after(async () => { await closeClients(); await app.close(); });
   const page = await app.inject({ method: 'GET', url: '/' });
   assert.equal(page.statusCode, 200);
   assert.match(page.body, /id="messages"/);
@@ -217,7 +218,7 @@ test('Pi host app forwards only final response stream events over SSE', async t 
   });
   const { app, closeClients } = buildPiHostApp({ mode: 'scripted', client });
   await app.listen({ port: 0, host: '127.0.0.1' });
-  t.after(async () => { closeClients(); await app.close(); });
+  t.after(async () => { await closeClients(); await app.close(); });
   const address = app.server.address();
   assert.ok(address && typeof address === 'object');
   const events = await fetch(`http://127.0.0.1:${address.port}/api/pi-host/events?session=stream-demo`);
@@ -236,4 +237,68 @@ test('Pi host app forwards only final response stream events over SSE', async t 
   assert.match(body, /核对工单信息/);
   assert.match(body, /event: iarDelta/);
   assert.match(body, /工单结果如下/);
+});
+
+/**
+ * 读取 Pi Host SSE 首帧并返回可主动关闭的读取器。
+ *
+ * @param port - Pi Host HTTP 端口
+ * @param sessionId - Pi Host 会话标识
+ * @returns SSE 读取器与首帧文本
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-24
+ */
+async function openPiHostEvents(port: number, sessionId: string): Promise<{ reader: ReadableStreamDefaultReader<Uint8Array>; firstChunk: string }> {
+  const response = await fetch(`http://127.0.0.1:${port}/api/pi-host/events?session=${sessionId}`);
+  assert.equal(response.status, 200);
+  const reader = response.body!.getReader();
+  const first = await reader.read();
+  return { reader, firstChunk: new TextDecoder().decode(first.value) };
+}
+
+test('Pi host refresh reuses the same server session after SSE disconnect', async t => {
+  let openCount = 0;
+  const { app, closeClients } = buildPiHostApp({ mode: 'scripted', client: makeFakeBridge({ onOpen: () => { openCount += 1; } }) });
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  t.after(async () => { await closeClients(); await app.close(); });
+  const address = app.server.address();
+  assert.ok(address && typeof address === 'object');
+  const first = await openPiHostEvents(address.port, 'refresh-demo');
+  assert.match(first.firstChunk, /event: ready/);
+  const firstChat = await app.inject({ method: 'POST', url: '/api/pi-host/chat', payload: { session: 'refresh-demo', text: '你是谁' } });
+  assert.equal(firstChat.statusCode, 200);
+  await first.reader.cancel();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const second = await openPiHostEvents(address.port, 'refresh-demo');
+  const secondChat = await app.inject({ method: 'POST', url: '/api/pi-host/chat', payload: { session: 'refresh-demo', text: '继续刚才的话题' } });
+  assert.equal(secondChat.statusCode, 200);
+  assert.equal(openCount, 1);
+  await second.reader.cancel();
+});
+
+test('Pi host clear releases the old server session before a new tab session starts', async t => {
+  let openCount = 0;
+  const { app, closeClients } = buildPiHostApp({ mode: 'scripted', client: makeFakeBridge({ onOpen: () => { openCount += 1; } }) });
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  t.after(async () => { await closeClients(); await app.close(); });
+  const firstChat = await app.inject({ method: 'POST', url: '/api/pi-host/chat', payload: { session: 'clear-demo', text: '你是谁' } });
+  assert.equal(firstChat.statusCode, 200);
+  const cleared = await app.inject({ method: 'DELETE', url: '/api/pi-host/session/clear-demo' });
+  assert.equal(cleared.statusCode, 200);
+  const secondChat = await app.inject({ method: 'POST', url: '/api/pi-host/chat', payload: { session: 'clear-demo', text: '你是谁' } });
+  assert.equal(secondChat.statusCode, 200);
+  assert.equal(openCount, 2);
+});
+
+test('Pi host expires detached sessions after the configured idle lifetime', async t => {
+  let openCount = 0;
+  const { app, closeClients } = buildPiHostApp({ mode: 'scripted', sessionIdleMs: 1, client: makeFakeBridge({ onOpen: () => { openCount += 1; } }) });
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  t.after(async () => { await closeClients(); await app.close(); });
+  const firstChat = await app.inject({ method: 'POST', url: '/api/pi-host/chat', payload: { session: 'idle-demo', text: '你是谁' } });
+  assert.equal(firstChat.statusCode, 200);
+  await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  const secondChat = await app.inject({ method: 'POST', url: '/api/pi-host/chat', payload: { session: 'idle-demo', text: '你是谁' } });
+  assert.equal(secondChat.statusCode, 200);
+  assert.equal(openCount, 2);
 });
