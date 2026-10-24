@@ -38,6 +38,12 @@ test('parameter collection accepts parameter events but rejects execution jumps'
   assert.deepEqual(rejected, { ok: false, reasonCode: 'workflow_transition_invalid', currentState: current, event: 'confirmation_accepted' });
 });
 
+test('context answer is a no-op workflow event and never advances execution', () => {
+  const current: WorkflowPhase = 'collecting_parameters';
+  const result = transitionWorkflow(current, decision({ userIntent: 'answer_context', event: 'context_answered' }));
+  assert.deepEqual(result, { ok: true, currentState: current, nextState: current, event: 'context_answered' });
+});
+
 test('cancellation clears the executable workflow path without executing', () => {
   const result = transitionWorkflow('awaiting_confirmation', decision({ userIntent: 'cancel_workflow', event: 'workflow_cancelled' }));
   assert.deepEqual(result, { ok: true, currentState: 'awaiting_confirmation', nextState: 'cancelled', event: 'workflow_cancelled' });
@@ -45,7 +51,7 @@ test('cancellation clears the executable workflow path without executing', () =>
 
 test('completed workflow can accept a new bounded input without granting execution', () => {
   const result = transitionWorkflow('completed', decision({ userIntent: 'provide_parameter', event: 'parameter_received' }));
-  assert.deepEqual(result, { ok: true, currentState: 'completed', nextState: 'collecting_parameters', event: 'parameter_received' });
+  assert.deepEqual(result, { ok: true, currentState: 'completed', nextState: 'normal', event: 'parameter_received' });
 });
 
 test('unknown runtime state fails closed instead of indexing the transition table', () => {

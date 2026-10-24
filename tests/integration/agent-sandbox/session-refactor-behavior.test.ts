@@ -127,15 +127,106 @@ test('普通与流式入口使用相同的连续路由恢复和确认边界', as
     const streamed = await streamedSession.turnStreamed('改成每秒200次吧', (event) => events.push(event));
 
     for (const result of [normal, streamed]) {
-      assert.notEqual(result.status, 'pass_through');
-      assert.equal(result.replySource, 'response_model');
+      assert.equal(result.status, 'awaiting_confirmation');
+      assert.equal(result.replySource, 'none');
       assert.equal(result.route.functionId, 'api.gateway');
       assert.equal(result.route.pluginId, 'api-gateway-v1');
+      assert.deepEqual(result.pending?.input, { operation: 'limit', query: '改成每秒200次吧', params: { receipt: 'gateway-limit-order-center', target: 'order-center' } });
     }
     assert.equal(streamed.status, normal.status);
+    assert.equal(events.at(-1)?.type, 'done');
+    const normalConfirmed = await normalSession.confirm(true);
+    const streamedConfirmed = await streamedSession.confirm(true);
+    assert.equal(normalConfirmed.status, 'executed');
+    assert.equal(streamedConfirmed.status, 'executed');
+    if (normalConfirmed.status !== 'executed' || streamedConfirmed.status !== 'executed') return;
+    assert.equal(normalConfirmed.actionResult?.status, 'succeeded');
+    assert.equal(streamedConfirmed.actionResult?.status, 'succeeded');
+    assert.equal(normalConfirmed.actionResult?.output && typeof normalConfirmed.actionResult.output === 'object' && !Array.isArray(normalConfirmed.actionResult.output) ? normalConfirmed.actionResult.output.newLimit : undefined, '200/s');
+    assert.equal(streamedConfirmed.actionResult?.output && typeof streamedConfirmed.actionResult.output === 'object' && !Array.isArray(streamedConfirmed.actionResult.output) ? streamedConfirmed.actionResult.output.newLimit : undefined, '200/s');
+  } finally {
+    normalSession.dispose();
+    streamedSession.dispose();
+  }
+});
+
+test('带取消语气的参数自我修正仍恢复原动作并重新确认', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    const initial = await session.turn('把订单接口的限流值调整到每秒50次');
+    assert.equal(initial.status, 'awaiting_confirmation');
+    assert.equal((await session.confirm(true)).status, 'executed');
+    const corrected = await session.turn('算了，改成每秒200次吧');
+    assert.equal(corrected.status, 'awaiting_confirmation');
+    assert.equal(corrected.route.functionId, 'api.gateway');
+    if (corrected.status !== 'awaiting_confirmation') return;
+    assert.deepEqual(corrected.pending.input, { operation: 'limit', query: '算了，改成每秒200次吧', params: { receipt: 'gateway-limit-order-center', target: 'order-center' } });
+    const confirmed = await session.confirm(true);
+    assert.equal(confirmed.status, 'executed');
+    if (confirmed.status !== 'executed') return;
+    assert.equal(confirmed.actionResult?.status, 'succeeded');
+    assert.equal(confirmed.actionResult?.output && typeof confirmed.actionResult.output === 'object' && !Array.isArray(confirmed.actionResult.output) ? confirmed.actionResult.output.newLimit : undefined, '200/s');
+  } finally { session.dispose(); }
+});
+
+test('普通与流式入口将已完成动作的事实追问统一视为上下文回答', async () => {
+  const normalSession = new IarSandboxSession({ mode: 'scripted' });
+  const streamedSession = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    for (const session of [normalSession, streamedSession]) {
+      const pending = await session.turn('帮我创建一张工单，描述是网络中断');
+      assert.equal(pending.status, 'awaiting_confirmation');
+      if (pending.status !== 'awaiting_confirmation') return;
+      assert.equal((await session.confirm(true)).status, 'executed');
+    }
+    const normal = await normalSession.turn('刚才那张工单的编号是多少？');
+    const events: StreamEvent[] = [];
+    const streamed = await streamedSession.turnStreamed('刚才那张工单的编号是多少？', (event) => events.push(event));
+
+    for (const result of [normal, streamed]) {
+      assert.equal(result.status, 'clarification');
+      assert.equal(result.disposition, 'context_answered');
+      assert.equal(result.route.semanticIntent, 'unknown');
+      assert.notEqual(result.route.reasonCode, 'workflow_transition_invalid');
+      assert.notEqual(result.status, 'pass_through');
+    }
+    assert.deepEqual(
+      { status: normal.status, reasonCode: normal.route.reasonCode, semanticIntent: normal.route.semanticIntent },
+      { status: streamed.status, reasonCode: streamed.route.reasonCode, semanticIntent: streamed.route.semanticIntent }
+    );
     assert.equal(events.at(-1)?.type, 'done');
   } finally {
     normalSession.dispose();
     streamedSession.dispose();
+  }
+});
+
+test('已完成动作的状态追问仍使用可信事实上下文', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    const pending = await session.turn('帮我创建一张工单，描述是网络中断');
+    assert.equal(pending.status, 'awaiting_confirmation');
+    if (pending.status !== 'awaiting_confirmation') return;
+    assert.equal((await session.confirm(true)).status, 'executed');
+    const result = await session.turn('这张工单现在处理到哪一步了？');
+    assert.equal(result.status, 'clarification');
+    assert.equal(result.disposition, 'context_answered');
+    assert.equal(result.route.semanticIntent, 'unknown');
+    assert.match(result.reply, /ticket|工单|created|created|分诊|受理/u);
+    assert.notEqual(result.status, 'awaiting_confirmation');
+    assert.notEqual(result.status, 'executed');
+  } finally { session.dispose(); }
+});
+
+test('空会话的历史指代不会被业务名词误判为新动作', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    const result = await session.turn('刚才那张工单的编号是多少？');
+    assert.equal(result.status, 'clarification');
+    assert.notEqual(result.status, 'awaiting_confirmation');
+    assert.notEqual(result.status, 'executed');
+    assert.equal((await session.state()).pending, null);
+  } finally {
+    session.dispose();
   }
 });

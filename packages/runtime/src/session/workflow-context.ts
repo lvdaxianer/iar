@@ -8,7 +8,7 @@
  * @date 2026-10-23
  */
 import type { BehaviorContext, CollectionState, WorkflowEvent } from '@iar/contracts';
-import { allowedWorkflowEvents, type WorkflowPhase } from './workflow-transition.js';
+import { allowedWorkflowEvents, type WorkflowActivePhase, type WorkflowOutcome, type WorkflowPhase } from './workflow-transition.js';
 
 /** Workflow context 投影版本。 */
 export const WORKFLOW_CONTEXT_MAP_VERSION = 'iar.workflow-map/v1' as const;
@@ -43,6 +43,8 @@ export type WorkflowCollectionProjection =
 export type WorkflowContextProjection = {
   mapVersion: typeof WORKFLOW_CONTEXT_MAP_VERSION;
   currentState: WorkflowPhase;
+  activeState: WorkflowActivePhase;
+  outcome: WorkflowOutcome | 'none';
   workflowStatus: BehaviorContext['workflow']['status'];
   allowedEvents: WorkflowEvent[];
   pending: { kind: BehaviorContext['pending']['kind']; status: BehaviorContext['pending']['status'] };
@@ -59,18 +61,27 @@ export type WorkflowContextProjection = {
  */
 export function projectWorkflowContext(context: BehaviorContext): WorkflowContextProjection {
   const currentState = deriveWorkflowPhase(context);
+  const outcome = workflowOutcome(currentState);
+  const activeState: WorkflowActivePhase = outcome === 'none' ? currentState as WorkflowActivePhase : 'normal';
   const route = projectRoute(context);
   const collection = projectCollection(context.collection);
   return {
     mapVersion: WORKFLOW_CONTEXT_MAP_VERSION,
     currentState,
+    activeState,
+    outcome,
     workflowStatus: context.workflow.status,
-    allowedEvents: allowedWorkflowEvents(currentState),
+    allowedEvents: allowedWorkflowEvents(activeState),
     pending: { kind: context.pending.kind, status: context.pending.status },
     confirmation: { state: context.confirmation.state },
     ...(route ? { route } : {}),
     ...(collection ? { collection } : {})
   };
+}
+
+/** 将历史终态从当前可推进阶段中分离。 */
+function workflowOutcome(state: WorkflowPhase): WorkflowOutcome | 'none' {
+  return state === 'completed' || state === 'cancelled' || state === 'failed' ? state : 'none';
 }
 
 /** 根据已验证状态字段派生通用 Workflow phase。 */

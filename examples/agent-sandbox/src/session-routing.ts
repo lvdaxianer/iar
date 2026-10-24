@@ -225,7 +225,20 @@ export class SandboxSessionRouting {
   private prepareFunctionInput(context: { traceId: string; route: RouteResult; frame: SemanticFrame; behaviorContext: BehaviorContext; userText: string; functionRecord: PluginFunctionRecord }): { ok: true; input: JsonValue } | { ok: false; result: ExecuteTurnOutcome } {
     const { traceId, route, frame, behaviorContext, userText, functionRecord } = context;
     const slots = mergeVerifiedFunctionSlots(frame.slots, behaviorContext, functionRecord.definition.inputSchema);
-    const built = route.functionId === SELF_INTRODUCTION_FUNCTION_ID ? { input: buildSelfIntroductionInput(this.context.pluginHost.allDescriptors(), this.context.configuration.selfIntroduction.extraPrompt) } : route.functionCallProposal ? buildFunctionCallInput(route.functionCallProposal) : buildActionInput(route.functionId!, slots, userText, frame.action, behaviorContext, functionRecord.operations);
+    const proposal = route.functionCallProposal;
+    const proposalCompatible = proposal !== undefined && isFunctionCallProposalCompatible(proposal.operation, frame.action, functionRecord.operations);
+    // 当前语义帧和用户文本是本轮的最高优先级。route.propose 可能带有旧的或默认的
+    // arguments（例如把上一轮 50/s 继续带成 300/s），不能让它覆盖当前补充值；
+    // proposal 只在当前动作仍未知时作为完整 Function Call 兜底。
+    const hasCurrentOperation = typeof slots.operation === 'string' && slots.operation.trim().length > 0;
+    const proposalOperationSlots = proposalCompatible && proposal !== undefined && !hasCurrentOperation
+      ? { ...slots, operation: proposal.operation }
+      : slots;
+    const built = route.functionId === SELF_INTRODUCTION_FUNCTION_ID
+      ? { input: buildSelfIntroductionInput(this.context.pluginHost.allDescriptors(), this.context.configuration.selfIntroduction.extraPrompt) }
+      : proposalCompatible && frame.action === 'unknown' && proposal !== undefined
+        ? buildFunctionCallInput(proposal)
+        : buildActionInput(route.functionId!, proposalOperationSlots, userText, frame.action, behaviorContext, functionRecord.operations);
     if ('reasonCode' in built && built.reasonCode === 'operation_conflict') return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: slots, requiredFields: ['operation'], conflictFields: ['operation'], fallback: { reasonCode: 'parameters_required', reply: '操作信息不一致，请确认后再试。' } });
     if ('missing' in built) {
       const requiredFields = schemaFields(functionRecord.definition.inputSchema, built.missing);
@@ -481,6 +494,16 @@ function createRoutingRules(descriptors: readonly PluginDescriptor[]): { functio
     rule: genericRule('plugin', `plugin-${descriptor.candidateKey}`, descriptor.functionId)
   }));
   return { functionRules: [...functionRules.values()], pluginRules };
+}
+
+/** 只接受与当前语义动作类型一致的 nested Function proposal。
+ * 连续补全时模型可能沿用默认 read operation；此时回退到本地 Schema/上下文合并，
+ * 防止错误 proposal 覆盖用户本轮的 update 或 execute 意图。
+ */
+function isFunctionCallProposalCompatible(operation: string, action: SemanticFrame['action'], operations: readonly PluginOperation[]): boolean {
+  if (action === 'unknown') return true;
+  const expectedKind = action === 'query' ? 'read' : 'action';
+  return operations.some((item) => item.name === operation && item.kind === expectedKind);
 }
 
 /** 构造只匹配结构化 semantic.intent 的通用规则，不解析业务关键词。 */

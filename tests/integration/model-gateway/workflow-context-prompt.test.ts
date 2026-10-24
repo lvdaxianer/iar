@@ -35,6 +35,8 @@ test('semantic prompt exposes the current workflow map and bounded state', () =>
   assert.match(prompt, /<workflow_context>/);
   assert.match(prompt, /iar\.workflow-map\/v1/);
   assert.match(prompt, /"currentState": "collecting_parameters"/);
+  assert.match(prompt, /"activeState": "collecting_parameters"/);
+  assert.match(prompt, /"outcome": "none"/);
   assert.match(prompt, /"parameter_received"/);
   assert.match(prompt, /"missingFields": \[\s*"nextField"/);
   const workflowSection = prompt.split('<workflow_context>')[1]?.split('</workflow_context>')[0] ?? '';
@@ -44,5 +46,7 @@ test('semantic prompt exposes the current workflow map and bounded state', () =>
 test('semantic system prompt defines workflow event output as non-authoritative', () => {
   assert.match(SEMANTIC_SYSTEM_PROMPT, /workflowDecision/);
   assert.match(SEMANTIC_SYSTEM_PROMPT, /parameter_received/);
+  assert.match(SEMANTIC_SYSTEM_PROMPT, /context_answered/);
+  assert.match(SEMANTIC_SYSTEM_PROMPT, /completed、cancelled、failed/);
   assert.match(SEMANTIC_SYSTEM_PROMPT, /不能.*授权|不.*执行权限/u);
 });

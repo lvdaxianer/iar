@@ -67,6 +67,8 @@ export class ScriptedModelProvider implements ModelProvider {
     if (trimmed.length === 0) return frame('unknown', {}, 0.1, 'unknown');
     // 已有可信事实的追问优先交给通用回复模型，不能因业务名词重复触发默认动作。
     if (hasVerifiedFacts(behaviorContext) && isFactFollowUp(trimmed) && !isExplicitNewOperation(trimmed)) return frame('unknown', {}, 0.95, 'query', historicalReference(trimmed));
+    // 没有可信事实时，历史指代仍保持 unknown，避免业务名词把澄清误判为新动作。
+    if (!hasVerifiedFacts(behaviorContext) && isUnanchoredHistoricalFollowUp(trimmed) && !isExplicitNewOperation(trimmed)) return frame('unknown', {}, 0.95, 'query', historicalReference(trimmed));
     if (isSelfIntroductionRequest(trimmed)) return frame(SELF_INTRODUCTION_FUNCTION_ID, {}, 0.99, 'query');
     // howTo 用于区分「如何/怎么/怎样」类咨询与真正的动作请求。
     const howTo = /(如何|怎么|怎样)/.test(trimmed);
@@ -240,7 +242,12 @@ function hasVerifiedFacts(context: Record<string, unknown>): boolean {
 
 /** 判断用户是否在追问已有结果，而非表达新副作用。 */
 function isFactFollowUp(text: string): boolean {
-  return /刚才|之前|上次|前面|上一个|前一个|当前|这个|该|那条|编号|单号|结果|进度|状态|多少|哪个|第几个|第几位|哪一位|什么位置|位次/.test(text);
+  return /刚才|之前|上次|前面|上一个|前一个|当前|这个|那个|该|那条|那张|昨天|编号|单号|结果|进度|状态|多少|哪个|第几个|第几位|哪一位|什么位置|位次/.test(text);
+}
+
+/** 空会话只拦截明确依赖历史的指代，不吞掉“当前状态”等独立查询。 */
+function isUnanchoredHistoricalFollowUp(text: string): boolean {
+  return /刚才|之前|上次|前面|上一个|前一个|这个|那个|该|那条|那张|昨天/.test(text);
 }
 
 /** 判断当前句子是否明确要求重新执行一个新操作。 */
@@ -275,7 +282,7 @@ function addPluginId(raw: unknown, descriptors: PluginScopeDescriptor[]): unknow
 /** 离线模型只模拟通用 Workflow 事件，验证 Runtime 不依赖业务标识完成状态处理。 */
 function scriptedWorkflowDecision(text: string, context: Record<string, unknown>): { schemaVersion: 'iar.workflow-decision/v1'; userIntent: 'provide_parameter' | 'cancel_workflow' | 'new_topic'; event: 'parameter_received' | 'workflow_cancelled' | 'new_topic' } | { schemaVersion: 'iar.workflow-decision/v1'; userIntent: 'unknown'; event: 'unknown' } {
   if (/换个话题|开始新的话题/.test(text)) return { schemaVersion: 'iar.workflow-decision/v1', userIntent: 'new_topic', event: 'new_topic' };
-  if (/不用了|取消|算了|不填了|不需要了/.test(text)) return { schemaVersion: 'iar.workflow-decision/v1', userIntent: 'cancel_workflow', event: 'workflow_cancelled' };
+  if (/不用了|取消|算了|不填了|不需要了/.test(text) && !/(改成|调整|调到|设为|提高|降低|创建|新增|修改|删除|重跑|导出|申请|执行|重试|重新)/.test(text)) return { schemaVersion: 'iar.workflow-decision/v1', userIntent: 'cancel_workflow', event: 'workflow_cancelled' };
   const hasCollection = isRecord(context.collection);
   const hasRoute = isRecord(context.route) && (typeof context.route.functionId === 'string' || typeof context.route.pluginId === 'string');
   if (hasCollection || hasRoute && /(继续|修改|改成|调整|调到|设为|提高|降低|执行这个|按这个|照这个|重试|再试|重新|proceed|retry|change|update|adjust|set|run)/iu.test(text)) return { schemaVersion: 'iar.workflow-decision/v1', userIntent: 'provide_parameter', event: 'parameter_received' };

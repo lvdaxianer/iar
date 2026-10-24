@@ -25,6 +25,7 @@ export type WorkflowEvent =
   | 'confirmation_rejected'
   | 'workflow_cancelled'
   | 'new_topic'
+  | 'context_answered'
   | 'unknown';
 
 /** semantic.extract 返回的非权威 Workflow 决策。 */

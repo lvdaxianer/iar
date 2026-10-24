@@ -94,7 +94,7 @@ export function buildActionInput(functionId: string, slots: Record<string, JsonV
   const query = userText.length > 0 ? userText : stringSlot(slots, 'query');
   const expectedKind = actionType === 'query' ? 'read' : 'action';
   const operation = chooseCompatibleOperation(operations, rawOperation, expectedKind);
-  const params = inheritFactParams(functionId, paramsSlot(slots), behaviorContext);
+  const params = inheritFactParams(functionId, paramsSlot(slots), userText, behaviorContext);
   if (!operation) return { missing: ['operation'], reasonCode: 'operation_missing', expectedOperation: (operations.filter((item) => item.kind === expectedKind).map((item) => item.name).join('|') || 'unknown').slice(0, 256), actualOperation: 'missing' };
   if (operation === 'search' && !query) return { missing: ['query'], reasonCode: 'query_missing' };
   const input: Record<string, JsonValue> = {};
@@ -180,17 +180,28 @@ function chooseCompatibleOperation(operations: readonly PluginOperation[], rawOp
  * @author lvdaxianer@yeah.net
  * @date 2026-10-19
  */
-function inheritFactParams(functionId: string, params: Record<string, string> | undefined, behaviorContext: BehaviorContext | undefined): Record<string, string> | undefined {
+function inheritFactParams(functionId: string, params: Record<string, string> | undefined, currentText: string, behaviorContext: BehaviorContext | undefined): Record<string, string> | undefined {
   const inherited = { ...(params ?? {}) };
   const records = behaviorContext?.factHistory?.records ?? [];
   for (const record of [...records].reverse()) {
     if (record.functionId !== functionId) continue;
     for (const [field, value] of Object.entries(record.values)) {
       if (inherited[field] || typeof value !== 'string' || value.length === 0) continue;
+      // 当前轮的自然语言可能只携带了新值，语义模型未必会把它重复映射到
+      // params。数字事实出现不同的新值时，旧事实不能继续覆盖当前输入。
+      if (hasDifferentNumericValue(currentText, value)) continue;
       inherited[field] = value;
     }
   }
   return Object.keys(inherited).length > 0 ? inherited : undefined;
+}
+
+/** 判断当前文本是否携带了与历史字符串不同的数字值。 */
+function hasDifferentNumericValue(currentText: string, historicalValue: string): boolean {
+  const currentNumbers: string[] = currentText.match(/\d+(?:\.\d+)?/g) ?? [];
+  const historicalNumbers: string[] = historicalValue.match(/\d+(?:\.\d+)?/g) ?? [];
+  if (currentNumbers.length === 0 || historicalNumbers.length === 0) return false;
+  return currentNumbers.some((current) => !historicalNumbers.includes(current));
 }
 
 /**
