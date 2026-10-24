@@ -54,21 +54,21 @@
 - Modify: `examples/agent-sandbox/src/pi-host/pi-host-server.ts`
 - Test: `tests/integration/pi-host/pi-host-session.test.ts`
 
-- [ ] **Step 1: Write the failing pending-state test**
+- [x] **Step 1: Write the failing pending-state test**
 
   Make the fake bridge return a pending action, disconnect and reconnect SSE, and assert the second connection receives a `confirm` event containing only the bounded pending summary. Add the no-pending case and assert it emits `null`.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
   Run: `node --test --import tsx tests/integration/pi-host/pi-host-session.test.ts`
 
   Expected: FAIL because the current session does not expose its pending state and reconnect sends no state event.
 
-- [ ] **Step 3: Implement state projection and sync**
+- [x] **Step 3: Implement state projection and sync**
 
   Wrap the bridge `state` call and confirmation hooks to retain only `BridgePendingAction | null`. Expose a read-only snapshot on `PiHostSession`. Register the SSE client before resolving the session, send `ready`, then send `confirm` with the current snapshot; emit `null` when absent. Preserve existing live events and never copy Action input.
 
-- [ ] **Step 4: Run GREEN and inspect sensitive fields**
+- [x] **Step 4: Run GREEN and inspect sensitive fields**
 
   Run: `node --test --import tsx tests/integration/pi-host/pi-host-session.test.ts` and assert serialized SSE data does not contain `input`, prompt text, reasoning, or raw payload fields.
 

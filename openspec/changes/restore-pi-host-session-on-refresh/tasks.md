@@ -7,8 +7,8 @@
 
 ## 2. Pending confirmation recovery
 
-- [ ] 2.1 Add a failing session/HTTP test proving a pending confirmation summary is available after reconnect and that no pending state clears stale UI state; verify the test fails before state synchronization exists.
-- [ ] 2.2 Track only the sanitized pending-action summary in `PiHostSession` and emit the current `confirm` state after SSE `ready`; verify refresh-state tests pass without exposing Action input.
+- [x] 2.1 Add a failing session/HTTP test proving a pending confirmation summary is available after reconnect and that no pending state clears stale UI state; verify the test fails before state synchronization exists.
+- [x] 2.2 Track only the sanitized pending-action summary in `PiHostSession` and emit the current `confirm` state after SSE `ready`; verify refresh-state tests pass without exposing Action input.
 
 ## 3. Browser reconnect and clear behavior
 
