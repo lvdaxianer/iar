@@ -25,7 +25,6 @@ export class IarSandboxSession extends SandboxSessionCore {
   /** 流式组件只持有宿主能力，重置后仍访问当前状态。 */
   private readonly streaming = this.createStreaming();
   private readonly turnRunner = this.createTurnRunner();
-  /** 绑定路由依赖和可变状态，重置不会留下过期引用。 */
   private createRouting(): SandboxSessionRouting {
     const session = this;
     return new SandboxSessionRouting({
@@ -44,11 +43,7 @@ export class IarSandboxSession extends SandboxSessionCore {
       drainWorkflowEvents: () => session.drainWorkflowEvents()
     });
   }
-  /** 创建回复组件，访问器避免重置后引用旧的会话状态。
-   * @returns 使用当前会话依赖的回复组件
-   * @author lvdaxianer@yeah.net
-   * @date 2026-10-19
-   */
+  /** 创建回复组件，访问器避免重置后引用旧的会话状态。 */
   private createReplies(): SandboxSessionReplies {
     const session = this;
     return new SandboxSessionReplies({
@@ -71,17 +66,9 @@ export class IarSandboxSession extends SandboxSessionCore {
       set compactCount(value) { session.compactCount = value; }
     });
   }
-  /** 压缩当前会话，并保留原有公开入口。
-   * @returns 压缩结果
-   * @author lvdaxianer@yeah.net
-   * @date 2026-10-19
-   */
+  /** 压缩当前会话，并保留原有公开入口。 */
   public compact(): Promise<CompactResult> { return this.whenReady().then(() => this.replies.compact()); }
-  /** 将会话方法绑定给流式编排，避免另一份事件与历史状态。
-   * @returns 使用当前会话能力的流式组件
-   * @author lvdaxianer@yeah.net
-   * @date 2026-10-19
-   */
+  /** 将会话方法绑定给流式编排，避免另一份事件与历史状态。 */
   private createStreaming(): SandboxSessionStreamTurn {
     const session = this;
     return new SandboxSessionStreamTurn({

@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { ACTION_TYPES, MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGE_LIMIT, validateContract, type ActionType, type BehaviorContext, type CompactionResult, type DecisionResult, type JsonValue, type WorkflowDecision } from '@iar/contracts';
+import { ACTION_TYPES, MAX_CONVERSATION_TURN_ID_LENGTH, MAX_CONVERSATION_TURN_SEQUENCE, MAX_FACT_RECORD_ID_LENGTH, MAX_FACT_SEQUENCE, MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGE_LIMIT, validateContract, type ActionType, type BehaviorContext, type CompactionResult, type DecisionResult, type JsonValue, type WorkflowDecision } from '@iar/contracts';
 import { validateDecisionOutput } from '../validation.js';
 import type { DecisionRequest } from '../types.js';
 import { MODEL_NO_PROFILE_MESSAGE, type ModelGatewayInvocationOptions, type ModelGatewayResult, type ModelInvocation, type ModelOutputValidation } from './types.js';
@@ -38,12 +38,25 @@ export type SemanticFrame = {
 /** 旧版引用结构，仅用于兼容 v1 空间。 */
 export type LegacySemanticReference = { text: string; resolvedTo: string };
 
-/** 新版引用结构，只表达不透明记录与顺序关系。 */
+/** 新版引用的两个有序上下文命名空间。 */
+export type SemanticReferenceScope = 'conversation_turn' | 'fact_history' | 'same_fact_chain';
+
+/** 新版引用结构，只表达有序上下文范围、不透明目标和有限关系。 */
 export type HistoricalSemanticReference = {
   text: string;
-  anchorRecordId?: string;
+  /** 新协议的上下文集合；same_fact_chain 只为旧 v2 输出保留。 */
+  scope?: SemanticReferenceScope;
   relation: 'current' | 'previous' | 'next' | 'first' | 'last' | 'offset';
-  scope?: 'same_fact_chain';
+  /** 新协议的通用不透明锚点；其含义由 scope 决定。 */
+  anchorId?: string;
+  /** 新协议的有序锚点；其含义由 scope 决定。 */
+  anchorSequence?: number;
+  /** 新协议允许模型直接选中上下文中的不透明目标。 */
+  targetId?: string;
+  /** 新协议允许模型直接选中上下文中的有序目标。 */
+  targetSequence?: number;
+  /** 旧 fact_history 关系的锚点字段，不能用于 conversation_turn。 */
+  anchorRecordId?: string;
   offset?: number;
 };
 
@@ -419,11 +432,33 @@ function isSubject(value: unknown): boolean {
 /** 校验 SemanticFrame reference。 @param value - 未知引用 @returns 是否合法 @author lvdaxianer@yeah.net @date 2026-10-17 */
 function isReference(value: unknown, schemaVersion: SemanticFrame['schemaVersion']): boolean {
   if (schemaVersion === 'iar.semantic-frame/v1') return isRecord(value) && hasOnlyKeys(value, ['text', 'resolvedTo']) && isNonEmptyString(value.text) && isNonEmptyString(value.resolvedTo);
-  if (!isRecord(value) || !hasOnlyKeys(value, ['text', 'anchorRecordId', 'relation', 'scope', 'offset']) || !isNonEmptyString(value.text) || typeof value.relation !== 'string' || !REFERENCE_RELATIONS.has(value.relation)) return false;
-  if (value.anchorRecordId !== undefined && !isNonEmptyString(value.anchorRecordId)) return false;
-  if (value.scope !== undefined && value.scope !== 'same_fact_chain') return false;
+  if (!isRecord(value) || !hasOnlyKeys(value, ['text', 'anchorRecordId', 'relation', 'scope', 'anchorId', 'anchorSequence', 'targetId', 'targetSequence', 'offset']) || !isNonEmptyString(value.text) || typeof value.relation !== 'string' || !REFERENCE_RELATIONS.has(value.relation)) return false;
+  if (value.anchorRecordId !== undefined && !isReferenceId(value.anchorRecordId, 'fact_history')) return false;
+  if (value.scope !== undefined && value.scope !== 'conversation_turn' && value.scope !== 'fact_history' && value.scope !== 'same_fact_chain') return false;
+  if (value.anchorId !== undefined && !isReferenceId(value.anchorId, value.scope)) return false;
+  if (value.targetId !== undefined && !isReferenceId(value.targetId, value.scope)) return false;
+  if (!validReferenceSequence(value.anchorSequence, value.scope) || !validReferenceSequence(value.targetSequence, value.scope)) return false;
+  const usesNewTargetFields = value.anchorId !== undefined || value.anchorSequence !== undefined || value.targetId !== undefined || value.targetSequence !== undefined;
+  if (usesNewTargetFields && value.scope !== 'conversation_turn' && value.scope !== 'fact_history') return false;
+  // 新作用域使用通用 ID/sequence；旧字段只允许留在旧事实链兼容空间。
+  if (value.scope === 'conversation_turn' && value.anchorRecordId !== undefined) return false;
+  if (value.scope !== 'same_fact_chain' && value.anchorRecordId !== undefined) return false;
+  if (value.scope === 'same_fact_chain' && (value.anchorId !== undefined || value.anchorSequence !== undefined || value.targetId !== undefined || value.targetSequence !== undefined)) return false;
   if (value.relation === 'offset') return typeof value.offset === 'number' && Number.isSafeInteger(value.offset) && Math.abs(value.offset) <= MAX_REFERENCE_OFFSET;
   return value.offset === undefined;
+}
+
+/** 校验引用序号属于对应有序集合的安全边界。 */
+function validReferenceSequence(value: unknown, scope: SemanticReferenceScope | undefined): boolean {
+  if (value === undefined) return true;
+  const maximum = scope === 'conversation_turn' ? MAX_CONVERSATION_TURN_SEQUENCE : MAX_FACT_SEQUENCE;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= maximum;
+}
+
+/** 校验引用目标是有界的不透明标识，而不是无界原文。 */
+function isReferenceId(value: unknown, scope: SemanticReferenceScope | undefined): value is string {
+  const maximum = scope === 'conversation_turn' ? MAX_CONVERSATION_TURN_ID_LENGTH : MAX_FACT_RECORD_ID_LENGTH;
+  return typeof value === 'string' && value.length > 0 && value.length <= maximum;
 }
 
 /** 判断 SemanticFrame 是否使用当前支持的版本。 */
