@@ -73,11 +73,12 @@ test('IAR bridge restores a verified route for a generic continuation', async ()
     const confirmed = await server.app.inject({ method: 'POST', url: `/api/bridge/v1/sessions/${sessionId}/confirm`, payload: { actionId: pending.pending.actionId, accepted: true } });
     assert.equal(confirmed.statusCode, 200);
     const continuation = await server.app.inject({ method: 'POST', url: `/api/bridge/v1/sessions/${sessionId}/input`, payload: { text: '改成每秒200次吧' } });
-    const body = continuation.json() as { disposition: string; replySource: string; route?: { functionId?: string; pluginId?: string } };
-    assert.notEqual(body.disposition, 'pass_through');
-    assert.equal(body.replySource, 'response_model');
+    const body = continuation.json() as { disposition: string; replySource: string; route?: { functionId?: string; pluginId?: string }; pending?: { actionId?: string } };
+    assert.equal(body.disposition, 'awaiting_confirmation');
+    assert.equal(body.replySource, 'none');
     assert.equal(body.route?.functionId, 'api.gateway');
     assert.equal(body.route?.pluginId, 'api-gateway-v1');
+    assert.ok(body.pending?.actionId);
   } finally { await server.close(); }
 });
 

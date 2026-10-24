@@ -21,6 +21,12 @@ export type WorkflowPhase =
   | 'cancelled'
   | 'failed';
 
+/** 当前仍可推进的 Workflow 阶段。终态只作为历史结果展示。 */
+export type WorkflowActivePhase = Exclude<WorkflowPhase, 'completed' | 'cancelled' | 'failed'>;
+
+/** 已结束的 Workflow 结果。 */
+export type WorkflowOutcome = Extract<WorkflowPhase, 'completed' | 'cancelled' | 'failed'>;
+
 /** 状态转换成功或被安全拒绝的结果。 */
 export type WorkflowTransitionResult =
   | { ok: true; currentState: WorkflowPhase; nextState: WorkflowPhase; event: WorkflowEvent }
@@ -86,6 +92,8 @@ const TRANSITIONS: Readonly<Record<WorkflowPhase, Partial<Record<WorkflowEvent, 
  */
 export function transitionWorkflow(currentState: WorkflowPhase, decision: WorkflowDecision): WorkflowTransitionResult {
   const event = decision.event;
+  if (event === 'context_answered') return { ok: true, currentState, nextState: currentState, event };
+  if (isWorkflowOutcome(currentState) && event !== 'unknown') return { ok: true, currentState, nextState: 'normal', event };
   const transitions = Object.hasOwn(TRANSITIONS, currentState) ? TRANSITIONS[currentState] : undefined;
   if (!transitions) return { ok: false, reasonCode: 'workflow_transition_invalid', currentState, event };
   const nextState = transitions[event];
@@ -102,16 +110,23 @@ export function transitionWorkflow(currentState: WorkflowPhase, decision: Workfl
  * @returns 有序且去重的允许事件
  */
 export function allowedWorkflowEvents(currentState: WorkflowPhase): WorkflowEvent[] {
+  if (isWorkflowOutcome(currentState)) return ['unknown', 'context_answered', 'function_selected', 'parameter_received', 'parameter_invalid', 'confirmation_accepted', 'confirmation_rejected', 'workflow_cancelled', 'new_topic'];
   const transitions = Object.hasOwn(TRANSITIONS, currentState) ? TRANSITIONS[currentState] : undefined;
   if (!transitions) return ['unknown'];
-  return ['unknown', ...Object.keys(transitions) as WorkflowEvent[]];
+  return ['unknown', 'context_answered', ...Object.keys(transitions) as WorkflowEvent[]];
 }
 
 /** 校验模型事件并归一化取消/换题分支，执行授权仍由会话编排层负责。 */
 export function classifyWorkflowDecision(currentState: WorkflowPhase, decision: WorkflowDecision | undefined): WorkflowDecisionDisposition {
   if (decision === undefined) return { kind: 'none' };
+  if (decision.event === 'context_answered' || decision.event === 'unknown') return { kind: 'none' };
   const transition = transitionWorkflow(currentState, decision);
   if (!transition.ok) return { kind: 'invalid', reasonCode: transition.reasonCode, event: decision.event };
   if (decision.event === 'workflow_cancelled' || decision.event === 'new_topic') return { kind: 'cancelled', event: decision.event };
   return { kind: 'accepted', event: decision.event };
+}
+
+/** 判断状态是否已经结束；终态不再作为下一轮输入的活动门禁。 */
+function isWorkflowOutcome(state: WorkflowPhase): state is WorkflowOutcome {
+  return state === 'completed' || state === 'cancelled' || state === 'failed';
 }

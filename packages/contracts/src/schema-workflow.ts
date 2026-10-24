@@ -28,6 +28,7 @@ export const WorkflowEventSchema = Type.Union([
   Type.Literal('confirmation_rejected'),
   Type.Literal('workflow_cancelled'),
   Type.Literal('new_topic'),
+  Type.Literal('context_answered'),
   Type.Literal('unknown')
 ]);
 

@@ -3,7 +3,7 @@ import test from 'node:test';
 import { IarSandboxSession } from '../../../examples/agent-sandbox/src/session.js';
 import { flushObservabilityLogs, withObservabilityFixture } from './observability-fixture.js';
 
-test('不完整语义帧会记录缺失字段并明确跳过路由和动作阶段', async () => {
+test('无法解析历史指代时交给回复模型澄清并明确跳过业务路由', async () => {
   await withObservabilityFixture(async (fixture) => {
     const session = new IarSandboxSession({ mode: 'scripted' });
     try {
@@ -15,19 +15,19 @@ test('不完整语义帧会记录缺失字段并明确跳过路由和动作阶�
       const routeDecisions = records.filter((record) => record.event === 'iar.route.decision');
       const timing = result.timing?.stages ?? [];
 
-      assert.equal(result.route.reasonCode, 'semantic_incomplete');
+      assert.equal(result.route.reasonCode, 'reference_unresolved');
       assert.equal(semantic?.missingField, 'intent');
-      assert.ok(routeDecisions.some((record) => record.stage === 'route.propose' && record.status === 'skipped' && record.reasonCode === 'semantic_incomplete'));
-      assert.ok(routeDecisions.some((record) => record.stage === 'action.execute' && record.status === 'skipped' && record.reasonCode === 'semantic_incomplete'));
-      assert.equal(timing.find((stage) => stage.stage === 'route.propose')?.status, 'skipped');
-      assert.equal(timing.find((stage) => stage.stage === 'action.execute')?.status, 'skipped');
+      assert.equal(routeDecisions.length, 0);
+      assert.equal(timing.find((stage) => stage.stage === 'route.propose'), undefined);
+      assert.equal(timing.find((stage) => stage.stage === 'action.execute'), undefined);
+      assert.equal(timing.find((stage) => stage.stage === 'response.generate')?.status, 'completed');
     } finally {
       session.dispose();
     }
   });
 });
 
-test('重复确认语言仍缺少目标时返回确定性澄清，不调用回复模型或执行动作', async () => {
+test('重复确认语言仍缺少目标时返回安全澄清且不执行动作', async () => {
   const session = new IarSandboxSession({ mode: 'scripted' });
   try {
     const first = await session.turn('请处理这个请求');
@@ -35,9 +35,9 @@ test('重复确认语言仍缺少目标时返回确定性澄清，不调用回�
 
     for (const result of [first, second]) {
       assert.equal(result.status, 'clarification');
-      assert.equal(result.route.reasonCode, 'semantic_incomplete');
-      assert.match(result.reply, /目标|Function|操作/);
-      assert.equal(result.timing?.stages.find((stage) => stage.stage === 'response.generate')?.status, 'skipped');
+      assert.equal(result.route.reasonCode, 'reference_unresolved');
+      assert.match(result.reply, /对象|目标|Function|操作/);
+      assert.equal(result.timing?.stages.find((stage) => stage.stage === 'response.generate')?.status, 'completed');
       assert.equal(result.route.functionId, undefined);
       assert.equal(result.route.pluginId, undefined);
     }

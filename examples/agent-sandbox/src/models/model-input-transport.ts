@@ -18,7 +18,7 @@
  */
 export const SEMANTIC_SYSTEM_PROMPT = `你是 IAR（Intent Action Runtime）的 Semantic Extractor。
 把用户输入抽取为一个 JSON 对象，包含 semanticFrame 和非授权的 workflowDecision：
-{ "semanticFrame": { "schemaVersion": "iar.semantic-frame/v2", "subject": {...}, "intent": string, "pluginId"?: string, "action": "query"|"create"|"update"|"delete"|"transfer"|"execute"|"unknown", "slots": {...}, "references": [...], "confidence": number }, "workflowDecision": { "schemaVersion": "iar.workflow-decision/v1", "userIntent": "start_workflow"|"select_function"|"provide_parameter"|"confirm"|"cancel_workflow"|"new_topic"|"answer_context"|"unknown", "event": "function_selected"|"parameter_received"|"parameter_invalid"|"confirmation_accepted"|"confirmation_rejected"|"workflow_cancelled"|"new_topic"|"unknown" } }
+{ "semanticFrame": { "schemaVersion": "iar.semantic-frame/v2", "subject": {...}, "intent": string, "pluginId"?: string, "action": "query"|"create"|"update"|"delete"|"transfer"|"execute"|"unknown", "slots": {...}, "references": [...], "confidence": number }, "workflowDecision": { "schemaVersion": "iar.workflow-decision/v1", "userIntent": "start_workflow"|"select_function"|"provide_parameter"|"confirm"|"cancel_workflow"|"new_topic"|"answer_context"|"unknown", "event": "function_selected"|"parameter_received"|"parameter_invalid"|"confirmation_accepted"|"confirmation_rejected"|"workflow_cancelled"|"new_topic"|"context_answered"|"unknown" } }
 
 intent 必须从当前请求提供的 Plugin 描述中理解，不能凭空创建新的能力；命中时 pluginId 只能原样复制当前 Plugin 描述中的 pluginId，无法匹配时省略 pluginId 并使用 unknown。
 
@@ -37,8 +37,10 @@ intent 必须从当前请求提供的 Plugin 描述中理解，不能凭空创�
 12. 上一轮如果只是澄清而没有创建 pending action，当前输入仍明确表达继续执行或修改时，可以依据 behavior_context.route 和最近消息恢复同一目标；恢复只用于形成新的待确认动作，不能直接授权执行。
 13. subject 只能包含 type、id、source 三个可选字段（source 取值仅限 input/context/event/plugin），不要输出 domain、entity 等其他字段；不确定时省略 subject。
 14. factHistory.records 是运行时累加的可信事实记录，values 中的字段名和值只能原样引用；自然语言“上一个/前一个/当前/最后一个”等只转换为关系，不要把 values 中的业务值写进 references。
-15. workflowDecision 只分类当前用户意图和事件，不能创建或修改 Function、Plugin、Schema、权限、参数授权或 nextState；Runtime 会重新校验事件和状态转换。
-16. 只输出一个 JSON 对象，不要输出 Markdown、解释文字或代码围栏。`;
+15. workflowDecision 只分类当前用户意图和事件，不能创建或修改 Function、Plugin、Schema、权限、参数授权或 nextState；Runtime 会重新校验事件和状态转换。若用户是在询问已验证历史事实，返回 userIntent=answer_context、event=context_answered；该事件不推进工作流。completed、cancelled、failed 是上一流程的历史结果，不是当前输入的全局阻断状态；当前轮应根据用户问题重新判断。
+16. “算了/取消/不用了”只有在用户没有同时给出新的明确操作或参数修正时，才返回 cancel_workflow；例如“算了，改成每秒 200 次”应识别为原 Function 的新参数变更，不能提前取消并丢失新请求。
+17. new_topic 只能由当前用户输入中的明确话题切换表达触发（如“换个话题”“开始新的话题”）；不能因为 recent_messages 或上一轮 workflowDecision 曾出现 new_topic，就把当前明确的业务请求继续标成 new_topic。
+18. 只输出一个 JSON 对象，不要输出 Markdown、解释文字或代码围栏。`;
 
 /** Function-call 角色的固定协议，工具身份和参数 Schema 仍由 Runtime 提供。 */
 export const FUNCTION_CALL_SYSTEM_PROMPT = `你是 IAR（Intent Action Runtime）的 Function Caller。

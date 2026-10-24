@@ -11,6 +11,8 @@ test('initial behavior context projects to a normal workflow with bounded events
 
   assert.equal(projection.mapVersion, 'iar.workflow-map/v1');
   assert.equal(projection.currentState, 'normal');
+  assert.equal(projection.activeState, 'normal');
+  assert.equal(projection.outcome, 'none');
   assert.equal(projection.workflowStatus, 'pending');
   assert.equal(projection.pending.kind, 'input');
   assert.equal(projection.allowedEvents.includes('unknown'), true);
@@ -63,4 +65,17 @@ test('required confirmation projects an awaiting state regardless of model text'
   assert.equal(projection.currentState, 'awaiting_confirmation');
   assert.deepEqual(projection.confirmation, { state: 'required' });
   assert.equal('scopeHash' in projection.confirmation, false);
+});
+
+test('completed workflow exposes a normal active state and historical outcome', () => {
+  const context = createInitialContext('run-completed');
+  context.workflow = { currentStep: 'completed', status: 'completed' };
+  context.action = { name: 'ticket.create', status: 'resolved' };
+
+  const projection = projectWorkflowContext(context);
+  assert.equal(projection.currentState, 'completed');
+  assert.equal(projection.activeState, 'normal');
+  assert.equal(projection.outcome, 'completed');
+  assert.equal(projection.allowedEvents.includes('context_answered'), true);
+  assert.equal(projection.allowedEvents.includes('function_selected'), true);
 });
