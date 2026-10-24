@@ -4,8 +4,8 @@ import { classifyWorkflowDecision, projectWorkflowContext, type RouteResult, typ
 import type { WorkflowDecision } from '@iar/contracts';
 import type { RouteEvidence, TurnResult } from './session-types.js';
 
-const GENERIC_CONTINUATION_PATTERN = /(?:^(?:那|那么|接着|接下来|另外|此外|上述|这|这个|那个)|继续|修改|改成|调整|调到|设为|提高|降低|执行这个|按这个|照这个|重试|再试|重新|proceed|retry|change|update|adjust|set|run)/iu;
-const UPDATE_CONTINUATION_PATTERN = /(修改|改成|调整|调到|设为|提高|降低|change|update|adjust|set)/iu;
+const GENERIC_CONTINUATION_PATTERN = /(?:^(?:那|那么|接着|接下来|另外|此外|上述|这|这个|那个)|继续|修改|改成|调整|调到|设为|提高|降低|上调|下调|往上调|往下调|增加|减少|加上|减去|执行这个|按这个|照这个|重试|再试|重新|proceed|retry|change|update|adjust|increase|decrease|set|run)/iu;
+const UPDATE_CONTINUATION_PATTERN = /(修改|改成|调整|调到|设为|提高|降低|上调|下调|往上调|往下调|增加|减少|加上|减去|change|update|adjust|increase|decrease|set)/iu;
 const QUERY_CONTINUATION_PATTERN = /(查询|查一下|现在.*(?:多少|什么)|状态|结果|成功了吗|跑完了吗|有没有完成|怎么样|是多少|query|status|how many)/iu;
 const INFORMATIONAL_QUERY_PATTERN = /(怎么|如何|流程|方式|方法|能不能|是否可以|为什么|什么是|how to|can i|why)/iu;
 const EXECUTE_CONTINUATION_PATTERN = /(继续执行|执行这个|重试|再试|重跑|再跑|重新跑|重新执行|proceed|retry|run|execute)/iu;

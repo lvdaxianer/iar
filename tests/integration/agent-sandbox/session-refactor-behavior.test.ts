@@ -169,6 +169,39 @@ test('带取消语气的参数自我修正仍恢复原动作并重新确认', as
   } finally { session.dispose(); }
 });
 
+test('限流增量续问恢复已验证目标并合成为新值', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    const initial = await session.turn('把订单接口的限流调到每秒 100');
+    assert.equal(initial.status, 'awaiting_confirmation');
+    assert.equal((await session.confirm(true)).status, 'executed');
+
+    const increment = await session.turn('再往上调 50');
+    assert.equal(increment.status, 'awaiting_confirmation');
+    assert.equal(increment.route.functionId, 'api.gateway');
+    if (increment.status !== 'awaiting_confirmation') return;
+    assert.deepEqual(increment.pending.input, {
+      operation: 'limit',
+      query: '再往上调 50',
+      params: { receipt: 'gateway-limit-order-center', target: 'order-center', rate: '150/s' }
+    });
+
+    const confirmed = await session.confirm(true);
+    assert.equal(confirmed.status, 'executed');
+    if (confirmed.status !== 'executed') return;
+    assert.equal(confirmed.actionResult?.status, 'succeeded');
+    assert.equal(confirmed.actionResult?.output && typeof confirmed.actionResult.output === 'object' && !Array.isArray(confirmed.actionResult.output) ? confirmed.actionResult.output.newLimit : undefined, '150/s');
+
+    const percentage = await session.turn('再提高 50%');
+    assert.equal(percentage.status, 'awaiting_confirmation');
+    if (percentage.status !== 'awaiting_confirmation') return;
+    assert.equal((percentage.pending.input as { params?: { rate?: string } }).params?.rate, '225/s');
+    const percentageConfirmed = await session.confirm(true);
+    assert.equal(percentageConfirmed.status, 'executed');
+    assert.equal(percentageConfirmed.actionResult?.output && typeof percentageConfirmed.actionResult.output === 'object' && !Array.isArray(percentageConfirmed.actionResult.output) ? percentageConfirmed.actionResult.output.newLimit : undefined, '225/s');
+  } finally { session.dispose(); }
+});
+
 test('普通与流式入口将已完成动作的事实追问统一视为上下文回答', async () => {
   const normalSession = new IarSandboxSession({ mode: 'scripted' });
   const streamedSession = new IarSandboxSession({ mode: 'scripted' });
