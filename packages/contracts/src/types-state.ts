@@ -4,7 +4,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-17
  */
-import { MAX_TRUSTED_FACT_KEY_LENGTH, type ActionType, type FunctionResponse, type JsonValue, type RiskLevel } from './types-base.js';
+import { MAX_FACT_SEQUENCE, MAX_TRUSTED_FACT_KEY_LENGTH, type ActionType, type FunctionResponse, type JsonValue, type RiskLevel } from './types-base.js';
 import type { WorkflowStatus } from './types-routing.js';
 
 /** 最近消息窗口允许的最大消息数量。 */
@@ -15,6 +15,14 @@ export const DEFAULT_RECENT_MESSAGE_LIMIT = 5;
 
 /** 最近消息窗口允许的单条消息最大字符数。 */
 export const MAX_RECENT_MESSAGE_CHARS = 2000;
+
+/** 会话轮次历史允许保留的最大轮次数量。 */
+export const MAX_CONVERSATION_TURNS = 64;
+
+/** 会话轮次标识和文本的长度边界。 */
+export const MAX_CONVERSATION_TURN_ID_LENGTH = 200;
+export const MAX_CONVERSATION_TURN_TEXT_LENGTH = MAX_RECENT_MESSAGE_CHARS;
+export const MAX_CONVERSATION_TURN_SEQUENCE = MAX_FACT_SEQUENCE;
 
 /** 待选择候选和展示选项允许的最大数量。 */
 export const MAX_CLARIFICATION_OPTIONS = 12;
@@ -300,6 +308,32 @@ export type VerifiedFactHistory = {
   focusRecordId?: string;
 };
 
+/** 一次用户输入及其最终助手回复组成的有序会话轮次。 */
+export type ConversationTurn = {
+  /** turnId 是本轮会话的稳定、不透明标识。 */
+  turnId: string;
+  /** sequence 只在会话轮次命名空间内单调递增。 */
+  sequence: number;
+  /** userText 是进入本轮的有界用户输入。 */
+  userText: string;
+  /** assistantText 是完整提交的最终助手回复。 */
+  assistantText: string;
+  /** outcome 描述回复完成时的业务结果状态。 */
+  outcome: 'completed' | 'awaiting_confirmation' | 'needs_clarification' | 'failed' | 'cancelled';
+  /** actionTaken 只表示本轮是否已经产生过动作结果，不代表授权。 */
+  actionTaken: boolean;
+  /** completedAt 是本轮完成事件的发生时间。 */
+  completedAt: string;
+};
+
+/** 可随 BehaviorContext 恢复的有界会话轮次历史。 */
+export type ConversationTurnHistory = {
+  /** turns 按 sequence 升序保存且数量有界。 */
+  turns: ConversationTurn[];
+  /** 当前模型理解上下文时使用的轮次焦点。 */
+  focusTurnId?: string;
+};
+
 /** 已校验、可恢复但不可执行的上下文摘要。 */
 export type ContextSummary = {
   /** 摘要正文，长度由 BehaviorContext Schema 限制。 */
@@ -342,6 +376,8 @@ export type BehaviorContext = {
   confirmation: ConfirmationState;
   // factHistory 保存成功输出中的有限、可追溯有序事实。
   factHistory?: VerifiedFactHistory;
+  // conversationTurns 保存用户输入与完整助手回复的有序轮次。
+  conversationTurns?: ConversationTurnHistory;
   // facts 仅为旧快照读取兼容保留，新投影不再写入该 map。
   facts?: Record<string, TrustedFact>;
   // summary 只用于辅助理解和恢复，不授予模型执行权限。
@@ -374,6 +410,7 @@ export type EventName =
   | 'action.failed'
   | 'context.clarification.updated'
   | 'context.fact.focused'
+  | 'conversation.turn.completed'
   | 'context.compacted'
   | 'context.compaction_failed';
 

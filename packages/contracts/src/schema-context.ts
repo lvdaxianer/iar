@@ -17,6 +17,10 @@ import {
   MAX_CLARIFICATION_LABEL_LENGTH,
   MAX_CLARIFICATION_OPTIONS,
   MAX_CLARIFICATION_REASON_LENGTH,
+  MAX_CONVERSATION_TURN_ID_LENGTH,
+  MAX_CONVERSATION_TURNS,
+  MAX_CONVERSATION_TURN_SEQUENCE,
+  MAX_CONVERSATION_TURN_TEXT_LENGTH,
   MAX_PENDING_REFERENCE_CANDIDATES,
   MAX_PENDING_REFERENCE_OFFSET,
   MAX_PENDING_REFERENCE_TEXT_LENGTH,
@@ -262,6 +266,38 @@ export const VerifiedFactHistorySchema = Type.Object({
   focusRecordId: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_FACT_RECORD_ID_LENGTH }))
 }, { additionalProperties: false });
 
+/** 单条有序会话轮次 Schema。 */
+export const ConversationTurnSchema = Type.Object({
+  // turnId 是不透明的稳定轮次标识。
+  turnId: Type.String({ minLength: 1, maxLength: MAX_CONVERSATION_TURN_ID_LENGTH }),
+  // sequence 决定会话轮次的唯一顺序。
+  sequence: Type.Integer({ minimum: 1, maximum: MAX_CONVERSATION_TURN_SEQUENCE }),
+  // userText 只保存有界的用户输入原文。
+  userText: Type.String({ minLength: 1, maxLength: MAX_CONVERSATION_TURN_TEXT_LENGTH }),
+  // assistantText 只保存完整提交的最终回复。
+  assistantText: Type.String({ minLength: 1, maxLength: MAX_CONVERSATION_TURN_TEXT_LENGTH }),
+  // outcome 是回复完成时的稳定结果状态。
+  outcome: Type.Union([
+    Type.Literal('completed'),
+    Type.Literal('awaiting_confirmation'),
+    Type.Literal('needs_clarification'),
+    Type.Literal('failed'),
+    Type.Literal('cancelled')
+  ]),
+  // actionTaken 只是结果元数据，不授予后续执行权限。
+  actionTaken: Type.Boolean(),
+  // completedAt 标识轮次完成事件的发生时间。
+  completedAt: Type.String({ minLength: 1, maxLength: MAX_CONVERSATION_TURN_ID_LENGTH })
+}, { additionalProperties: false });
+
+/** 有序会话轮次历史 Schema。 */
+export const ConversationTurnHistorySchema = Type.Object({
+  // turns 按 sequence 升序保存且数量有界。
+  turns: Type.Array(ConversationTurnSchema, { maxItems: MAX_CONVERSATION_TURNS }),
+  // focusTurnId 只允许指向当前历史中的轮次。
+  focusTurnId: Type.Optional(Type.String({ minLength: 1, maxLength: MAX_CONVERSATION_TURN_ID_LENGTH }))
+}, { additionalProperties: false });
+
 /** 已通过压缩契约校验、可随会话恢复的摘要。 */
 export const ContextSummarySchema = Type.Object({
   // text 只承载已校验的辅助摘要，不授予执行权限。
@@ -319,6 +355,8 @@ export const BehaviorContextSchema = Type.Object({
   confirmation: ConfirmationStateSchema,
   // factHistory 保存成功输出中的有限、可追溯有序事实。
   factHistory: Type.Optional(VerifiedFactHistorySchema),
+  // conversationTurns 保存用户输入与最终回复的有序轮次。
+  conversationTurns: Type.Optional(ConversationTurnHistorySchema),
   // facts 仅用于旧快照兼容读取，新投影不再写入。
   facts: Type.Optional(Type.Record(Type.String({ minLength: 1, maxLength: MAX_TRUSTED_FACT_KEY_LENGTH, pattern: TRUSTED_FACT_KEY_PATTERN }), TrustedFactSchema, { maxProperties: MAX_TRUSTED_FACTS })),
   // summary 是已校验的辅助视图，不进入关键执行字段哈希。

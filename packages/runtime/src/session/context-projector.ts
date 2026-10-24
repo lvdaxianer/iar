@@ -64,6 +64,7 @@ export function criticalFieldHash(context: BehaviorContext): string {
     confirmation: context.confirmation,
     idempotencyKey: context.idempotencyKey,
     ...(context.factHistory ? { factHistory: context.factHistory } : {}),
+    ...(context.conversationTurns ? { conversationTurns: context.conversationTurns } : {}),
     ...(context.facts ? { facts: context.facts } : {})
   };
   return createHash(HASH_ALGORITHM).update(JSON.stringify(canonicalize(critical))).digest('hex');
@@ -91,6 +92,7 @@ export function createInitialContext(runId = 'unknown-run'): BehaviorContext {
     clarification: { mode: 'none', unresolvedStreak: 0 },
     confirmation: { state: 'not_required' },
     factHistory: { records: [] },
+    conversationTurns: { turns: [] },
     idempotencyKey: `run:${runId}`,
     integrity: { criticalFieldHash: '', lastEventId: 'initial' }
   };
@@ -367,13 +369,14 @@ function appendFactRecord(history: VerifiedFactHistory, record: VerifiedFactReco
 
 /** 将旧版 facts map 转换为新的事实记录集合。 */
 function normalizeBehaviorContext(context: BehaviorContext): BehaviorContext {
-  if (context.factHistory !== undefined || context.facts === undefined) return context;
+  const withTurns = context.conversationTurns ?? { turns: [] };
+  if (context.factHistory !== undefined || context.facts === undefined) return { ...context, conversationTurns: withTurns };
   const records = Object.values(context.facts).map((fact, index) => legacyFactRecord(fact, index));
   const { facts: _legacyFacts, ...withoutLegacyFacts } = context;
   const focusRecordId = records.at(-1)?.recordId;
   return focusRecordId === undefined
-    ? { ...withoutLegacyFacts, factHistory: { records } }
-    : { ...withoutLegacyFacts, factHistory: { records, focusRecordId } };
+    ? { ...withoutLegacyFacts, conversationTurns: withTurns, factHistory: { records } }
+    : { ...withoutLegacyFacts, conversationTurns: withTurns, factHistory: { records, focusRecordId } };
 }
 
 /** 把旧版单字段事实转换为可追溯记录。 */

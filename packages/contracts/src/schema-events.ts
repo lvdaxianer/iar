@@ -6,6 +6,7 @@
  */
 import { Type } from '@sinclair/typebox';
 import { JsonValueSchema } from './schema-primitives.js';
+import { ConversationTurnSchema } from './schema-context.js';
 import { SCHEMA_VERSIONS } from './versions.js';
 
 /** 有限事件名称集合，保证投影语义稳定。 */
@@ -37,10 +38,18 @@ export const EventNameSchema = Type.Union([
   Type.Literal('context.clarification.updated'),
   // 事实焦点事件只更新后续上下文指代，不携带执行授权。
   Type.Literal('context.fact.focused'),
+  // 会话轮次完成事件只记录完整的用户输入和最终回复。
+  Type.Literal('conversation.turn.completed'),
   // 上下文事件记录压缩成功或失败。
   Type.Literal('context.compacted'),
   Type.Literal('context.compaction_failed')
 ]);
+
+/** 会话轮次完成事件的专用载荷 Schema。 */
+export const ConversationTurnCompletedEventPayloadSchema = Type.Object({
+  // turn 是已经完成并可恢复的完整会话轮次。
+  turn: ConversationTurnSchema
+}, { additionalProperties: false });
 
 // 未声明的事件名称会被拒绝，防止投影器出现隐式分支。
 // 事件集合是 EventName 类型的运行时对应物。

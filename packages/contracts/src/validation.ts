@@ -9,6 +9,7 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import { MAX_FUNCTION_RESPONSE_UI_BYTES } from './schema-function-response.js';
 import { ContractValidationError, ERROR_CODES, type ContractErrorResult, type ContractIssue, type ErrorCode } from './errors.js';
 import { CompactionEventPayloadSchema, CompactionFailedEventPayloadSchema } from './schema-compaction.js';
+import { ConversationTurnCompletedEventPayloadSchema } from './schema-events.js';
 import { CONTRACT_SCHEMAS } from './schemas.js';
 import type { FunctionResponse, JsonSchema, JsonValue, PluginManifest } from './types.js';
 import { IAR_API_VERSION, SCHEMA_VERSIONS } from './versions.js';
@@ -35,7 +36,8 @@ const validators = Object.fromEntries(
 /** 上下文压缩事件的专用载荷校验器。 */
 const eventPayloadValidators = {
   'context.compacted': contractAjv.compile(CompactionEventPayloadSchema),
-  'context.compaction_failed': contractAjv.compile(CompactionFailedEventPayloadSchema)
+  'context.compaction_failed': contractAjv.compile(CompactionFailedEventPayloadSchema),
+  'conversation.turn.completed': contractAjv.compile(ConversationTurnCompletedEventPayloadSchema)
 } as const;
 
 /**
@@ -188,6 +190,7 @@ function validateBehaviorContextRelations(input: unknown): ContractIssue[] {
   if (!isRecord(input)) return [];
   const issues = validatePendingOptionKeys(input);
   if (isRecord(input.factHistory)) issues.push(...validateFactHistoryRelations(input.factHistory));
+  if (isRecord(input.conversationTurns)) issues.push(...validateConversationTurnRelations(input.conversationTurns));
   return issues;
 }
 
@@ -212,6 +215,22 @@ function validateFactHistoryRelations(history: Record<string, unknown>): Contrac
     const previous = sequences[index - 1];
     return index > 0 && previous !== undefined && sequence <= previous;
   })) issues.push({ path: '/factHistory/records', keyword: 'ordered', message: '事实记录必须按 sequence 升序排列' });
+  return issues;
+}
+
+/** 校验会话轮次中的 ID、焦点和严格递增顺序。 */
+function validateConversationTurnRelations(history: Record<string, unknown>): ContractIssue[] {
+  if (!Array.isArray(history.turns)) return [];
+  const turns = history.turns.filter(isRecord);
+  const issues: ContractIssue[] = [];
+  const ids = turns.map((turn) => turn.turnId).filter((id): id is string => typeof id === 'string');
+  if (new Set(ids).size !== ids.length) issues.push({ path: '/conversationTurns/turns', keyword: 'uniqueTurnIds', message: '会话轮次 ID 必须唯一' });
+  if (typeof history.focusTurnId === 'string' && !ids.includes(history.focusTurnId)) issues.push({ path: '/conversationTurns/focusTurnId', keyword: 'reference', message: '会话轮次焦点必须指向已有轮次' });
+  const sequences = turns.map((turn) => turn.sequence).filter((sequence): sequence is number => typeof sequence === 'number');
+  if (sequences.some((sequence, index) => {
+    const previous = sequences[index - 1];
+    return index > 0 && previous !== undefined && sequence <= previous;
+  })) issues.push({ path: '/conversationTurns/turns', keyword: 'ordered', message: '会话轮次必须按 sequence 升序排列' });
   return issues;
 }
 
