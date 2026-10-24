@@ -112,8 +112,10 @@ test('会话重启后下一次模型调用只接收 SQLite 中最新的有界消
     try {
       await restored.whenReady();
       await restored.turn('恢复后的新问题');
-      const input = capturedInputs.at(-1) as { recentMessages?: Array<{ role: string; text: string }> } | undefined;
+      const input = capturedInputs.at(-1) as { recentMessages?: Array<{ role: string; text: string }>; pluginDescriptors?: Array<{ functionId?: string; pluginId?: string }> } | undefined;
       assert.deepEqual(input?.recentMessages, persistedMessages.slice(-recentMessageLimit).map((message) => ({ role: message.role, text: message.content })));
+      assert.ok(input?.pluginDescriptors?.some((descriptor) => descriptor.functionId === 'ticket.create'));
+      assert.ok(input?.pluginDescriptors?.every((descriptor) => typeof descriptor.pluginId === 'string'));
     } finally {
       restored.dispose();
     }

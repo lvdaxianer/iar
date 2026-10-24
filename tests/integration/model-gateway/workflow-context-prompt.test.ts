@@ -50,3 +50,28 @@ test('semantic system prompt defines workflow event output as non-authoritative'
   assert.match(SEMANTIC_SYSTEM_PROMPT, /completed、cancelled、failed/);
   assert.match(SEMANTIC_SYSTEM_PROMPT, /不能.*授权|不.*执行权限/u);
 });
+
+test('semantic prompt gives a complete current request priority over stale route context', () => {
+  const prompt = buildSemanticUserPrompt({
+    text: '一个新的完整请求',
+    behaviorContext: {
+      route: { functionId: 'function.previous', pluginId: 'plugin.previous' },
+      pending: { kind: 'none', status: 'none' },
+      workflow: { currentStep: 'completed', status: 'completed' }
+    },
+    recentMessages: [{ role: 'user', text: '上一轮请求' }]
+  });
+
+  assert.match(prompt, /当前用户问题.*唯一的本轮语义来源/u);
+  assert.match(prompt, /完整请求.*不得.*继承.*上一轮.*Function|当前问题.*明确.*新对象.*不得.*迁移/u);
+  assert.ok(prompt.lastIndexOf('本轮语义来源') > prompt.indexOf('</plugin_descriptors>'));
+  assert.ok(prompt.lastIndexOf('<current_user_question>') > prompt.indexOf('</plugin_descriptors>'));
+  assert.match(prompt.slice(prompt.lastIndexOf('<current_user_question>')), /一个新的完整请求/);
+});
+
+test('semantic prompt requires exact closed-set Function identifiers', () => {
+  const prompt = buildSemanticUserPrompt({ text: '调整新的参数', pluginDescriptors: [{ functionId: 'function.current', pluginId: 'plugin.current' }] });
+  assert.match(SEMANTIC_SYSTEM_PROMPT, /逐字比对当前 plugin_descriptors\.functionId/u);
+  assert.match(prompt, /不能输出新别名/u);
+  assert.match(prompt, /只允许逐字复制 plugin_descriptors 中的 functionId/u);
+});

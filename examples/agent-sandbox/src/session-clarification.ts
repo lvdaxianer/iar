@@ -10,6 +10,8 @@ const QUERY_CONTINUATION_PATTERN = /(查询|查一下|现在.*(?:多少|什么)|
 const EXECUTE_CONTINUATION_PATTERN = /(继续执行|执行这个|重试|再试|重新执行|proceed|retry|run|execute)/iu;
 const EXPLICIT_SIDE_EFFECT_PATTERN = /(创建|新增|修改|改成|调整|调到|设为|删除|重跑|导出|申请|执行|重试|create|update|change|adjust|delete|export|apply|execute|retry)/iu;
 const EXPLICIT_NEW_TOPIC_PATTERN = /(换个话题|换一个话题|开始新的话题|另起一个话题|new topic|different topic)/iu;
+const EXPLICIT_CANCEL_PATTERN = /(取消|算了|不用了|放弃|不做了|cancel|stop|abort)/iu;
+const CONFIRMATION_ONLY_PATTERN = /^(?:直接)?(?:确认|同意|批准|confirm|approve)(?:上一个|当前|这个)?(?:操作|动作)?$/iu;
 
 /** 将当前动态 Plugin 描述转换为有限、不具备执行权限的选择状态。 */
 export function createSelectionState(descriptors: readonly PluginDescriptor[], unresolvedStreak: number, reasonCode: string): { state: ClarificationState; options: NonNullable<PendingInput['options']> } {
@@ -51,8 +53,11 @@ export function normalizeContextFollowUpFrame(context: BehaviorContext, frame: S
 
 /** 丢弃模型把上一轮新话题事件错误延续到当前明确业务请求的结果。 */
 export function normalizeCurrentTurnWorkflowDecision(frame: SemanticFrame, userText: string): SemanticFrame['workflowDecision'] {
-  if (frame.workflowDecision?.event === 'new_topic' && frame.intent !== 'unknown' && !EXPLICIT_NEW_TOPIC_PATTERN.test(userText)) return undefined;
-  return frame.workflowDecision;
+  const decision = frame.workflowDecision;
+  if (decision === undefined) return undefined;
+  if (decision.event === 'new_topic' && EXPLICIT_NEW_TOPIC_PATTERN.test(userText)) return decision;
+  if (decision.event === 'workflow_cancelled' && EXPLICIT_CANCEL_PATTERN.test(userText)) return decision;
+  return undefined;
 }
 
 /** 只有带有明确上下文指代或事实查询词时，才把未知输入视为事实追问。 */
@@ -64,6 +69,7 @@ function isLikelyFactFollowUp(userText: string): boolean {
 function isContextFollowUpCandidate(context: BehaviorContext, frame: SemanticFrame, userText: string): boolean {
   return (context.factHistory?.records.length ?? 0) > 0
     && (frame.action === 'query' || frame.action === 'unknown')
+    && !CONFIRMATION_ONLY_PATTERN.test(userText.trim())
     && !EXPLICIT_SIDE_EFFECT_PATTERN.test(userText)
     && isLikelyFactFollowUp(userText);
 }
@@ -115,17 +121,38 @@ export function workflowDecisionReply(disposition: WorkflowDecisionDisposition):
 export function recoverContinuation(descriptors: readonly PluginDescriptor[], context: BehaviorContext, frame: SemanticFrame, userText: string): ContinuationRecovery {
   const workflowEvent = frame.workflowDecision?.event;
   const eventAllowsRecovery = workflowEvent === 'parameter_received' || workflowEvent === 'function_selected';
+  const hasParameterCollection = context.collection?.kind === 'parameters';
+  if (!hasParameterCollection && context.pending.status !== 'required' && CONFIRMATION_ONLY_PATTERN.test(userText.trim())) {
+    return { frame: clearUntrustedContinuationTarget(frame) };
+  }
   const target = context.collection?.kind === 'parameters'
     ? { functionId: context.collection.functionId, pluginId: context.collection.pluginId }
     : (eventAllowsRecovery || (workflowEvent === undefined && GENERIC_CONTINUATION_PATTERN.test(userText))) && (context.route.functionId !== undefined || context.route.pluginId !== undefined)
       ? { functionId: context.route.functionId, pluginId: context.route.pluginId }
       : undefined;
   if (target === undefined) return { frame };
+  if (!hasParameterCollection && hasAmbiguousTextDescriptorEvidence(descriptors, userText)) {
+    return { frame: clearUntrustedContinuationTarget(frame) };
+  }
+  const currentFrame = hasParameterCollection ? frame : normalizeAuthorizedFrame(descriptors, frame, userText, target.functionId);
+  if (!hasParameterCollection && frame.intent === 'unknown') {
+    const textCandidate = chooseTextDescriptor(descriptors, userText, frame.action);
+    if (textCandidate !== undefined && textCandidate.functionId !== target.functionId) {
+      return { frame: { ...currentFrame, intent: textCandidate.functionId, pluginId: textCandidate.pluginId } };
+    }
+  }
+  const currentFunctionIsAuthorized = currentFrame.intent !== 'unknown'
+    && descriptors.some((descriptor) => descriptor.functionId === currentFrame.intent && (currentFrame.pluginId === undefined || descriptor.pluginId === currentFrame.pluginId));
+  if (!hasParameterCollection && currentFunctionIsAuthorized && (target.functionId === undefined || currentFrame.intent !== target.functionId)) return { frame: currentFrame };
   const matches = findMatchingDescriptors(descriptors, target.functionId, target.pluginId);
-  if (matches.length !== 1) return { frame, ...(target.functionId === undefined ? {} : { functionId: target.functionId }), ...(target.pluginId === undefined ? {} : { pluginId: target.pluginId }), ...(matches.length > 1 ? { candidateDescriptors: matches } : {}), reasonCode: resolveRecoveryReason(descriptors, target, matches.length) };
+  if (matches.length !== 1) return { frame: currentFrame, ...(target.functionId === undefined ? {} : { functionId: target.functionId }), ...(target.pluginId === undefined ? {} : { pluginId: target.pluginId }), ...(matches.length > 1 ? { candidateDescriptors: matches } : {}), reasonCode: resolveRecoveryReason(descriptors, target, matches.length) };
   const descriptor = matches[0];
-  if (descriptor === undefined) return { frame, reasonCode: resolveRecoveryReason(descriptors, target, matches.length) };
-  return { frame: recoverContinuationFrame(frame, context, descriptor, userText), descriptor, functionId: descriptor.functionId, pluginId: descriptor.pluginId };
+  if (descriptor === undefined) return { frame: currentFrame, reasonCode: resolveRecoveryReason(descriptors, target, matches.length) };
+  const requestedAction = inferRequestedContinuationAction(userText);
+  if (requestedAction !== undefined && !descriptor.actionTypes.includes(requestedAction)) {
+    return { frame: clearUntrustedContinuationTarget(currentFrame) };
+  }
+  return { frame: recoverContinuationFrame(currentFrame, context, descriptor, userText), descriptor, functionId: descriptor.functionId, pluginId: descriptor.pluginId };
 }
 
 /**
@@ -140,6 +167,90 @@ export function recoverContinuation(descriptors: readonly PluginDescriptor[], co
 export function recoverContinuationFrame(frame: SemanticFrame, context: BehaviorContext, descriptor: PluginDescriptor | undefined, userText: string): SemanticFrame {
   if (descriptor === undefined) return frame;
   return { ...frame, intent: descriptor.functionId, pluginId: descriptor.pluginId, action: recoverAction(frame.action, descriptor, context, userText) };
+}
+
+/** 当前轮动作与旧 descriptor 不兼容时，清除不可信的旧目标，避免污染新请求。 */
+function clearUntrustedContinuationTarget(frame: SemanticFrame): SemanticFrame {
+  const cleared = { ...frame, intent: 'unknown' as const, action: 'unknown' as const };
+  delete cleared.pluginId;
+  return cleared;
+}
+
+/** 仅把模型输出的唯一、可验证标识别名归一到授权 descriptor，不创建新标识。 */
+function normalizeAuthorizedFrame(descriptors: readonly PluginDescriptor[], frame: SemanticFrame, userText: string, previousFunctionId: string | undefined): SemanticFrame {
+  if (frame.intent === 'unknown') return frame;
+  const exact = descriptors.filter((descriptor) => descriptor.functionId === frame.intent && (frame.pluginId === undefined || descriptor.pluginId === frame.pluginId));
+  if (exact.length === 1 && exact[0] !== undefined) {
+    const textCandidate = chooseTextDescriptor(descriptors, userText, frame.action);
+    if (textCandidate !== undefined && textCandidate.functionId !== exact[0].functionId && exact[0].functionId === previousFunctionId) return { ...frame, intent: textCandidate.functionId, pluginId: textCandidate.pluginId };
+    return { ...frame, intent: exact[0].functionId, pluginId: exact[0].pluginId };
+  }
+  const candidates = descriptors.filter((descriptor) => (frame.action === 'unknown' || descriptor.actionTypes.includes(frame.action as PluginDescriptor['actionTypes'][number])) && identifierOverlap(frame.intent, descriptor.functionId) > 0);
+  const textCandidate = chooseTextDescriptor(descriptors, userText, frame.action);
+  if (candidates.length === 0) return textCandidate === undefined ? frame : { ...frame, intent: textCandidate.functionId, pluginId: textCandidate.pluginId };
+  const scores = candidates.map((descriptor) => ({ descriptor, score: identifierOverlap(frame.intent, descriptor.functionId) }));
+  const bestScore = Math.max(...scores.map((item) => item.score));
+  const best = scores.filter((item) => item.score === bestScore);
+  if (best.length !== 1 || best[0] === undefined) return frame;
+  return { ...frame, intent: best[0].descriptor.functionId, pluginId: best[0].descriptor.pluginId };
+}
+
+/** 用当前输入和动态 descriptor 描述做唯一匹配；常见描述词由运行时按文档频率自动降权。 */
+function chooseTextDescriptor(descriptors: readonly PluginDescriptor[], userText: string, action: SemanticFrame['action']): PluginDescriptor | undefined {
+  const scored = scoreTextDescriptors(descriptors, userText, action);
+  const first = scored[0];
+  const second = scored[1];
+  if (first === undefined || first.score < 2 || (second !== undefined && second.score === first.score)) return undefined;
+  return first.descriptor;
+}
+
+/** 当前轮同时命中多个授权 descriptor 时，阻止历史稳定路由兜底。 */
+function hasAmbiguousTextDescriptorEvidence(descriptors: readonly PluginDescriptor[], userText: string): boolean {
+  const scored = scoreTextDescriptors(descriptors, userText, 'unknown');
+  const first = scored[0];
+  const second = scored[1];
+  return first !== undefined && second !== undefined && first.score >= 2 && second.score >= 2 && second.score * 2 >= first.score;
+}
+
+/** 计算当前文本对授权 descriptor 的闭集证据分数。 */
+function scoreTextDescriptors(descriptors: readonly PluginDescriptor[], userText: string, action: SemanticFrame['action']): Array<{ descriptor: PluginDescriptor; score: number }> {
+  const normalizedText = normalizeLexicalText(userText);
+  if (normalizedText.length < 2) return [];
+  const features = descriptors.map((descriptor) => descriptorFeatures(descriptor));
+  const frequency = new Map<string, number>();
+  for (const set of features) for (const feature of set) frequency.set(feature, (frequency.get(feature) ?? 0) + 1);
+  return descriptors.map((descriptor, index) => {
+    const descriptorFeaturesSet = features[index] ?? new Set<string>();
+    const score = [...descriptorFeaturesSet].reduce((total, feature) => frequency.get(feature) === 1 && normalizedText.includes(feature) ? total + feature.length : total, 0);
+    const actionCompatible = action === 'unknown' || descriptor.actionTypes.includes(action as PluginDescriptor['actionTypes'][number]);
+    return { descriptor, score: actionCompatible ? score : 0 };
+  }).filter((item) => item.score > 0).sort((left, right) => right.score - left.score);
+}
+
+/** 提取中英文标识和中文二元片段，完全由 descriptor 内容驱动。 */
+function descriptorFeatures(descriptor: PluginDescriptor): Set<string> {
+  return new Set([...identifierFeatures(descriptor.functionId), ...identifierFeatures(descriptor.description ?? '')]);
+}
+
+function identifierFeatures(value: string): string[] {
+  const latinFeatures = value.toLocaleLowerCase().match(/[a-z0-9]+/gu) ?? [];
+  const normalized = normalizeLexicalText(value);
+  const result: string[] = [...latinFeatures];
+  for (let index = 0; index + 1 < normalized.length; index += 1) {
+    const pair = normalized.slice(index, index + 2);
+    if (/[^a-z0-9]/u.test(pair)) result.push(pair);
+  }
+  return result;
+}
+
+function normalizeLexicalText(value: string): string {
+  return value.toLocaleLowerCase().replace(/\s+/gu, '').replace(/[，。！？、；：（）()「」“”‘’"'`~·…!?;,.:/\\-]/gu, '');
+}
+
+/** 标识片段只用于闭集内的唯一归一化，不能单独产生可执行目标。 */
+function identifierOverlap(left: string, right: string): number {
+  const leftParts = new Set(left.split(/[._:-]+/u).filter((part) => part.length > 1));
+  return right.split(/[._:-]+/u).filter((part) => leftParts.has(part)).length;
 }
 
 /** 查找匹配已验证目标的当前授权描述。 */
@@ -178,6 +289,11 @@ function isDeclaredAction(action: SemanticFrame['action'], descriptor: PluginDes
 
 /** 从通用连续词推断动作，不读取或匹配任何业务名称。 */
 function inferContinuationAction(userText: string, descriptor: PluginDescriptor): SemanticFrame['action'] | undefined {
-  const preferred = UPDATE_CONTINUATION_PATTERN.test(userText) ? 'update' : QUERY_CONTINUATION_PATTERN.test(userText) ? 'query' : EXECUTE_CONTINUATION_PATTERN.test(userText) ? 'execute' : undefined;
+  const preferred = inferRequestedContinuationAction(userText);
   return preferred !== undefined && descriptor.actionTypes.includes(preferred) ? preferred : undefined;
+}
+
+/** 从当前输入推断用户明确要求的动作，不受旧 descriptor 支持范围影响。 */
+function inferRequestedContinuationAction(userText: string): Exclude<SemanticFrame['action'], 'unknown'> | undefined {
+  return UPDATE_CONTINUATION_PATTERN.test(userText) ? 'update' : QUERY_CONTINUATION_PATTERN.test(userText) ? 'query' : EXECUTE_CONTINUATION_PATTERN.test(userText) ? 'execute' : undefined;
 }
