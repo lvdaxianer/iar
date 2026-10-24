@@ -5,7 +5,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-21
  */
-import { createIarExtension, IarBridgeClient, type BridgeCapabilityDescriptor, type BridgeConfirmResponse, type BridgeInputResponse, type BridgeInputStreamHandlers, type BridgePendingAction, type BridgeReplySource, type BridgeStateResponse, type BridgeTimingSummary, type IarBridgeClientLike, type PiExtensionAPI, type PiExtensionContext, type PiInputResult } from '@iar/pi-bridge';
+import { BridgeClientError, createIarExtension, IarBridgeClient, type BridgeCapabilityDescriptor, type BridgeConfirmResponse, type BridgeInputResponse, type BridgeInputStreamHandlers, type BridgePendingAction, type BridgeReplySource, type BridgeStateResponse, type BridgeTimingSummary, type IarBridgeClientLike, type PiExtensionAPI, type PiExtensionContext, type PiInputResult } from '@iar/pi-bridge';
 import { createPiAgentDelegate, type PiAgentDelegate } from '../models/pi-agent-delegate.js';
 import type { SandboxMode } from '../session-types.js';
 
@@ -26,6 +26,10 @@ export type PiHostSessionEvents = {
   onTiming?: (timing: BridgeTimingSummary) => void;
   /** 待确认动作变化；null 表示当前没有待确认。 */
   onConfirm?: (pending: BridgePendingAction | null) => void;
+  /** 当前单一会话的安全 structuredContext 和 workflowState。 */
+  onState?: (state: BridgeStateResponse) => void;
+  /** 状态同步失败时的稳定错误码；不改变当前轮业务处置。 */
+  onStateError?: (code: string) => void;
   /** Pi Agent 流式增量（仅未命中输入）。 */
   onPiDelta?: (delta: string) => void;
   /** Pi Agent 单轮结束，回传完整回复。 */
@@ -58,12 +62,23 @@ export type PiHostSessionOptions = {
 export type PiHostInputResult = { action: 'handled' | 'continue' };
 
 /** 可观测 client：在转发响应的同时提取路由证据和待确认状态。 */
-function observeClient(client: IarBridgeClientLike, hooks: { input?: (response: BridgeInputResponse) => BridgeInputResponse | void; confirm?: (response: BridgeConfirmResponse) => void; state?: (response: BridgeStateResponse) => void; stream?: BridgeInputStreamHandlers }): IarBridgeClientLike {
+function observeClient(client: IarBridgeClientLike, hooks: { input?: (response: BridgeInputResponse) => BridgeInputResponse | void; confirm?: (response: BridgeConfirmResponse) => void; state?: (response: BridgeStateResponse) => void; stateError?: (code: string) => void; stream?: BridgeInputStreamHandlers }): IarBridgeClientLike {
+  const readState = async (sessionId: string): Promise<BridgeStateResponse> => {
+    const response = await client.state(sessionId);
+    hooks.state?.(response);
+    return response;
+  };
+  const syncState = async (sessionId: string): Promise<void> => {
+    try { await readState(sessionId); }
+    catch (error) {
+      hooks.stateError?.(error instanceof BridgeClientError ? error.code : 'bridge_unavailable');
+    }
+  };
   return {
     openSession: (request) => client.openSession(request),
-    input: async (sessionId, text) => { const response = client.inputStream ? await client.inputStream(sessionId, text, hooks.stream ?? {}) : await client.input(sessionId, text); return hooks.input?.(response) ?? response; },
-    confirm: async (sessionId, actionId, accepted) => { const response = await client.confirm(sessionId, actionId, accepted); hooks.confirm?.(response); return response; },
-    state: async (sessionId) => { const response = await client.state(sessionId); hooks.state?.(response); return response; }
+    input: async (sessionId, text) => { const response = client.inputStream ? await client.inputStream(sessionId, text, hooks.stream ?? {}) : await client.input(sessionId, text); const effective = hooks.input?.(response) ?? response; await syncState(sessionId); return effective; },
+    confirm: async (sessionId, actionId, accepted) => { const response = await client.confirm(sessionId, actionId, accepted); hooks.confirm?.(response); await syncState(sessionId); return response; },
+    state: (sessionId) => readState(sessionId)
   };
 }
 
@@ -78,6 +93,8 @@ export class PiHostSession {
   private passThroughDescriptors: BridgeCapabilityDescriptor[] = [];
   /** 当前 IAR 会话的脱敏待确认摘要；不保存 Action input。 */
   private pendingAction: BridgePendingAction | null = null;
+  /** 最近一次成功读取的安全 Bridge state，用于 SSE 重连补发。 */
+  private latestStateResponse: BridgeStateResponse | undefined;
   /** 同一会话的轮次串行，保持与 Pi 单会话输入队列一致的语义。 */
   private chain: Promise<unknown> = Promise.resolve();
   /** 当前轮收集的 entry，handled 后以备注形式写进 Pi 委托上下文。 */
@@ -90,7 +107,8 @@ export class PiHostSession {
     const client = observeClient(baseClient, {
       input: (response) => { const effective = response.pending === undefined && this.pendingAction !== null && response.route?.reasonCode === 'pending_confirmation' ? { ...response, pending: this.pendingAction } : response; this.passThroughDescriptors = effective.disposition === 'pass_through' ? effective.capabilityContext?.functionDescriptors ?? [] : []; if (effective.pending !== undefined || this.pendingAction === null) this.pendingAction = effective.pending ?? null; this.publishRoute(effective); if (effective.timing) this.events.onTiming?.(effective.timing); this.events.onConfirm?.(this.pendingAction); return effective; },
       confirm: (response) => { this.pendingAction = response.pending ?? null; this.events.onConfirm?.(this.pendingAction); },
-      state: (response) => { this.pendingAction = response.pending ?? null; },
+      state: (response) => { if (response.pending !== undefined || this.pendingAction === null) this.pendingAction = response.pending ?? null; this.latestStateResponse = response; this.events.onState?.(response); },
+      stateError: (code) => { this.events.onStateError?.(code); },
       stream: { onReasoningDelta: (delta) => this.events.onIarReasoningDelta?.(delta), onDelta: (delta) => this.events.onIarDelta?.(delta) }
     });
     const pi: PiExtensionAPI = {
@@ -123,6 +141,11 @@ export class PiHostSession {
    */
   public pendingConfirmation(): BridgePendingAction | null {
     return this.pendingAction === null ? null : { ...this.pendingAction };
+  }
+
+  /** 返回最近一次成功读取的安全状态，供 SSE 重连同步。 */
+  public stateSnapshot(): BridgeStateResponse | undefined {
+    return this.latestStateResponse === undefined ? undefined : structuredClone(this.latestStateResponse);
   }
 
   /** 处理一轮用户输入：先走 IAR input hook，未命中再交给 Pi Agent。 */
