@@ -12,7 +12,7 @@
 
 - [x] 3.1 Extend semantic reference contracts and adapters with explicit `conversation_turn` and `fact_history` scopes, stable IDs/sequences, and bounded relations while preserving legacy compatibility. Verify adapter and validation tests.
 - [x] 3.2 Implement one generic ordered resolver for the two scopes and remove Runtime dependence on fixed natural-language keyword/ordinal parsing. Validate only model-provided scope, target, relation, bounds, and session ownership; unresolved references must use existing clarification flow. Verify relation and security tests.
-- [ ] 3.3 Expose separately sorted `<conversation_turns>` and `<fact_history>` collections plus independent focus IDs to semantic and response models. Make the ordered collections authoritative and raw messages supplementary; ensure fallback answers enumerate all relevant records instead of only the current focus. Verify prompt-contract and scripted-provider tests.
+- [x] 3.3 Expose separately sorted `<conversation_turns>` and `<fact_history>` collections plus independent focus IDs to semantic and response models. Make the ordered collections authoritative and raw messages supplementary; ensure fallback answers enumerate all relevant records instead of only the current focus. Verify prompt-contract and scripted-provider tests.
 
 ## 4. End-to-end regression and release gates
 

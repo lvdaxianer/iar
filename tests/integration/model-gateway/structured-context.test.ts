@@ -128,6 +128,40 @@ test('历史关系使用不透明记录并与动态能力和最近消息同时�
   assert.doesNotMatch(SEMANTIC_SYSTEM_PROMPT, /resolvedTo/);
 });
 
+test('模型输入按独立作用域投影有序会话轮次、事实历史和焦点', () => {
+  const context = createInitialContext('run-ordered-prompt');
+  context.conversationTurns = {
+    turns: [
+      { turnId: 'turn-2', sequence: 2, userText: '第二个问题', assistantText: '第二个回答', outcome: 'completed', actionTaken: false, completedAt: '2026-10-20T00:00:02.000Z' },
+      { turnId: 'turn-1', sequence: 1, userText: '第一个问题', assistantText: '第一个回答', outcome: 'completed', actionTaken: true, completedAt: '2026-10-20T00:00:01.000Z' }
+    ],
+    focusTurnId: 'turn-2'
+  };
+  context.factHistory = {
+    records: [
+      { recordId: 'fact-2', sequence: 2, sourceEventId: 'event-2', functionId: 'function.two', pluginId: 'plugin.two', values: { value: '事实二' }, createdAt: '2026-10-20T00:00:02.000Z' },
+      { recordId: 'fact-1', sequence: 1, sourceEventId: 'event-1', functionId: 'function.one', pluginId: 'plugin.one', values: { value: '事实一' }, createdAt: '2026-10-20T00:00:01.000Z' }
+    ],
+    focusRecordId: 'fact-1'
+  };
+  const input = { text: '继续查看', userMessage: '继续查看', behaviorContext: context, recentMessages: [{ role: 'assistant', text: '仅供补充的原文' }] };
+  const prompts = [buildSemanticUserPrompt(input), buildResponseUserPrompt(input), buildFallbackUserPrompt(input, [])];
+  for (const prompt of prompts) {
+    assert.match(prompt, /<conversation_turns>/);
+    assert.match(prompt, /<fact_history>/);
+    assert.match(prompt, /<context_focus>/);
+    const turns = prompt.slice(prompt.indexOf('<conversation_turns>'), prompt.indexOf('</conversation_turns>'));
+    const facts = prompt.slice(prompt.indexOf('<fact_history>'), prompt.indexOf('</fact_history>'));
+    const ordinary = prompt.slice(prompt.indexOf('<behavior_context>'), prompt.indexOf('</behavior_context>'));
+    assert.ok(turns.indexOf('第一个问题') < turns.indexOf('第二个问题'));
+    assert.ok(facts.indexOf('事实一') < facts.indexOf('事实二'));
+    assert.doesNotMatch(ordinary, /第一个问题|事实一/);
+    assert.match(prompt, /turn-2/);
+    assert.match(prompt, /fact-1/);
+    assert.match(prompt, /最近有限.*消息原文.*补充/);
+  }
+});
+
 test('PluginHost 只投影当前启用且授权的通用描述，并使用不透明候选键', () => {
   const host = new PluginHost();
   assert.equal(host.install(descriptorManifest('plugin.visible', 'function.visible')).ok, true);
@@ -308,7 +342,8 @@ test('scripted semantic fallback answers a verified follow-up without repeating 
     assert.equal(followUp.status, 'clarification');
     if (followUp.status === 'clarification') assert.equal(followUp.disposition, 'context_answered');
     assert.match(followUp.reply, new RegExp(String(ticketId)));
-    assert.equal(after.stats.eventCount, before.stats.eventCount);
+    assert.equal(after.stats.eventCount, before.stats.eventCount + 1);
+    assert.equal(after.context.conversationTurns?.turns.length, (before.context.conversationTurns?.turns.length ?? 0) + 1);
     assert.equal(after.pending, null);
   } finally {
     session.dispose();
