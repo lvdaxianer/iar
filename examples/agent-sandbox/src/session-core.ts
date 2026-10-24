@@ -58,6 +58,20 @@ type RestorableSnapshot = {
   context: import('@iar/contracts').BehaviorContext;
 };
 
+/** 无快照时可直接重放的行为状态事件；消息与快照通知不改变 BehaviorContext。 */
+const PERSISTED_STATE_EVENTS: ReadonlySet<EventName> = new Set([
+  'context.compacted',
+  'context.fact.focused',
+  'context.clarification.updated',
+  'conversation.turn.completed',
+  'workflow.started',
+  'workflow.transitioned',
+  'decision.created',
+  'action.started',
+  'action.completed',
+  'action.failed'
+]);
+
 /** sandbox 会话构造参数，集中约束 Agent 级运行时配置。 */
 type SandboxSessionOptions = {
   mode: SandboxMode;
@@ -376,7 +390,7 @@ export class SandboxSessionCore {
     if (!this.snapshotStore && !this.persistenceProvider) return;
     const snapshot = await this.loadSnapshotSafely();
     const restored = snapshot === undefined ? false : this.restoreStructuredSnapshot(snapshot);
-    await this.restoreConversationTurnEvents(restored);
+    await this.restorePersistedEvents(restored);
     await this.restoreRecentMessages();
     if (restored && snapshot) this.enqueuePersistenceEvent({ eventName: 'session.restored', runId: SESSION_RUN_ID, payload: { revision: snapshot.revision, eventId: snapshot.eventId } as JsonValue, eventId: `session-restored-${snapshot.eventId}` });
   }
@@ -404,19 +418,24 @@ export class SandboxSessionCore {
     }
   }
 
-  /** 从持久化轮次事件补齐缺失或落后快照中的有序会话上下文。 */
-  private async restoreConversationTurnEvents(hasSnapshot: boolean): Promise<void> {
+  /** 从持久化事件补齐快照，并在快照缺失时重建事实与轮次上下文。 */
+  private async restorePersistedEvents(hasSnapshot: boolean): Promise<void> {
     if (!this.persistenceProvider) return;
     try {
       const events = await this.persistenceProvider.listEvents(this.sessionId);
       const current = hasSnapshot ? this.projector.current() : createInitialContext(SESSION_RUN_ID);
       const projector = new BehaviorContextProjector(current, SESSION_RUN_ID);
       const lastSequence = current.conversationTurns?.turns.at(-1)?.sequence ?? 0;
-      for (const event of events.filter((item) => item.eventName === 'conversation.turn.completed')) {
+      const eventsToReplay = hasSnapshot
+        ? events.filter((item) => item.eventName === 'conversation.turn.completed')
+        : events.filter((item) => PERSISTED_STATE_EVENTS.has(item.eventName));
+      for (const event of eventsToReplay) {
         if (!validateContract('event', event).ok) throw new Error('会话轮次事件契约无效');
-        const sequence = conversationEventSequence(event);
-        if (sequence === undefined) throw new Error('会话轮次事件序号无效');
-        if (sequence <= lastSequence) continue;
+        if (event.eventName === 'conversation.turn.completed') {
+          const sequence = conversationEventSequence(event);
+          if (sequence === undefined) throw new Error('会话轮次事件序号无效');
+          if (hasSnapshot && sequence <= lastSequence) continue;
+        }
         projector.apply(event);
       }
       this.projector = projector;
