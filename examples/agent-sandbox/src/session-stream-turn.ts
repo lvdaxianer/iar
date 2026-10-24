@@ -45,6 +45,8 @@ export type StreamTurnContext = {
   focusFactRecord: (recordId: string) => Promise<void>;
   /** 仅完整回复可写入宿主持有的历史。 */
   pushMessages: (userText: string, reply: string) => void;
+  /** 在 done 之前提交完整的有序会话轮次。 */
+  completeConversationTurn: (userText: string, result: TurnResult) => Promise<void>;
   /** 可选的进程内 Pi 委托，未命中业务路由时接管 eligible 输入。 */
   piAgent?: PiAgentDelegate | undefined;
 };
@@ -84,7 +86,7 @@ export class SandboxSessionStreamTurn {
     const timing = new TurnTimingTracker(traceId);
     try {
       const result = await this.executeStreamTurn({ userText, traceId, emit, timing, bridgeMode, ...(structuredInput === undefined ? {} : { structuredInput }) });
-      return this.finishStreamResult(result, timing, emit);
+      return this.finishStreamResult(userText, result, timing, emit);
     } catch (error) {
       this.finishStreamFailure(timing, emit);
       throw error;
@@ -108,10 +110,11 @@ export class SandboxSessionStreamTurn {
   /**
    * 发送最终 timing 后再发送 done，避免界面先结束而丢失总耗时。
    */
-  private finishStreamResult(result: TurnResult, timing: TurnTimingTracker, emit: (event: StreamEvent) => void): TurnResult {
+  private async finishStreamResult(userText: string, result: TurnResult, timing: TurnTimingTracker, emit: (event: StreamEvent) => void): Promise<TurnResult> {
     const summary = timing.finish();
     recordTurnTiming(summary);
     const timed = { ...result, timing: summary };
+    await this.context.completeConversationTurn(userText, timed);
     emit({ type: 'timing', summary: timed.timing });
     emit({ type: 'done', result: timed });
     return timed;

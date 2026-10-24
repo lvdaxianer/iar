@@ -106,6 +106,7 @@ export class IarSandboxSession extends SandboxSessionCore {
       generateReplyStreamed: (context, onDelta, onReasoningDelta) => this.replies.generateReplyStreamed(context, onDelta, onReasoningDelta),
       currentBehaviorContext: () => this.projector.current(), focusFactRecord: (recordId) => session.focusFactRecord(recordId),
       pushMessages: (text, reply) => this.replies.pushMessages(text, reply),
+      completeConversationTurn: (text, result) => session.completeConversationTurn(text, result),
       piAgent: this.piAgent
     });
   }
@@ -149,7 +150,9 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @date 2026-10-18
    */
   public async turn(text: string, structuredInput?: StructuredInput): Promise<TurnResult> {
-    return recordAgentExchange(this.piAgent, text, withReplySource(await this.turnRunner.run(text, false, structuredInput)));
+    const result = withReplySource(await this.turnRunner.run(text, false, structuredInput));
+    await this.completeConversationTurn(text.trim(), result);
+    return recordAgentExchange(this.piAgent, text, result);
   }
   /**
    * 执行一轮供 Pi bridge 使用的输入。
@@ -160,7 +163,9 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @date 2026-10-20
    */
   public async bridgeTurn(text: string): Promise<TurnResult> {
-    return withReplySource(await this.turnRunner.run(text, true));
+    const result = withReplySource(await this.turnRunner.run(text, true));
+    await this.completeConversationTurn(text.trim(), result);
+    return result;
   }
   /**
    * 执行普通对话的路由并分派未命中或动作路径。
@@ -400,11 +405,19 @@ export class IarSandboxSession extends SandboxSessionCore {
   public async confirm(accepted: boolean): Promise<ConfirmResult> {
     await this.whenReady();
     // 确认入口只消费当前会话的 pending，不接受客户端重新构造的动作对象。
-    if (!this.pending) return { status: 'failed', reply: '当前没有待确认的操作。', reasonCode: 'no_pending_confirmation' };
+    if (!this.pending) {
+      const result = withConfirmReplySource({ status: 'failed', reply: '当前没有待确认的操作。', reasonCode: 'no_pending_confirmation' });
+      const input = accepted ? '（确认执行）' : '（取消操作）';
+      await this.completeConversationTurn(input, result);
+      return recordAgentExchange(this.piAgent, input, result);
+    }
     const { action } = this.pending;
     // 取消路径不调用执行器，避免产生副作用。
     const result = accepted ? await this.executeConfirmation(action) : await this.cancelConfirmation(action);
-    return recordAgentExchange(this.piAgent, accepted ? '（确认执行）' : '（取消操作）', withConfirmReplySource(result));
+    const input = accepted ? '（确认执行）' : '（取消操作）';
+    const completed = withConfirmReplySource(result);
+    await this.completeConversationTurn(input, completed);
+    return recordAgentExchange(this.piAgent, input, completed);
   }
   /** 取消当前动作并先投影工作流事件。
    * @param action - 用户取消的待确认动作

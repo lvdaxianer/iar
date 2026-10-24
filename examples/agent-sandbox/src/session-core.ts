@@ -8,7 +8,7 @@
  * @date 2026-10-18
  */
 import { randomUUID } from 'node:crypto';
-import { DEFAULT_RECENT_MESSAGE_LIMIT, MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGE_LIMIT, SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type ClarificationState, type CollectionState, type EventName, type JsonValue, type PendingInput, type PendingReference, type WorkflowDefinition } from '@iar/contracts';
+import { DEFAULT_RECENT_MESSAGE_LIMIT, MAX_CONVERSATION_TURN_TEXT_LENGTH, MAX_RECENT_MESSAGE_CHARS, MAX_RECENT_MESSAGE_LIMIT, SCHEMA_VERSIONS, type ActionDefinition, type ActionResult, type ClarificationState, type CollectionState, type ConversationTurn, type EventName, type JsonValue, type PendingInput, type PendingReference, type WorkflowDefinition } from '@iar/contracts';
 import { ModelGateway, ModelProfileRegistry, type IarRuntimeConfiguration, type SelfIntroductionOptions } from '@iar/runtime';
 import { PersistenceSubscriptionBridge } from '@iar/storage';
 import type { SessionMessage, SessionPersistenceProvider } from '@iar/storage';
@@ -24,7 +24,7 @@ import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { createSandboxModels, createSandboxRuntime } from './session-dependencies.js';
 import { summarizeAction } from './session-helpers.js';
 import { writeSafeLog } from './safe-log.js';
-import type { SandboxDecisionBackend, SandboxMode, SandboxState } from './session-types.js';
+import type { ConfirmResult, SandboxDecisionBackend, SandboxMode, SandboxState, TurnResult } from './session-types.js';
 
 /** 会话内所有事件共享的 runId，保证压缩校验的单运行边界。 */
 export const SESSION_RUN_ID = 'sandbox-session';
@@ -304,6 +304,24 @@ export class SandboxSessionCore {
     await this.drainWorkflowEvents();
   }
 
+  /** 在完整助手回复提交后记录一条有序会话轮次。
+   * @param userText - 本轮用户输入
+   * @param result - 已完成的公开会话结果
+   * @returns 轮次事件已经投影到当前上下文
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-24
+   */
+  protected async completeConversationTurn(userText: string, result: TurnResult | ConfirmResult): Promise<void> {
+    const normalizedUserText = userText.trim();
+    if (normalizedUserText.length === 0) return;
+    const assistantText = finalAssistantText(result);
+    if (assistantText === undefined) return;
+    const sequence = nextConversationSequence(this.projector.current().conversationTurns?.turns);
+    const turn: ConversationTurn = { turnId: `turn-${String(sequence)}`, sequence, userText: normalizedUserText.slice(0, MAX_CONVERSATION_TURN_TEXT_LENGTH), assistantText: assistantText.slice(0, MAX_CONVERSATION_TURN_TEXT_LENGTH), outcome: conversationOutcome(result), actionTaken: result.status === 'executed', completedAt: new Date().toISOString() };
+    this.workflowEventLog.conversationTurnCompleted(SESSION_RUN_ID, turn);
+    await this.drainWorkflowEvents();
+  }
+
   /** 保存当前已解析事实的透明焦点，不改变执行授权或待确认状态。 */
   protected async focusFactRecord(recordId: string): Promise<void> {
     if (this.projector.current().factHistory?.focusRecordId === recordId) return;
@@ -528,4 +546,25 @@ function normalizeRecentMessageLimit(value: number | undefined): number {
 function toRecentMessage(message: SessionMessage, maxMessageChars: number): { role: string; text: string }[] {
   if (!['user', 'assistant', 'system'].includes(message.role) || typeof message.content !== 'string') return [];
   return [{ role: message.role, text: message.content.slice(0, maxMessageChars) }];
+}
+
+/** 只接受已经提交的非空最终回复，过滤流式超限的说明结果。 */
+function finalAssistantText(result: TurnResult | ConfirmResult): string | undefined {
+  if (!('reply' in result) || ('reasonCode' in result && result.reasonCode === 'model_response_too_large')) return undefined;
+  const reply = result.reply.trim();
+  return reply.length === 0 ? undefined : reply;
+}
+
+/** 将公开结果映射为不具备授权含义的轮次结果。 */
+function conversationOutcome(result: TurnResult | ConfirmResult): ConversationTurn['outcome'] {
+  if (result.status === 'awaiting_confirmation') return 'awaiting_confirmation';
+  if (result.status === 'clarification') return 'needs_clarification';
+  if (result.status === 'failed') return 'failed';
+  if (result.status === 'cancelled') return 'cancelled';
+  return 'completed';
+}
+
+/** 从当前有序历史计算下一个轮次序号。 */
+function nextConversationSequence(turns: ConversationTurn[] | undefined): number {
+  return (turns?.at(-1)?.sequence ?? 0) + 1;
 }
