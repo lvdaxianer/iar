@@ -121,6 +121,46 @@ test('IAR bridge client covers open, confirm, state and HTTP failure paths', asy
   ]);
 });
 
+test('IAR bridge client preserves structured context and workflow state in state responses', async () => {
+  const client = new IarBridgeClient({
+    baseUrl: 'http://iar.test',
+    fetch: async () => Response.json({
+      version: PI_BRIDGE_VERSION,
+      iarSessionId: 'iar-1',
+      structuredContext: {
+        schemaVersion: 'iar.pi-structured-context/v1',
+        subject: { type: 'ticket', id: 'ticket-1', status: 'resolved', source: 'context', sourceEventId: 'event-1' },
+        intent: 'ticket.lookup',
+        action: { name: 'lookup', status: 'resolved' },
+        route: { functionId: 'ticket.lookup', pluginId: 'ticket-plugin' },
+        slots: {},
+        workflow: { currentStep: 'normal', status: 'running' },
+        pending: { kind: 'input', status: 'none' },
+        confirmation: { state: 'not_required' },
+        factHistory: { records: [{ recordId: 'fact-1', sequence: 1, sourceEventId: 'event-1', functionId: 'ticket.lookup', pluginId: 'ticket-plugin', values: { ticketId: 'ticket-1' }, createdAt: '2026-10-24T00:00:00.000Z' }], focusRecordId: 'fact-1' },
+        conversationTurns: { turns: [{ turnId: 'turn-1', sequence: 1, outcome: 'completed', actionTaken: false, completedAt: '2026-10-24T00:00:00.000Z' }], focusTurnId: 'turn-1' },
+        integrity: { criticalFieldHash: 'hash-1', lastEventId: 'event-1' }
+      },
+      workflowState: {
+        mapVersion: 'iar.workflow-map/v1',
+        currentState: 'normal',
+        activeState: 'normal',
+        outcome: 'none',
+        workflowStatus: 'running',
+        allowedEvents: ['input'],
+        pending: { kind: 'input', status: 'none' },
+        confirmation: { state: 'not_required' }
+      }
+    })
+  });
+
+  const result = await client.state('iar-1');
+  assert.equal(result.structuredContext?.intent, 'ticket.lookup');
+  assert.equal(result.structuredContext?.conversationTurns.turns[0]?.sequence, 1);
+  assert.equal(result.workflowState?.currentState, 'normal');
+  assert.deepEqual(result.workflowState?.allowedEvents, ['input']);
+});
+
 test('IAR bridge client rejects malformed responses and normalizes timeout failures', async () => {
   const malformed = new IarBridgeClient({
     baseUrl: 'http://iar.test',
