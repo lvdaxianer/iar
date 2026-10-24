@@ -76,6 +76,8 @@ export function buildPiHostApp(options: PiHostServerOptions): { app: FastifyInst
     if (existing) {
       existing.lastUsedAt = Date.now();
       client.send('confirm', existing.session.pendingConfirmation());
+      const state = existing.session.stateSnapshot();
+      if (state !== undefined) client.send('state', state);
     } else {
       client.send('confirm', null);
     }
@@ -130,6 +132,8 @@ export function buildPiHostApp(options: PiHostServerOptions): { app: FastifyInst
       onRoute: emit('route'),
       onTiming: emit('timing'),
       onConfirm: emit('confirm'),
+      onState: emit('state'),
+      onStateError: (code) => { for (const client of clients.get(sessionId) ?? []) client.send('notify', { message: 'IAR 状态同步失败，本轮业务结果未受影响。', type: 'warning', code }); },
       onPiDelta: emit('piDelta'),
       onPiDone: emit('piDone'),
       onIarReasoningDelta: emit('iarReasoningDelta'),

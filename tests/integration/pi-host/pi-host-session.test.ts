@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BridgeClientError, PI_BRIDGE_VERSION, type BridgeConfirmResponse, type BridgeInputResponse, type BridgeInputStreamHandlers, type BridgeRouteEvidence, type IarBridgeClientLike } from '@iar/pi-bridge';
+import { BridgeClientError, PI_BRIDGE_VERSION, type BridgeConfirmResponse, type BridgeInputResponse, type BridgeInputStreamHandlers, type BridgeRouteEvidence, type BridgeStateResponse, type IarBridgeClientLike } from '@iar/pi-bridge';
 import { buildPiHostApp } from '../../../examples/agent-sandbox/src/pi-host/pi-host-server.js';
 import { PiHostSession, type PiHostRouteInfo, type PiHostSessionEvents } from '../../../examples/agent-sandbox/src/pi-host/pi-host-session.js';
 import type { PiAgentDelegate } from '../../../examples/agent-sandbox/src/models/pi-agent-delegate.js';
@@ -14,7 +14,7 @@ function businessRoute(): BridgeRouteEvidence {
   return { status: 'matched', reasonCode: 'none', semanticIntent: 'api.gateway', semanticConfidence: 0.92, functionId: 'api.gateway', pluginId: 'api-gateway-v1', expectedOperation: 'limit|stats', actualOperation: 'limit' };
 }
 
-function makeFakeBridge(overrides: { input?: (text: string) => BridgeInputResponse; inputStream?: (text: string, handlers: BridgeInputStreamHandlers) => BridgeInputResponse; onConfirm?: (actionId: string, accepted: boolean) => void; onOpen?: () => void; failOpen?: boolean } = {}): IarBridgeClientLike {
+function makeFakeBridge(overrides: { input?: (text: string) => BridgeInputResponse; inputStream?: (text: string, handlers: BridgeInputStreamHandlers) => BridgeInputResponse; state?: () => BridgeStateResponse | Promise<BridgeStateResponse>; onConfirm?: (actionId: string, accepted: boolean) => void; onOpen?: () => void; failOpen?: boolean } = {}): IarBridgeClientLike {
   const client: IarBridgeClientLike = {
     openSession: async () => {
       if (overrides.failOpen) throw new BridgeClientError('bridge_unavailable', 'IAR 不可用', true);
@@ -31,7 +31,7 @@ function makeFakeBridge(overrides: { input?: (text: string) => BridgeInputRespon
       overrides.onConfirm?.(actionId, accepted);
       return { version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo', disposition: 'handled', reply: accepted ? '已确认执行。' : '已取消该操作。' };
     },
-    state: async () => ({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo' }),
+    state: async () => await (overrides.state?.() ?? ({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo' })),
   };
   if (overrides.inputStream) client.inputStream = async (_sessionId, text, handlers) => { const response = overrides.inputStream!(text, handlers); return response; };
   return client;
@@ -44,6 +44,7 @@ function makeProbe(options: { client: IarBridgeClientLike; piAgent?: PiAgentDele
   const routes: PiHostRouteInfo[] = [];
   const confirms: Array<unknown> = [];
   const timings: Array<unknown> = [];
+  const states: BridgeStateResponse[] = [];
   const deltas: string[] = [];
   const piDones: string[] = [];
   const iarReasoning: string[] = [];
@@ -56,6 +57,8 @@ function makeProbe(options: { client: IarBridgeClientLike; piAgent?: PiAgentDele
     onRoute: (route) => { routes.push(route); },
     onConfirm: (pending) => { confirms.push(pending); },
     onTiming: (timing) => { timings.push(timing); },
+    onState: (state) => { states.push(state); },
+    onStateError: (code) => { notifications.push({ message: `state:${code}`, type: 'warning' }); },
     onPiDelta: (delta) => { deltas.push(delta); },
     onPiDone: (reply) => { piDones.push(reply); },
     onIarReasoningDelta: (delta) => { iarReasoning.push(delta); },
@@ -67,7 +70,7 @@ function makeProbe(options: { client: IarBridgeClientLike; piAgent?: PiAgentDele
     reset: () => {}
   };
   const session = new PiHostSession({ sessionId: 'pi-demo', mode: 'scripted', client: options.client, piAgent, events });
-  return { session, entries, notifications, routes, confirms, timings, deltas, piDones, iarReasoning, iarDeltas, recorded, piRuns };
+  return { session, entries, notifications, routes, confirms, timings, states, deltas, piDones, iarReasoning, iarDeltas, recorded, piRuns };
 }
 
 test('Pi host session routes business input to IAR and blocks the Pi Agent', async () => {
@@ -94,6 +97,38 @@ test('Pi host session forwards bridge timing to the UI event boundary', async ()
   await probe.session.start();
   await probe.session.handleUserInput('查询状态');
   assert.deepEqual(probe.timings, [timing]);
+});
+
+test('Pi host session synchronizes state after startup, input and confirmation', async () => {
+  const pending = { actionId: 'action-state-1', runId: 'run-state-1', functionId: 'api.gateway', pluginId: 'api-gateway-v1', riskLevel: 'high', confirmationRequired: true };
+  const state = (): BridgeStateResponse => ({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo', pending });
+  const client = makeFakeBridge({
+    input: () => ({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo', disposition: 'awaiting_confirmation', reply: '请确认', route: businessRoute(), pending }),
+    state,
+  });
+  const probe = makeProbe({ client });
+  await probe.session.start();
+  assert.equal(probe.states.length, 1);
+  await probe.session.handleUserInput('创建工单');
+  assert.equal(probe.states.length, 2);
+  assert.deepEqual(probe.states.at(-1)?.pending, pending);
+  assert.equal(await probe.session.confirm(false), true);
+  assert.equal(probe.states.length, 3);
+});
+
+test('Pi host state sync failure does not change business disposition', async () => {
+  let stateCalls = 0;
+  const probe = makeProbe({
+    client: makeFakeBridge({
+      input: () => ({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo', disposition: 'handled', reply: '已查询', route: businessRoute() }),
+      state: async () => { stateCalls += 1; if (stateCalls === 1) return { version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo' }; throw new BridgeClientError('bridge_unavailable', 'IAR 不可用', true); }
+    })
+  });
+  await probe.session.start();
+  const result = await probe.session.handleUserInput('查询工单');
+  assert.deepEqual(result, { action: 'handled' });
+  assert.equal(probe.piRuns.length, 0);
+  assert.ok(probe.notifications.some((item) => item.message === 'state:bridge_unavailable'));
 });
 
 test('Pi host session forwards only final response reasoning and answer deltas', async () => {
@@ -259,6 +294,8 @@ test('Pi host app forwards only final response stream events over SSE', async t 
   assert.match(body, /核对工单信息/);
   assert.match(body, /event: iarDelta/);
   assert.match(body, /工单结果如下/);
+  const stateBody = await readPiHostEvent({ reader, firstChunk: body }, 'state');
+  assert.match(stateBody, /event: state/);
 });
 
 /**
