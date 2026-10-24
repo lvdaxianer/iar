@@ -13,7 +13,7 @@
 ## 3. 变更验证与真实链路回归
 
 - [x] 3.1 完成 OpenSpec 严格校验、全量测试、lint、build 和差异审计，确认未改动业务插件/路由/执行语义；验证 `openspec validate pi-host-turn-context-export --strict`、`npm test`、`npm run lint` 和 `npm run build` 均通过。
-- [ ] 3.2 在真实模型端口 `8878` 的同一会话执行用户提供的 50 个话题突变场景，验证复制结果包含多轮结构化上下文与 workflow state，并记录每组结果；失败时先修复非业务性的上下文导出/展示问题再继续回归。
+- [x] 3.2 在真实模型端口 `8878` 的同一会话执行用户提供的 50 个话题突变场景，验证复制结果包含多轮结构化上下文与 workflow state，并记录每组结果；失败时先修复非业务性的上下文导出/展示问题再继续回归。
 
 ## Workflow follow-up
 
