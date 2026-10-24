@@ -8,8 +8,8 @@
 import { randomUUID } from 'node:crypto';
 import { MAX_COLLECTION_ATTEMPTS, SCHEMA_VERSIONS, validateJsonSchemaValue, type ActionDefinition, type ActionType, type BehaviorContext, type CollectionState, type EventEnvelope, type JsonSchema, type JsonValue, type PendingReference, type PluginOperation, type PluginPolicyMetadata, type RuleExpression, type VerifiedFactRecord } from '@iar/contracts';
 import { SELF_INTRODUCTION_FUNCTION_ID, type PluginDescriptor, type PluginFunctionRecord, type PluginHost, type PluginRecord } from '@iar/plugins';
-import { ModelGateway, SemanticExtractorAdapter, projectWorkflowContext, type HistoricalSemanticReference, type ModelGatewayResult, type ModelProfileRegistry, type SemanticFrame } from '@iar/runtime';
-import { PluginFirstRouter, resolveFactRelationCandidates, type AsyncDecisionAdapter, type AsyncFunctionCallAdapter, type AsyncNestedRouteAdapter, type FactRelationCandidateReference, type RouteResult } from '@iar/runtime';
+import { ModelGateway, SemanticExtractorAdapter, projectWorkflowContext, resolveOrderedReferenceCandidates, type HistoricalSemanticReference, type ModelGatewayResult, type ModelProfileRegistry, type OrderedReference, type SemanticFrame } from '@iar/runtime';
+import { PluginFirstRouter, type AsyncDecisionAdapter, type AsyncFunctionCallAdapter, type AsyncNestedRouteAdapter, type RouteResult } from '@iar/runtime';
 import type { FunctionRule, IarRuntimeConfiguration, PluginRule } from '@iar/runtime';
 import type { ActionExecutor, LocalWorkflow } from '@iar/runtime';
 import { ScriptedModelProvider } from './models/scripted-provider.js';
@@ -18,7 +18,7 @@ import { SESSION_RUN_ID, SESSION_CORRELATION_ID, TURN_DEFINITION } from './sessi
 import type { CompactionContext } from './session-compaction.js';
 import { buildActionInput, buildFacts, buildFunctionCallInput, buildSelfIntroductionInput, describeAction, mergeResolvedReferenceParams, mergeVerifiedFunctionSlots, sandboxOperationKind, toSlotMap } from './session-helpers.js';
 import { collectParameters, parameterCollectionReply } from './parameter-collector.js';
-import type { ExecuteTurnOutcome, ExtractFrameOutcome, PendingActionContext, ReferenceResolution, ResolvedFactReference, RouteEvidence, SandboxMode, StructuredInput } from './session-types.js';
+import type { ExecuteTurnOutcome, ExtractFrameOutcome, PendingActionContext, ReferenceResolution, ResolvedContextReference, RouteEvidence, SandboxMode, StructuredInput } from './session-types.js';
 
 /** 路由读取和更新当前会话的状态，不拥有独立生命周期。 */
 export type SessionRoutingContext = Pick<CompactionContext, 'eventStore' | 'projector' | 'gateway'> & {
@@ -159,56 +159,36 @@ export class SandboxSessionRouting {
   public resolveReferences(frame: SemanticFrame, behaviorContext: BehaviorContext): ReferenceResolution {
     const references = frame.references.filter(isHistoricalReference);
     if (references.length === 0) return { ok: true, references: [] };
-    const history = behaviorContext.factHistory;
-    // 没有可信历史时，任何历史指代都必须阻断；不能让查询动作借助最近原文
-    // 绕过事实锚点，也不能把空会话中的“这个/刚才”交给 Function 或 Pi 猜测。
-    if (!history || history.records.length === 0) return { ok: false, reasonCode: 'reference_unresolved' };
-    const resolved: ResolvedFactReference[] = [];
+    const resolved: ResolvedContextReference[] = [];
     for (const reference of references) {
-      const scopedHistory = restrictToPendingCandidates(history, behaviorContext.pendingReference);
-      const scopedFunctionId = frame.intent !== 'unknown' ? frame.intent : behaviorContext.route.functionId;
-      const ordinal = this.resolveOrdinalFactReference(scopedHistory, reference as FactRelationCandidateReference, scopedFunctionId);
-      if (ordinal.status === 'resolved') {
-        resolved.push({ text: reference.text, record: ordinal.record });
-        continue;
+      const scope = reference.scope === 'conversation_turn' ? 'conversation_turn' : 'fact_history';
+      if (scope === 'conversation_turn') {
+        const turns = behaviorContext.conversationTurns;
+        if (!turns || turns.turns.length === 0) return { ok: false, reasonCode: 'reference_unresolved' };
+        const result = resolveOrderedReferenceCandidates({
+          items: turns.turns.map((turn) => ({ id: turn.turnId, sequence: turn.sequence, turn })),
+          ...(turns.focusTurnId === undefined ? {} : { focusId: turns.focusTurnId })
+        }, orderedReference(reference, scope));
+        if (result.status === 'resolved') {
+          resolved.push({ text: reference.text, turn: result.item.turn });
+          continue;
+        }
+        return { ok: false, reasonCode: 'reference_unresolved' };
       }
-      const qualified = this.resolveQualifiedFactReference(scopedHistory, reference as FactRelationCandidateReference);
-      if (qualified.status === 'resolved') {
-        resolved.push({ text: reference.text, record: qualified.record });
-        continue;
-      }
-      if (qualified.status === 'ambiguous') return ambiguousReference(reference, qualified.candidates);
-      const result = resolveFactRelationCandidates(scopedHistory, reference as FactRelationCandidateReference);
+      const history = restrictToPendingCandidates(behaviorContext.factHistory, behaviorContext.pendingReference);
+      if (!history || history.records.length === 0) return { ok: false, reasonCode: 'reference_unresolved' };
+      const result = resolveOrderedReferenceCandidates({
+        items: history.records.map((record) => ({ id: record.recordId, sequence: record.sequence, record })),
+        ...(history.focusRecordId === undefined ? {} : { focusId: history.focusRecordId })
+      }, orderedReference(reference, scope));
       if (result.status === 'resolved') {
-        resolved.push({ text: reference.text, record: result.record });
+        resolved.push({ text: reference.text, record: result.item.record });
         continue;
       }
-      if (result.status === 'ambiguous') return ambiguousReference(reference, result.candidates);
+      if (result.status === 'ambiguous') return ambiguousReference(reference, result.candidates.map((candidate) => candidate.record));
       return { ok: false, reasonCode: 'reference_unresolved' };
     }
     return { ok: true, references: resolved };
-  }
-
-  /** 按当前文本中的通用状态限定筛选已验证记录；无法唯一收敛时不执行。 */
-  private resolveQualifiedFactReference(history: NonNullable<BehaviorContext['factHistory']>, reference: FactRelationCandidateReference): ReturnType<typeof resolveFactRelationCandidates> {
-    const requiredStatus = reference.text.match(/(?:失败|错误|异常)/u) ? 'failed' : reference.text.match(/(?:成功|完成)/u) ? 'success' : undefined;
-    if (requiredStatus === undefined) return { status: 'unresolved', reason: 'missing_anchor' };
-    const candidates = history.records.filter((record) => record.values.status === requiredStatus);
-    if (candidates.length === 1 && candidates[0] !== undefined) return { status: 'resolved', record: structuredClone(candidates[0]) };
-    return candidates.length > 1 ? { status: 'ambiguous', candidates: candidates.slice(0, 12) } : { status: 'unresolved', reason: 'out_of_range' };
-  }
-
-  /** 将明确的列表序号绑定到同一 Function 的已验证记录，避免回复模型重新排序。 */
-  private resolveOrdinalFactReference(history: NonNullable<BehaviorContext['factHistory']>, reference: FactRelationCandidateReference, functionId: string | undefined): ReturnType<typeof resolveFactRelationCandidates> {
-    const match = reference.text.match(/第\s*([一二三四五六七八九十百\d]+)\s*(?:个|条|项|位)/u);
-    if (match === null || functionId === undefined) return { status: 'unresolved', reason: 'missing_anchor' };
-    const digits: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 百: 100 };
-    const ordinalValue = /^\d+$/u.test(match[1]!) ? Number(match[1]) : digits[match[1]!];
-    if (ordinalValue === undefined || !Number.isSafeInteger(ordinalValue) || ordinalValue < 1) return { status: 'unresolved', reason: 'invalid_offset' };
-    const ordinal = ordinalValue;
-    const records = history.records.filter((record) => record.functionId === functionId);
-    const record = records[ordinal - 1];
-    return record === undefined ? { status: 'unresolved', reason: 'out_of_range' } : { status: 'resolved', record: structuredClone(record) };
   }
 
 
@@ -222,7 +202,7 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public async prepareAndExecute(context: { runId: string; traceId?: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext; resolvedReferences?: readonly ResolvedFactReference[] }): Promise<ExecuteTurnOutcome> {
+  public async prepareAndExecute(context: { runId: string; traceId?: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext; resolvedReferences?: readonly ResolvedContextReference[] }): Promise<ExecuteTurnOutcome> {
     const { route, frame, behaviorContext, userText, runId, traceId = runId, resolvedReferences = [] } = context;
     const resolved = this.resolveFunctionContext(route);
     if (!resolved.ok) return resolved.result;
@@ -259,7 +239,7 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-23
    */
-  private prepareFunctionInput(context: { traceId: string; route: RouteResult; frame: SemanticFrame; behaviorContext: BehaviorContext; userText: string; functionRecord: PluginFunctionRecord; resolvedReferences: readonly ResolvedFactReference[] }): { ok: true; input: JsonValue } | { ok: false; result: ExecuteTurnOutcome } {
+  private prepareFunctionInput(context: { traceId: string; route: RouteResult; frame: SemanticFrame; behaviorContext: BehaviorContext; userText: string; functionRecord: PluginFunctionRecord; resolvedReferences: readonly ResolvedContextReference[] }): { ok: true; input: JsonValue } | { ok: false; result: ExecuteTurnOutcome } {
     const { traceId, route, frame, behaviorContext, userText, functionRecord, resolvedReferences } = context;
     const slots = mergeResolvedReferenceParams(mergeVerifiedFunctionSlots(frame.slots, behaviorContext, functionRecord.definition.inputSchema), resolvedReferences, route.functionId ?? frame.intent);
     const proposal = route.functionCallProposal;
@@ -483,7 +463,21 @@ function isHistoricalReference(reference: SemanticFrame['references'][number]): 
 }
 
 /** 将待解析引用限制在上一次运行时确认的候选集合内。 */
-function restrictToPendingCandidates(history: NonNullable<BehaviorContext['factHistory']>, pendingReference: PendingReference | undefined): NonNullable<BehaviorContext['factHistory']> {
+function orderedReference(reference: HistoricalSemanticReference, scope: 'conversation_turn' | 'fact_history'): OrderedReference {
+  return {
+    scope,
+    relation: reference.relation,
+    ...(reference.anchorId === undefined ? reference.anchorRecordId === undefined ? {} : { anchorId: reference.anchorRecordId } : { anchorId: reference.anchorId }),
+    ...(reference.anchorSequence === undefined ? {} : { anchorSequence: reference.anchorSequence }),
+    ...(reference.targetId === undefined ? {} : { targetId: reference.targetId }),
+    ...(reference.targetSequence === undefined ? {} : { targetSequence: reference.targetSequence }),
+    ...(reference.offset === undefined ? {} : { offset: reference.offset })
+  };
+}
+
+/** 将待解析引用限制在上一次运行时确认的候选集合内。 */
+function restrictToPendingCandidates(history: NonNullable<BehaviorContext['factHistory']> | undefined, pendingReference: PendingReference | undefined): NonNullable<BehaviorContext['factHistory']> | undefined {
+  if (history === undefined) return undefined;
   if (pendingReference === undefined) return history;
   const candidateIds = new Set(pendingReference.candidateRecordIds);
   const records = history.records.filter((record) => candidateIds.has(record.recordId));
@@ -497,7 +491,7 @@ function ambiguousReference(reference: HistoricalSemanticReference, candidates: 
     text: reference.text,
     relation: reference.relation,
     candidateRecordIds: candidates.map((candidate) => candidate.recordId),
-    ...(reference.anchorRecordId === undefined ? {} : { anchorRecordId: reference.anchorRecordId }),
+    ...((reference.anchorRecordId ?? reference.anchorId) === undefined ? {} : { anchorRecordId: reference.anchorRecordId ?? reference.anchorId }),
     ...(reference.offset === undefined ? {} : { offset: reference.offset })
   };
   return { ok: false, reasonCode: 'reference_ambiguous', pendingReference, candidates };

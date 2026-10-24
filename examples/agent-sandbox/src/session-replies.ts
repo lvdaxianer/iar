@@ -10,7 +10,7 @@ import { SELF_INTRODUCTION_FUNCTION_ID, type PluginDescriptor } from '@iar/plugi
 import { OpenAICompatibleModelProvider, type BrainModelProvider } from './models/llm-provider.js';
 import type { ScriptedModelProvider } from './models/scripted-provider.js';
 import { SandboxSessionCompaction, type CompactionContext } from './session-compaction.js';
-import type { CompactResult, OperationKind, ResolvedFactReference, SandboxMode } from './session-types.js';
+import type { CompactResult, OperationKind, ResolvedContextReference, SandboxMode } from './session-types.js';
 import { FALLBACK_REPLY_TEXT } from './session-core.js';
 import { streamModelReply } from './session-model-stream.js';
 
@@ -19,7 +19,7 @@ import { streamModelReply } from './session-model-stream.js';
  * 所有回复路径共享同一个输入形状，避免普通和流式入口漂移。
  */
 type ReplyContext = { traceId: string; runId: string; userText: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[] };
-type FallbackContext = ReplyContext & { reasonCode: string; resolvedReferences?: ResolvedFactReference[]; referenceCandidates?: VerifiedFactRecord[] };
+type FallbackContext = ReplyContext & { reasonCode: string; resolvedReferences?: ResolvedContextReference[]; referenceCandidates?: VerifiedFactRecord[] };
 type ActionReplyContext = ReplyContext & { action: ActionDefinition; actionResult: ActionResult; operationKind: OperationKind };
 
 /** 回复及压缩只访问宿主状态，重置后所有访问器指向当前会话。 */
@@ -162,7 +162,7 @@ export class SandboxSessionReplies {
   }
 
   /** 离线模型的通用结构化上下文兜底，不按业务关键词解释事实。 */
-  protected scriptedFallbackResponse(userText: string, behaviorContext: BehaviorContext, functionDescriptors: PluginDescriptor[] = this.context.functionDescriptors, resolvedReferences: ResolvedFactReference[] = [], reasonCode = 'unknown', referenceCandidates: VerifiedFactRecord[] = []): ScriptedReply | undefined {
+  protected scriptedFallbackResponse(userText: string, behaviorContext: BehaviorContext, functionDescriptors: PluginDescriptor[] = this.context.functionDescriptors, resolvedReferences: ResolvedContextReference[] = [], reasonCode = 'unknown', referenceCandidates: VerifiedFactRecord[] = []): ScriptedReply | undefined {
     const text = userText.trim();
     const pending = behaviorContext.pending;
     if (pending.status === 'required' && pending.kind === 'selection' && pending.options && text.length <= 60) {
@@ -171,7 +171,7 @@ export class SandboxSessionReplies {
     }
     if (reasonCode === 'reference_ambiguous' && referenceCandidates.length > 0) return { text: `我找到多个可能的记录，请明确选择第 ${referenceCandidates.map((record) => record.sequence).join('、')} 条中的哪一条。` };
     if (isFactFollowUp(text)) {
-      const records = resolvedReferences.length > 0 ? resolvedReferences.map((item) => item.record) : reasonCode === 'reference_unresolved' ? [] : currentFactRecords(behaviorContext);
+      const records = resolvedReferences.length > 0 ? resolvedReferences.filter(isResolvedFactReference).map((item) => item.record) : reasonCode === 'reference_unresolved' ? [] : currentFactRecords(behaviorContext);
       if (records.length > 0) return { text: `根据当前会话已确认的信息：${records.flatMap((record) => Object.entries(record.values).map(([field, value]) => `${field}=${String(value ?? '空')}`)).join('、')}。` };
       return { text: '当前会话没有足够的已确认事实。请说明你想查询的对象或需要补充的信息。' };
     }
@@ -332,6 +332,11 @@ function currentFactRecords(context: BehaviorContext): Array<NonNullable<Behavio
   const focus = history.focusRecordId ? history.records.find((record) => record.recordId === history.focusRecordId) : undefined;
   const latest = history.records.at(-1);
   return focus ? [focus] : latest ? [latest] : [];
+}
+
+/** 只把事实历史引用用于动作参数和事实模板，不把会话轮次冒充成业务事实。 */
+function isResolvedFactReference(reference: ResolvedContextReference): reference is Extract<ResolvedContextReference, { record: VerifiedFactRecord }> {
+  return 'record' in reference;
 }
 
 /** 只提取 Function 输出中约定的附加提示词，不把整个输出提升为系统指令。 */
