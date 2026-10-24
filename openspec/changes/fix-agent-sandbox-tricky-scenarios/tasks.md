@@ -24,15 +24,15 @@
 ## 1. Real-model reproduction and contracts
 
 - [x] 1.1 Add a failing regression for a verified API gateway limit followed by the incremental continuation “再往上调 50”; prove the current route is restored, the merged value is 150/s, and confirmation is still required.
-- [ ] 1.2 Add a failing regression for an immediately cancelled permission request followed by “刚才那个申请，提交了吗？”, proving the answer stays bound to the cancelled request and does not cite another action.
+- [x] 1.2 Add a failing regression for an immediately cancelled permission request followed by “刚才那个申请，提交了吗？”, proving the answer stays bound to the cancelled request and does not cite another action.
 
 ## 2. Runtime repair
 
 - [x] 2.1 Implement the minimal continuation/parameter recovery fix for incremental numeric updates without widening execution authority or bypassing confirmation.
-- [ ] 2.2 Fix any deterministic context-focus defect proven by task 1.2 while preserving verified fact provenance and bounded model context.
+- [x] 2.2 Fix any deterministic context-focus defect proven by task 1.2 while preserving verified fact provenance and bounded model context.
 
 ## 3. Full real-model verification
 
-- [ ] 3.1 Run focused RED/GREEN tests, build, lint and relevant Agent Sandbox integration tests after each repair.
+- [x] 3.1 Run focused RED/GREEN tests, build, lint and relevant Agent Sandbox integration tests after each repair.
 - [ ] 3.2 Run all 50 attached scenarios through one continuous 8878 `mode=brain` session, handling only the confirmations required by the scenario semantics, and record pass/acceptable/fail evidence.
 - [ ] 3.3 Complete plan-implementation audit, code review, per-task audit, commit and integration into `master`.

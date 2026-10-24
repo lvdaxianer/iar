@@ -202,6 +202,22 @@ test('限流增量续问恢复已验证目标并合成为新值', async () => {
   } finally { session.dispose(); }
 });
 
+test('取消权限申请后追问仍绑定已取消的申请', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    const pending = await session.turn('帮我申请数据分析师角色权限');
+    assert.equal(pending.status, 'awaiting_confirmation');
+    assert.equal(pending.route.functionId, 'account.privilege');
+    assert.equal((await session.confirm(false)).status, 'cancelled');
+
+    const followUp = await session.turn('刚才那个申请，提交了吗？');
+    assert.equal(followUp.status, 'clarification');
+    assert.equal(followUp.disposition, 'context_answered');
+    assert.match(followUp.reply, /取消|未提交/u);
+    assert.doesNotMatch(followUp.reply, /订单接口|限流|gateway-limit/u);
+  } finally { session.dispose(); }
+});
+
 test('普通与流式入口将已完成动作的事实追问统一视为上下文回答', async () => {
   const normalSession = new IarSandboxSession({ mode: 'scripted' });
   const streamedSession = new IarSandboxSession({ mode: 'scripted' });
