@@ -12,7 +12,7 @@ import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, sandboxOperationKind, summarizeAction } from './session-helpers.js';
 import { classifySessionWorkflowDecision, createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption, normalizeContextFollowUpFrame, normalizeCurrentTurnWorkflowDecision, normalizeInformationalQueryFrame, recoverContinuation, recoverFunctionCandidates, workflowDecisionReply } from './session-clarification.js';
 import { collectFunctionCandidates } from './function-collector.js';
-import { allowsContextFollowUp, applyRouteDiagnostic, deterministicFallbackReply, finishConfirmedAction, gateIncompleteSemanticFrame, logActionResult, logRouteResult, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection, semanticIncompleteClarification } from './session-turn-helpers.js';
+import { allowsContextFollowUp, applyRouteDiagnostic, deterministicFactFollowUpReply, deterministicFallbackReply, deterministicOrderCandidateReply, deterministicReferenceReply, finishConfirmedAction, gateIncompleteSemanticFrame, logActionResult, logRouteResult, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection, semanticIncompleteClarification } from './session-turn-helpers.js';
 import { withConfirmReplySource, withReplySource, type CompactResult, type ConfirmResult, type ExecuteTurnOutcome, type ExtractFrameOutcome, type PendingActionContext, type RouteEvidence, type StreamEvent, type StructuredInput, type TurnResult } from './session-types.js';
 import type { TurnTimingTracker } from './turn-timing.js';
 export type { CompactResult, ConfirmResult, PendingActionSummary, ReplySource, RouteEvidence, SandboxDecisionBackend, SandboxMode, SandboxState, StreamEvent, TurnResult, TurnStage } from './session-types.js';
@@ -154,13 +154,6 @@ export class IarSandboxSession extends SandboxSessionCore {
     await this.completeConversationTurn(text.trim(), result);
     return result;
   }
-  /**
-   * 执行普通对话的路由并分派未命中或动作路径。
-   * @param context - 用户输入、链路标识及抽取结果
-   * @returns 本轮对话结果
-   * @author lvdaxianer@yeah.net
-   * @date 2026-10-18
-   */
   protected async routeNormalTurn(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; extracted: Extract<ExtractFrameOutcome, { ok: true }>; timing: TurnTimingTracker; passThroughOnNoMatch: boolean; selectedDescriptor?: PluginDescriptor }): Promise<TurnResult> {
     const { userText, traceId, behaviorContext, extracted, timing, passThroughOnNoMatch, selectedDescriptor } = context;
     const normalizedFrame = normalizeContextFollowUpFrame(behaviorContext, extracted.frame, userText);
@@ -241,14 +234,6 @@ export class IarSandboxSession extends SandboxSessionCore {
     applyRouteDiagnostic(evidence, traceId, outcome);
     return this.finishNormalOutcome({ userText, traceId, timing, evidence, outcome });
   }
-  /**
-   * 生成路由未命中时的普通回复，超限内容不写入历史。
-   * 没有动作执行时，回复超限表现为失败而非正常澄清。
-   * @param context - 当前输入、链路和路由证据
-   * @returns 澄清结果或明确的超限错误
-   * @author lvdaxianer@yeah.net
-   * @date 2026-10-18
-   */
   protected async finishNormalFallback(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; timing: TurnTimingTracker; evidence: RouteEvidence; resolvedReferences?: import('./session-types.js').ResolvedContextReference[]; pendingReference?: PendingReference; referenceCandidates?: VerifiedFactRecord[] }): Promise<TurnResult> {
     const { userText, traceId, behaviorContext, timing, evidence, resolvedReferences, pendingReference, referenceCandidates } = context;
     if (!hasVerifiedFactsForFollowUp(behaviorContext, evidence, userText) && !matchesPendingOption(behaviorContext, userText)) await this.markUnresolved(evidence.reasonCode, pendingReference);
@@ -258,6 +243,12 @@ export class IarSandboxSession extends SandboxSessionCore {
       timing.skip('response.generate');
       this.replies.pushMessages(userText, deterministicReply);
       return { status: 'clarification', reply: deterministicReply, route: evidence, reasonCode: evidence.reasonCode };
+    }
+    const deterministicFactReply = deterministicFactFollowUpReply(userText, currentBehaviorContext) ?? deterministicOrderCandidateReply(userText);
+    if (deterministicFactReply !== undefined) {
+      timing.skip('response.generate');
+      this.replies.pushMessages(userText, deterministicFactReply);
+      return { status: 'clarification', reply: deterministicFactReply, route: evidence, reasonCode: evidence.reasonCode, disposition: 'context_answered' };
     }
     const canUseModelContext = hasVerifiedFactsForFollowUp(behaviorContext, evidence, userText) || matchesPendingOption(behaviorContext, userText);
     const stableReply = canUseModelContext ? undefined : deterministicFallbackReply(evidence.reasonCode);
@@ -274,7 +265,14 @@ export class IarSandboxSession extends SandboxSessionCore {
       return undefined;
     });
     timing.end('response.generate', reply === undefined ? 'failed' : 'completed');
-    if (reply === undefined) return { status: 'failed', reply: '模型回复超限，回复未完成。', route: evidence, reasonCode: 'model_response_too_large' };
+    if (reply === undefined) {
+      const boundedReply = deterministicReferenceReply(currentBehaviorContext, resolvedReferences);
+      if (boundedReply !== undefined) {
+        this.replies.pushMessages(userText, boundedReply);
+        return { status: 'clarification', reply: boundedReply, route: evidence, reasonCode: evidence.reasonCode, disposition: 'context_answered' };
+      }
+      return { status: 'failed', reply: '模型回复超限，回复未完成。', route: evidence, reasonCode: 'model_response_too_large' };
+    }
     const focusedReference = resolvedReferences?.findLast((reference) => 'record' in reference);
     if (focusedReference !== undefined && 'record' in focusedReference) await this.focusFactRecord(focusedReference.record.recordId);
     this.replies.pushMessages(userText, reply);

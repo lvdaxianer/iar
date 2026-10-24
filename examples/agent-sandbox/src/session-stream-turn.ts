@@ -2,7 +2,7 @@ import { ModelResponseLimitError, trackModelResponseLimit } from './models/model
 import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
-import { allowsContextFollowUp, applyRouteDiagnostic, canPassThrough, deterministicFallbackReply, gateIncompleteSemanticFrame, logActionResult, logRouteResult, pendingBridgeResult, resolveNoMatchTurn, runPiAgentDelegate, semanticIncompleteClarification } from './session-turn-helpers.js';
+import { allowsContextFollowUp, applyRouteDiagnostic, canPassThrough, deterministicFactFollowUpReply, deterministicFallbackReply, deterministicOrderCandidateReply, deterministicReferenceReply, gateIncompleteSemanticFrame, logActionResult, logRouteResult, pendingBridgeResult, resolveNoMatchTurn, runPiAgentDelegate, semanticIncompleteClarification } from './session-turn-helpers.js';
 import { classifySessionWorkflowDecision, hasVerifiedFactsForFollowUp, matchesPendingOption, normalizeContextFollowUpFrame, normalizeCurrentTurnWorkflowDecision, normalizeInformationalQueryFrame, recoverContinuation, recoverFunctionCandidates, workflowDecisionReply } from './session-clarification.js';
 import type { ActionDefinition, ActionResult, BehaviorContext, CollectionState, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/runtime';
@@ -276,6 +276,13 @@ export class SandboxSessionStreamTurn {
       this.context.pushMessages(userText, deterministicReply);
       return { status: 'clarification', reply: deterministicReply, route: evidence, reasonCode: evidence.reasonCode };
     }
+    const deterministicFactReply = deterministicFactFollowUpReply(userText, currentBehaviorContext) ?? deterministicOrderCandidateReply(userText);
+    if (deterministicFactReply !== undefined) {
+      timing.skip('response.reasoning');
+      timing.skip('response.generate');
+      this.context.pushMessages(userText, deterministicFactReply);
+      return { status: 'clarification', reply: deterministicFactReply, route: evidence, reasonCode: evidence.reasonCode, disposition: 'context_answered' };
+    }
     const canUseModelContext = hasVerifiedFactsForFollowUp(behaviorContext, evidence, userText) || matchesPendingOption(behaviorContext, userText);
     const stableReply = canUseModelContext ? undefined : deterministicFallbackReply(evidence.reasonCode);
     if (stableReply !== undefined) {
@@ -295,7 +302,14 @@ export class SandboxSessionStreamTurn {
     });
     timing.end('response.reasoning', 'completed');
     timing.end('response.generate', reply === undefined ? 'failed' : 'completed');
-    if (reply === undefined) return { status: 'failed', reply: '模型回复超限，回复未完成。', route: evidence, reasonCode: 'model_response_too_large' };
+    if (reply === undefined) {
+      const boundedReply = deterministicReferenceReply(currentBehaviorContext, resolvedReferences);
+      if (boundedReply !== undefined) {
+        this.context.pushMessages(userText, boundedReply);
+        return { status: 'clarification', reply: boundedReply, route: evidence, reasonCode: evidence.reasonCode, disposition: 'context_answered' };
+      }
+      return { status: 'failed', reply: '模型回复超限，回复未完成。', route: evidence, reasonCode: 'model_response_too_large' };
+    }
     const focusedReference = resolvedReferences?.findLast((reference) => 'record' in reference);
     if (focusedReference !== undefined && 'record' in focusedReference) await this.context.focusFactRecord(focusedReference.record.recordId);
     this.context.pushMessages(userText, reply);

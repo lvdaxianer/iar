@@ -115,12 +115,16 @@ test('历史关系使用不透明记录并与动态能力和最近消息同时�
   const semantic = buildSemanticUserPrompt(input);
   const response = buildResponseUserPrompt(input);
   const fallback = buildFallbackUserPrompt({ ...input, reasonCode: 'reference_unresolved', availableFunctions: input.functionDescriptors }, input.functionDescriptors);
-  for (const prompt of [semantic, response, fallback]) {
+  for (const prompt of [semantic]) {
     assert.match(prompt, /opaque-record-1/);
     assert.match(prompt, /trusted-value/);
     assert.match(prompt, /上一条原文/);
     assert.match(prompt, /candidate-dynamic/);
   }
+  assert.match(response, /trusted-value/);
+  assert.match(response, /上一条原文/);
+  assert.match(response, /动态能力/);
+  assert.doesNotMatch(response, /opaque-record-1|event-1|plugin\.dynamic|function\.dynamic/);
   assert.match(response, /运行时保留的历史引用候选/);
   assert.match(fallback, /运行时保留的历史引用候选/);
   assert.match(SEMANTIC_SYSTEM_PROMPT, /iar\.semantic-frame\/v2/);
@@ -146,7 +150,7 @@ test('模型输入按独立作用域投影有序会话轮次、事实历史和�
   };
   const input = { text: '继续查看', userMessage: '继续查看', behaviorContext: context, recentMessages: [{ role: 'assistant', text: '仅供补充的原文' }] };
   const prompts = [buildSemanticUserPrompt(input), buildResponseUserPrompt(input), buildFallbackUserPrompt(input, [])];
-  for (const prompt of prompts) {
+  for (const [index, prompt] of prompts.entries()) {
     assert.match(prompt, /<conversation_turns>/);
     assert.match(prompt, /<fact_history>/);
     assert.match(prompt, /<context_focus>/);
@@ -156,8 +160,12 @@ test('模型输入按独立作用域投影有序会话轮次、事实历史和�
     assert.ok(turns.indexOf('第一个问题') < turns.indexOf('第二个问题'));
     assert.ok(facts.indexOf('事实一') < facts.indexOf('事实二'));
     assert.doesNotMatch(ordinary, /第一个问题|事实一/);
-    assert.match(prompt, /turn-2/);
-    assert.match(prompt, /fact-1/);
+    if (index !== 0) {
+      assert.doesNotMatch(prompt, /turn-2|fact-1|event-1/);
+    } else {
+      assert.match(prompt, /turn-2/);
+      assert.match(prompt, /fact-1/);
+    }
     assert.match(prompt, /最近有限.*消息原文.*补充/);
   }
 });

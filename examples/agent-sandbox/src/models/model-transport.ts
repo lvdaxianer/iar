@@ -32,6 +32,8 @@ type CompletionResponse = { choices?: Array<{ message?: { content?: unknown; too
 export type ModelTransportTool = { type: 'function'; function: { name: string; description: string; parameters: JsonValue } };
 /** 温度与已有模型配置保持一致。 */
 const TEMPERATURE = 0.2;
+/** 所有 IAR 结构化模型调用共享的输出 token 上限，避免上游默认值导致无界响应。 */
+export const MAX_MODEL_OUTPUT_TOKENS = 4096;
 /** 模型 HTTP 响应的累计原始字节上限，包括 SSE 帧。 */
 export const MAX_MODEL_RESPONSE_BYTES = 256 * 1024;
 /** 用固定类型区分超限和网络异常，不保存上游内容。 */
@@ -133,7 +135,7 @@ export function cancelModelBody(cancel: () => Promise<void>): void {
 function createFetchOptions(request: ModelTransportRequest, isStream: boolean): RequestInit {
   return { method: 'POST', signal: request.signal,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${request.connection.apiKey}` },
-    body: JSON.stringify({ model: request.connection.model, temperature: TEMPERATURE,
+    body: JSON.stringify({ model: request.connection.model, temperature: TEMPERATURE, max_tokens: MAX_MODEL_OUTPUT_TOKENS,
       ...(isStream ? { stream: true } : request.allowToolCalls ? {} : { response_format: { type: 'json_object' } }),
       ...(request.thinking ? { thinking: request.thinking } : {}),
       ...(request.tools ? { tools: request.tools } : {}), ...(request.toolChoice ? { tool_choice: request.toolChoice } : {}),

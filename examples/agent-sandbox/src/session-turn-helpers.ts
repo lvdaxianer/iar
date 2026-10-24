@@ -10,7 +10,7 @@ import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { logRouteContractFailure, logRouteDecision, resolveSandboxTraceId, writeSafeLog } from './safe-log.js';
 import type { SandboxSessionReplies } from './session-replies.js';
 import { hasVerifiedFactsForFollowUp } from './session-clarification.js';
-import type { ConfirmResult, ExecuteTurnOutcome, OperationKind, PassThroughCapabilityContext, RouteEvidence, TurnResult } from './session-types.js';
+import type { ConfirmResult, ExecuteTurnOutcome, OperationKind, PassThroughCapabilityContext, ResolvedContextReference, RouteEvidence, TurnResult } from './session-types.js';
 import type { SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
 import type { TurnTimingTracker } from './turn-timing.js';
@@ -69,6 +69,67 @@ export function deterministicFallbackReply(reasonCode: string): string | undefin
   }
   if (reasonCode.startsWith('model.')) return '当前模型暂时不可用，本轮未执行任何动作，请稍后重试。';
   return undefined;
+}
+
+/**
+ * 回复模型超限时，从已通过运行时校验的事实生成有限摘要。
+ * 只有存在 resolved reference 才启用，避免把未知或未经验证的内容当作答案。
+ */
+export function deterministicReferenceReply(context: BehaviorContext, references: readonly ResolvedContextReference[] | undefined): string | undefined {
+  const records = (references ?? []).filter((reference): reference is Extract<ResolvedContextReference, { record: unknown }> => 'record' in reference).map((reference) => reference.record);
+  if (records.length === 0) return undefined;
+  const currentValues = records.flatMap((record) => Object.entries(record.values).map(([field, value]) => `${field}=${String(value ?? '空')}`)).join('、');
+  const latestTurn = context.conversationTurns?.turns.at(-1);
+  const firstName = records.map((record) => record.values.name).find((value): value is string => typeof value === 'string' && value.length > 0);
+  const matchingLine = firstName === undefined ? undefined : latestTurn?.assistantText.split(/\r?\n/u).find((line) => line.includes(firstName));
+  if (matchingLine !== undefined) return `根据当前会话已确认的结果：${matchingLine.trim().slice(0, 1200)}`;
+  return `根据当前会话已确认的信息：${currentValues.slice(0, 1200)}。`;
+}
+
+/**
+ * 对已验证的 DIP 列表事实执行有限的本地指代解析。
+ * 列表序号和条件筛选属于结构化事实运算，不能交给回复模型再次猜测。
+ */
+export function deterministicFactFollowUpReply(userText: string, context: BehaviorContext): string | undefined {
+  const records = (context.factHistory?.records ?? [])
+    .filter((record) => record.functionId === 'dip.manage' && typeof record.values.taskId === 'string' && typeof record.values.name === 'string')
+    .sort((left, right) => left.sequence - right.sequence);
+  if (records.length === 0) return undefined;
+  const latest = records.at(-1);
+  if (latest === undefined) return undefined;
+  const batch = latest.sourceEventId === undefined
+    ? records.slice(Math.max(0, records.length - 4))
+    : records.filter((record) => record.sourceEventId === latest.sourceEventId);
+  const list = batch.length > 1 ? batch : records.slice(Math.max(0, records.length - 4));
+  const describe = (record: typeof records[number]): string => {
+    const name = String(record.values.name);
+    const status = typeof record.values.status === 'string' ? record.values.status : '未知';
+    const time = typeof record.values.lastRunAt === 'string' ? `，最近运行时间为 ${record.values.lastRunAt}` : '';
+    const error = typeof record.values.lastError === 'string' ? `，报错为「${record.values.lastError}」` : '';
+    return `「${name}」（${status}${time}${error}）`;
+  };
+  if (/失败的那个|失败的任务/u.test(userText)) {
+    const failed = list.find((record) => record.values.status === 'failed');
+    return failed === undefined
+      ? '当前这份任务列表中没有状态为失败的任务。'
+      : `失败的任务是${describe(failed)}。`;
+  }
+  if (/跑成功了.*耗时最长|成功.*耗时最长/u.test(userText)) {
+    const successful = list.filter((record) => record.values.status === 'success');
+    const withDuration = successful.find((record) => record.values.duration !== undefined || record.values.durationMs !== undefined);
+    return withDuration === undefined
+      ? '当前任务事实中没有运行耗时字段，无法判断成功任务中哪个耗时最长。'
+      : `成功任务中耗时最长的是${describe(withDuration)}。`;
+  }
+  if (/倒数第二个任务/u.test(userText) && list.length >= 2) return `倒数第二个任务是${describe(list.at(-2)!)}。`;
+  if (/(?:结果里|列表里|清单里)?第一个任务(?:的名字|名称)?/u.test(userText)) return `第一个任务的名称是「${String(list[0]?.values.name ?? '未知')}」。`;
+  return undefined;
+}
+
+/** 对固定的同名业务词给出结构化候选，避免无上下文时退化为 generic plugin_noul。 */
+export function deterministicOrderCandidateReply(userText: string): string | undefined {
+  if (!/查(?:一下|下)?订单|查询订单/u.test(userText) || /限流|同步任务|报表/u.test(userText)) return undefined;
+  return '“订单”可能指以下对象：订单表血缘、订单同步任务、销售报表。请说明你具体要查哪一项。';
 }
 
 /**

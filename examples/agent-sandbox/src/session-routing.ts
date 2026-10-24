@@ -184,9 +184,10 @@ export class SandboxSessionRouting {
         }
         return { ok: false, reasonCode: 'reference_unresolved' };
       }
+      const scopedHistory = restrictToCurrentFactBatch(history, reference.relation);
       const result = resolveOrderedReferenceCandidates({
-        items: history.records.map((record) => ({ id: record.recordId, sequence: record.sequence, record })),
-        ...(history.focusRecordId === undefined ? {} : { focusId: history.focusRecordId })
+        items: scopedHistory.records.map((record) => ({ id: record.recordId, sequence: record.sequence, record })),
+        ...(scopedHistory.focusRecordId === undefined ? {} : { focusId: scopedHistory.focusRecordId })
       }, orderedReference(reference, scope));
       if (result.status === 'resolved') {
         resolved.push({ text: reference.text, record: result.item.record });
@@ -255,31 +256,62 @@ export class SandboxSessionRouting {
     const { traceId, route, frame, behaviorContext, userText, functionRecord, resolvedReferences } = context;
     const slots = mergeResolvedReferenceParams(mergeVerifiedFunctionSlots(frame.slots, behaviorContext, functionRecord.definition.inputSchema), resolvedReferences, route.functionId ?? frame.intent);
     const proposal = route.functionCallProposal;
-    const proposalCompatible = proposal !== undefined && isFunctionCallProposalCompatible(proposal.operation, frame.action, functionRecord.operations);
+    const forceTicketCreate = route.functionId === 'ticket.create' && /创建(?:一张|一个)?(?:工单|单子)|建(?:一张|一个)?(?:工单|单子)/u.test(userText);
+    const proposalCompatible = !forceTicketCreate && proposal !== undefined && isFunctionCallProposalCompatible(proposal.operation, frame.action, functionRecord.operations);
     // 当前语义帧和用户文本是本轮的最高优先级。route.propose 可能带有旧的或默认的
     // arguments（例如把上一轮 50/s 继续带成 300/s），不能让它覆盖当前补充值；
     // proposal 只在当前动作仍未知时作为完整 Function Call 兜底。
     const hasCurrentOperation = typeof slots.operation === 'string' && slots.operation.trim().length > 0;
-    const proposalOperationSlots = proposalCompatible && proposal !== undefined && !hasCurrentOperation
-      ? { ...slots, operation: proposal.operation }
-      : slots;
+    const proposalOperationSlots = forceTicketCreate
+      ? { ...slots, operation: 'create' }
+      : proposalCompatible && proposal !== undefined && !hasCurrentOperation
+        ? { ...slots, operation: proposal.operation }
+        : slots;
     // Function Calling proposal 在 action=unknown 时会绕过 buildActionInput；高风险
     // 网关限流仍必须经过同一条明确目标值门禁，不能因模型把动作类型漏标而确认猜测值。
     if (route.functionId === 'api.gateway' && requiresGatewayRateClarification(userText)) {
       return { ok: false, result: gatewayRateClarificationResult() };
     }
-    const built = route.functionId === SELF_INTRODUCTION_FUNCTION_ID
+    const usesFunctionCallProposal = !forceTicketCreate && route.functionId !== SELF_INTRODUCTION_FUNCTION_ID
+      && proposalCompatible
+      && frame.action === 'unknown'
+      && proposal !== undefined;
+    let built = route.functionId === SELF_INTRODUCTION_FUNCTION_ID
       ? { input: buildSelfIntroductionInput(this.context.pluginHost.allDescriptors(), this.context.configuration.selfIntroduction.extraPrompt) }
-      : proposalCompatible && frame.action === 'unknown' && proposal !== undefined
+      : usesFunctionCallProposal
         ? buildFunctionCallInput(proposal)
-        : buildActionInput(route.functionId!, proposalOperationSlots, userText, frame.action, behaviorContext, functionRecord.operations);
+        : buildActionInput(route.functionId!, proposalOperationSlots, userText, forceTicketCreate ? 'execute' : frame.action, behaviorContext, functionRecord.operations);
     if ('reasonCode' in built && built.reasonCode === 'operation_conflict') return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: slots, requiredFields: ['operation'], conflictFields: ['operation'], fallback: { reasonCode: 'parameters_required', reply: '操作信息不一致，请确认后再试。' } });
     if ('missing' in built) {
       const requiredFields = schemaFields(functionRecord.definition.inputSchema, built.missing);
       if (requiredFields.length === 0) return { ok: false, result: { status: 'clarification', reply: `还缺少必要信息（${built.missing.join('、')}），请补充完整后再试。`, reasonCode: built.reasonCode } };
       return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: slots, requiredFields });
     }
-    if (!validateJsonSchemaValue(functionRecord.definition.inputSchema, built.input).ok) return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: built.input });
+    if (!validateJsonSchemaValue(functionRecord.definition.inputSchema, built.input).ok) {
+      // 模型产生的所有动作参数都只是不可信候选；若合并后的输入与固定
+      // Function Schema 不符，丢弃整组非法字段，并基于本轮用户文本重建。
+      // 这样不会把 description 等旧/幻觉字段直接带进参数收集，同时仍保持
+      // 同一个已验证 Function 和已校验的 operation 边界。
+      if (route.functionId !== SELF_INTRODUCTION_FUNCTION_ID) {
+        const repairedSlots = proposal !== undefined && proposalCompatible
+          ? { ...slots, operation: proposal.operation }
+          : proposalOperationSlots;
+        const builtOperation = 'input' in built && typeof built.input === 'object' && built.input !== null && !Array.isArray(built.input) && typeof (built.input as Record<string, unknown>).operation === 'string'
+          ? (built.input as Record<string, unknown>).operation
+          : undefined;
+        const proposalIsAction = proposal !== undefined && proposalCompatible;
+        const builtOperationIsAction = typeof builtOperation === 'string' && functionRecord.operations.some((operation) => operation.name === builtOperation && operation.kind === 'action');
+        const repairedAction = frame.action === 'unknown' && (proposalIsAction || builtOperationIsAction) ? 'execute' : frame.action;
+        const repaired = buildActionInput(route.functionId!, repairedSlots, userText, repairedAction, behaviorContext, functionRecord.operations);
+        if ('input' in repaired && validateJsonSchemaValue(functionRecord.definition.inputSchema, repaired.input).ok) return { ok: true, input: repaired.input };
+        if ('reasonCode' in repaired && repaired.reasonCode === 'operation_conflict') return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: slots, requiredFields: ['operation'], conflictFields: ['operation'], fallback: { reasonCode: 'parameters_required', reply: '操作信息不一致，请确认后再试。' } });
+        if ('missing' in repaired) {
+          const requiredFields = schemaFields(functionRecord.definition.inputSchema, repaired.missing);
+          if (requiredFields.length > 0) return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: slots, requiredFields });
+        }
+      }
+      return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: built.input });
+    }
     return { ok: true, input: built.input };
   }
 
@@ -529,6 +561,34 @@ function restrictToPendingCandidates(history: NonNullable<BehaviorContext['factH
   const records = history.records.filter((record) => candidateIds.has(record.recordId));
   const focusRecordId = pendingReference.anchorRecordId && candidateIds.has(pendingReference.anchorRecordId) ? pendingReference.anchorRecordId : undefined;
   return focusRecordId === undefined ? { records } : { records, focusRecordId };
+}
+
+/**
+ * 相对列表引用优先绑定当前结果批次，避免单会话中“第一个/最后一个”跨场景串到旧事实。
+ * 多条 factRecords 通常共享同一个 sourceEventId；单条结果则退回到当前焦点 Function
+ * 的连续事实段，从而覆盖同一轮连续创建的两张工单等场景。
+ */
+function restrictToCurrentFactBatch(history: NonNullable<BehaviorContext['factHistory']>, relation: HistoricalSemanticReference['relation']): NonNullable<BehaviorContext['factHistory']> {
+  if (!['first', 'last', 'previous', 'next', 'offset'].includes(relation)) return history;
+  const records = [...history.records].sort((left, right) => left.sequence - right.sequence);
+  if (records.length <= 1) return history;
+  const focusIndex = history.focusRecordId === undefined
+    ? records.length - 1
+    : records.findIndex((record) => record.recordId === history.focusRecordId);
+  const end = focusIndex >= 0 ? focusIndex : records.length - 1;
+  const focus = records[end];
+  if (focus === undefined) return history;
+  const sourceBatch = records.filter((record) => record.sourceEventId === focus.sourceEventId && record.functionId === focus.functionId);
+  if (sourceBatch.length > 1) {
+    const focusRecordId = history.focusRecordId && sourceBatch.some((record) => record.recordId === history.focusRecordId) ? history.focusRecordId : sourceBatch.at(-1)?.recordId;
+    return { records: sourceBatch, ...(focusRecordId === undefined ? {} : { focusRecordId }) };
+  }
+  let start = end;
+  while (start > 0 && records[start - 1]?.functionId === focus.functionId) start -= 1;
+  const contiguous = records.slice(start, end + 1);
+  if (contiguous.length <= 1) return history;
+  const focusRecordId = history.focusRecordId && contiguous.some((record) => record.recordId === history.focusRecordId) ? history.focusRecordId : contiguous.at(-1)?.recordId;
+  return { records: contiguous, ...(focusRecordId === undefined ? {} : { focusRecordId }) };
 }
 
 /** 把有限候选转换为可持久化的通用待解析引用。 */

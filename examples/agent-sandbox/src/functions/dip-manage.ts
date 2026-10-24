@@ -163,7 +163,8 @@ export const dipManageHandler: FunctionHandler = async (input) => {
       taskId: String(task.taskId ?? ''),
       name: String(task.name ?? ''),
       status: String(task.status ?? ''),
-      ...(task.lastRunAt === undefined ? {} : { lastRunAt: String(task.lastRunAt) })
+      ...(task.lastRunAt === undefined ? {} : { lastRunAt: String(task.lastRunAt) }),
+      ...(task.lastError === undefined ? {} : { lastError: String(task.lastError) })
     }));
     return succeed('list', { tasks: [...DIP_TASKS], summary: `共 ${String(DIP_TASKS.length)} 个集成任务，${String(failed)} 个失败，1 个运行中` }, {}, factRecords);
   }
