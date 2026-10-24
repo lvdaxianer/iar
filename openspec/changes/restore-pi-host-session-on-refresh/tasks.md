@@ -17,7 +17,7 @@
 
 ## 4. Integration verification
 
-- [ ] 4.1 Run OpenSpec strict validation, focused Pi Host tests, TypeScript build, and the full test suite; record any failures and fix them before marking the change complete.
+- [x] 4.1 Run OpenSpec strict validation, focused Pi Host tests, TypeScript build, and the full test suite; record any failures and fix them before marking the change complete.
 
 ## Workflow follow-up
 
