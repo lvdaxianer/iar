@@ -37,6 +37,81 @@ export type FactRelationCandidateResult =
   | { status: 'ambiguous'; candidates: VerifiedFactRecord[] }
   | { status: 'unresolved'; reason: FactRelationFailure };
 
+/** 两个有序上下文集合共用的引用作用域。 */
+export type OrderedReferenceScope = 'conversation_turn' | 'fact_history';
+
+/** 模型输出的有序上下文关系，不携带业务值或执行权限。 */
+export type OrderedReference = {
+  scope: OrderedReferenceScope;
+  relation: FactRelation;
+  anchorId?: string;
+  anchorSequence?: number;
+  targetId?: string;
+  targetSequence?: number;
+  offset?: number;
+};
+
+/** 有序上下文集合的最小安全投影。 */
+export type OrderedReferenceItem = { id: string; sequence: number };
+
+/** 通用有序关系解析结果。 */
+export type OrderedReferenceCandidateResult<T extends OrderedReferenceItem> =
+  | { status: 'resolved'; item: T }
+  | { status: 'ambiguous'; candidates: T[] }
+  | { status: 'unresolved'; reason: 'empty_history' | 'missing_anchor' | 'invalid_anchor' | 'invalid_target' | 'invalid_offset' | 'out_of_range' };
+
+/**
+ * 在调用方选定的有序集合中解析模型引用。
+ * 集合由调用方按 scope 选择，解析器不会从 text、另一集合或业务字段猜测目标。
+ */
+export function resolveOrderedReferenceCandidates<T extends OrderedReferenceItem>(input: { items: readonly T[]; focusId?: string }, reference: OrderedReference): OrderedReferenceCandidateResult<T> {
+  const items = [...input.items].sort((left, right) => left.sequence - right.sequence);
+  if (items.length === 0) return { status: 'unresolved', reason: 'empty_history' };
+  if (reference.relation === 'offset' && !validOffset(reference.offset)) return { status: 'unresolved', reason: 'invalid_offset' };
+  const direct = directTarget(items, reference);
+  if (direct.status !== 'none') return direct.result;
+  if (reference.relation === 'first') return orderedResultAt(items, 0);
+  if (reference.relation === 'last') return orderedResultAt(items, items.length - 1);
+  const anchor = resolveAnchor(items, input.focusId, reference);
+  if (anchor.status !== 'resolved') return anchor;
+  return orderedResultAt(items, orderedRelationIndex(reference, anchor.index));
+}
+
+type DirectTargetResult<T extends OrderedReferenceItem> = { status: 'none' } | { status: 'resolved'; result: OrderedReferenceCandidateResult<T> };
+
+/** 解析模型直接给出的目标；target 只能和 current 关系组合。 */
+function directTarget<T extends OrderedReferenceItem>(items: T[], reference: OrderedReference): DirectTargetResult<T> {
+  if (reference.targetId === undefined && reference.targetSequence === undefined) return { status: 'none' };
+  if (reference.relation !== 'current') return { status: 'resolved', result: { status: 'unresolved', reason: 'invalid_target' } };
+  const item = items.find((candidate) => (reference.targetId === undefined || candidate.id === reference.targetId) && (reference.targetSequence === undefined || candidate.sequence === reference.targetSequence));
+  return item === undefined ? { status: 'resolved', result: { status: 'unresolved', reason: 'invalid_target' } } : { status: 'resolved', result: { status: 'resolved', item: structuredClone(item) } };
+}
+
+/** 解析显式锚点或当前焦点，并校验 ID 与序号必须指向同一项。 */
+function resolveAnchor<T extends OrderedReferenceItem>(items: T[], focusId: string | undefined, reference: OrderedReference): { status: 'resolved'; index: number } | { status: 'unresolved'; reason: 'missing_anchor' | 'invalid_anchor' } {
+  const anchorId = reference.anchorId ?? focusId;
+  const anchorSequence = reference.anchorSequence;
+  if (anchorId === undefined && anchorSequence === undefined) return { status: 'unresolved', reason: 'missing_anchor' };
+  const index = items.findIndex((item) => (anchorId === undefined || item.id === anchorId) && (anchorSequence === undefined || item.sequence === anchorSequence));
+  return index >= 0 ? { status: 'resolved', index } : { status: 'unresolved', reason: 'invalid_anchor' };
+}
+
+/** 将关系转换成有序集合中的目标位置。 */
+function orderedRelationIndex(reference: OrderedReference, anchorIndex: number): number | undefined {
+  if (reference.relation === 'current') return anchorIndex;
+  if (reference.relation === 'previous') return anchorIndex - 1;
+  if (reference.relation === 'next') return anchorIndex + 1;
+  if (reference.relation === 'offset') return anchorIndex + reference.offset!;
+  return undefined;
+}
+
+/** 将目标位置转换成有界克隆结果。 */
+function orderedResultAt<T extends OrderedReferenceItem>(items: T[], index: number | undefined): OrderedReferenceCandidateResult<T> {
+  if (index === undefined) return { status: 'unresolved', reason: 'invalid_offset' };
+  const item = items[index];
+  return item === undefined ? { status: 'unresolved', reason: 'out_of_range' } : { status: 'resolved', item: structuredClone(item) };
+}
+
 /** 按有序事实链解析一个通用历史关系。 */
 export function resolveFactRelation(history: VerifiedFactHistory, reference: FactRelationReference): FactRelationResult {
   const records = orderedRecords(history);

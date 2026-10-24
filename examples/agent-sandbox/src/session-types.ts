@@ -9,7 +9,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import type { ActionDefinition, ActionResult, BehaviorContext, CollectionState, EventEnvelope, JsonValue, PendingReference, VerifiedFactRecord } from '@iar/contracts';
+import type { ActionDefinition, ActionResult, BehaviorContext, CollectionState, ConversationTurn, EventEnvelope, JsonValue, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { DecisionBackend, SemanticFrame } from '@iar/runtime';
 import type { PluginDescriptor } from '@iar/plugins';
 import type { TurnTimingSummary } from './turn-timing.js';
@@ -127,9 +127,18 @@ export type ResolvedFactReference = {
   record: VerifiedFactRecord;
 };
 
+/** 运行时解析出的有序会话轮次引用，只能用于只读上下文回答。 */
+export type ResolvedConversationTurnReference = {
+  text: string;
+  turn: ConversationTurn;
+};
+
+/** 两个有序上下文集合的统一解析结果。 */
+export type ResolvedContextReference = ResolvedFactReference | ResolvedConversationTurnReference;
+
 /** 历史引用未唯一收敛时返回的安全候选状态。 */
 export type ReferenceResolution =
-  | { ok: true; references: ResolvedFactReference[] }
+  | { ok: true; references: ResolvedContextReference[] }
   | { ok: false; reasonCode: 'reference_unresolved' | 'reference_ambiguous'; pendingReference?: PendingReference; candidates?: VerifiedFactRecord[] };
 
 /** 单轮执行阶段的内部结果联合。 */

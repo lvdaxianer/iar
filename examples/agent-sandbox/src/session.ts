@@ -249,7 +249,7 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  protected async finishNormalFallback(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; timing: TurnTimingTracker; evidence: RouteEvidence; resolvedReferences?: import('./session-types.js').ResolvedFactReference[]; pendingReference?: PendingReference; referenceCandidates?: VerifiedFactRecord[] }): Promise<TurnResult> {
+  protected async finishNormalFallback(context: { userText: string; traceId: string; behaviorContext: BehaviorContext; timing: TurnTimingTracker; evidence: RouteEvidence; resolvedReferences?: import('./session-types.js').ResolvedContextReference[]; pendingReference?: PendingReference; referenceCandidates?: VerifiedFactRecord[] }): Promise<TurnResult> {
     const { userText, traceId, behaviorContext, timing, evidence, resolvedReferences, pendingReference, referenceCandidates } = context;
     if (!hasVerifiedFactsForFollowUp(behaviorContext, evidence, userText) && !matchesPendingOption(behaviorContext, userText)) await this.markUnresolved(evidence.reasonCode, pendingReference);
     const currentBehaviorContext = this.projector.current();
@@ -275,8 +275,8 @@ export class IarSandboxSession extends SandboxSessionCore {
     });
     timing.end('response.generate', reply === undefined ? 'failed' : 'completed');
     if (reply === undefined) return { status: 'failed', reply: '模型回复超限，回复未完成。', route: evidence, reasonCode: 'model_response_too_large' };
-    const focusedRecord = resolvedReferences?.at(-1)?.record;
-    if (focusedRecord !== undefined) await this.focusFactRecord(focusedRecord.recordId);
+    const focusedReference = resolvedReferences?.findLast((reference) => 'record' in reference);
+    if (focusedReference !== undefined && 'record' in focusedReference) await this.focusFactRecord(focusedReference.record.recordId);
     this.replies.pushMessages(userText, reply);
     return { status: 'clarification', reply, route: evidence, reasonCode: evidence.reasonCode, ...(resolvedReferences && resolvedReferences.length > 0 ? { disposition: 'context_answered' as const } : {}) };
   }

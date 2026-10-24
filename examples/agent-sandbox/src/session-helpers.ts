@@ -108,9 +108,10 @@ export function buildActionInput(functionId: string, slots: Record<string, JsonV
 }
 
 /** 将同一 Function 的已解析列表事实按字段名并入参数，当前轮槽位保持最高优先级。 */
-export function mergeResolvedReferenceParams(slots: Record<string, JsonValue>, references: readonly import('./session-types.js').ResolvedFactReference[], functionId: string): Record<string, JsonValue> {
+export function mergeResolvedReferenceParams(slots: Record<string, JsonValue>, references: readonly import('./session-types.js').ResolvedContextReference[], functionId: string): Record<string, JsonValue> {
   const params = isRecord(slots.params) ? { ...slots.params } : {};
   for (const reference of references) {
+    if (!('record' in reference)) continue;
     if (reference.record.functionId !== functionId) continue;
     for (const [field, value] of Object.entries(reference.record.values)) {
       if (typeof value === 'string' && value.length > 0 && !Object.hasOwn(params, field)) params[field] = value;

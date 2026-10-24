@@ -8,7 +8,7 @@ import type { ActionDefinition, ActionResult, BehaviorContext, CollectionState, 
 import type { SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
 import type { PluginDescriptor } from '@iar/plugins';
-import { withReplySource, type ExecuteTurnOutcome, type ExtractFrameOutcome, type PendingActionContext, type ReferenceResolution, type ResolvedFactReference, type RouteEvidence, type StreamEvent, type StructuredInput, type TurnResult } from './session-types.js';
+import { withReplySource, type ExecuteTurnOutcome, type ExtractFrameOutcome, type PendingActionContext, type ReferenceResolution, type ResolvedContextReference, type RouteEvidence, type StreamEvent, type StructuredInput, type TurnResult } from './session-types.js';
 import { recordTurnTiming, TurnTimingTracker } from './turn-timing.js';
 import type { SandboxMode } from './session-types.js';
 
@@ -37,9 +37,9 @@ export type StreamTurnContext = {
   functionDescriptors: PluginDescriptor[];
   routeFrame: (traceId: string, runId: string, frame: SemanticFrame, behaviorContext: BehaviorContext, currentMessage: string, recentMessages: Array<{ role: string; text: string }>, selectedDescriptor?: PluginDescriptor) => Promise<RouteResult>;
   resolveReferences: (frame: SemanticFrame, behaviorContext: BehaviorContext) => ReferenceResolution;
-  prepareAndExecute: (context: { runId: string; traceId?: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext; resolvedReferences?: readonly ResolvedFactReference[] }) => Promise<ExecuteTurnOutcome>;
+  prepareAndExecute: (context: { runId: string; traceId?: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext; resolvedReferences?: readonly ResolvedContextReference[] }) => Promise<ExecuteTurnOutcome>;
   /** 兜底与执行后回复分别保留增量回调和超限错误。 */
-  fallbackReplyStreamed: (context: { traceId: string; runId: string; userText: string; reasonCode: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[]; resolvedReferences?: ResolvedFactReference[] }, onDelta: (delta: string) => void, onReasoningDelta?: (delta: string) => void) => Promise<string>;
+  fallbackReplyStreamed: (context: { traceId: string; runId: string; userText: string; reasonCode: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[]; resolvedReferences?: ResolvedContextReference[] }, onDelta: (delta: string) => void, onReasoningDelta?: (delta: string) => void) => Promise<string>;
   generateReplyStreamed: (context: { traceId: string; runId: string; userText: string; action: ActionDefinition; actionResult: ActionResult; operationKind: 'read' | 'action'; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[] }, onDelta: (delta: string) => void, onReasoningDelta?: (delta: string) => void) => Promise<string>;
   currentBehaviorContext: () => BehaviorContext;
   focusFactRecord: (recordId: string) => Promise<void>;
@@ -266,7 +266,7 @@ export class SandboxSessionStreamTurn {
    * @returns 澄清或超限失败结果
    * @author lvdaxianer@yeah.net @date 2026-10-18
    */
-  protected async finishStreamFallback(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; timing: TurnTimingTracker; evidence: RouteEvidence; resolvedReferences?: ResolvedFactReference[]; pendingReference?: PendingReference; referenceCandidates?: VerifiedFactRecord[] }): Promise<TurnResult> {
+  protected async finishStreamFallback(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; behaviorContext: BehaviorContext; timing: TurnTimingTracker; evidence: RouteEvidence; resolvedReferences?: ResolvedContextReference[]; pendingReference?: PendingReference; referenceCandidates?: VerifiedFactRecord[] }): Promise<TurnResult> {
     const { userText, traceId, emit, behaviorContext, timing, evidence, resolvedReferences, pendingReference, referenceCandidates } = context;
     if (!hasVerifiedFactsForFollowUp(behaviorContext, evidence, userText) && !matchesPendingOption(behaviorContext, userText)) await this.context.markUnresolved(evidence.reasonCode, pendingReference);
     const currentBehaviorContext = this.context.currentBehaviorContext();
@@ -296,8 +296,8 @@ export class SandboxSessionStreamTurn {
     timing.end('response.reasoning', 'completed');
     timing.end('response.generate', reply === undefined ? 'failed' : 'completed');
     if (reply === undefined) return { status: 'failed', reply: '模型回复超限，回复未完成。', route: evidence, reasonCode: 'model_response_too_large' };
-    const focusedRecord = resolvedReferences?.at(-1)?.record;
-    if (focusedRecord !== undefined) await this.context.focusFactRecord(focusedRecord.recordId);
+    const focusedReference = resolvedReferences?.findLast((reference) => 'record' in reference);
+    if (focusedReference !== undefined && 'record' in focusedReference) await this.context.focusFactRecord(focusedReference.record.recordId);
     this.context.pushMessages(userText, reply);
     return { status: 'clarification', reply, route: evidence, reasonCode: evidence.reasonCode, ...(resolvedReferences && resolvedReferences.length > 0 ? { disposition: 'context_answered' as const } : {}) };
   }
