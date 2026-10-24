@@ -7,7 +7,8 @@
  */
 import { PI_BRIDGE_VERSION, isBridgeDisposition, isBridgeReplySource, type BridgeCapabilityContext, type BridgeConfirmRequest, type BridgeConfirmResponse, type BridgeInputRequest, type BridgeInputResponse, type BridgeInputStreamEvent, type BridgeOpenRequest, type BridgeOpenResponse, type BridgePendingAction, type BridgeRouteEvidence, type BridgeStateResponse, type BridgeTimingSummary, type IarSessionId } from './protocol.js';
 
-const DEFAULT_TIMEOUT_MS = 10_000;
+// 覆盖真实模型的一次完整 Bridge 请求：语义抽取、路由/回复生成和 SSE 收尾可能各自耗时，10 秒会在模型仍处于思考阶段时提前截断单会话。
+const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_TIMEOUT_MS = 60_000;
 const BRIDGE_TIMEOUT_ENV = 'IAR_PI_BRIDGE_TIMEOUT_MS';
 

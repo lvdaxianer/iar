@@ -34,5 +34,5 @@
 ## 3. Full real-model verification
 
 - [x] 3.1 Run focused RED/GREEN tests, build, lint and relevant Agent Sandbox integration tests after each repair.
-- [ ] 3.2 Run all 50 attached scenarios through one continuous 8878 `mode=brain` session, handling only the confirmations required by the scenario semantics, and record pass/acceptable/fail evidence.
+- [x] 3.2 Run all 50 attached scenarios through one continuous 8878 `mode=brain` session, handling only the confirmations required by the scenario semantics, and record pass/acceptable/fail evidence. Final evidence: `/tmp/iar-real-50-one-session-after-pending-fix.json`, `scenarioCount=50`, one `piSessionId`, and no empty event rows after the bridge timeout, confirmation transcript, and pending-preservation repairs.
 - [ ] 3.3 Complete plan-implementation audit, code review, per-task audit, commit and integration into `master`.

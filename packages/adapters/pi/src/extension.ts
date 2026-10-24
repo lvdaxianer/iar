@@ -117,7 +117,8 @@ async function confirmPending(pi: PiExtensionAPI, client: IarBridgeClientLike, s
 /** 将 IAR 结果转换为 Pi input 返回值。 */
 function presentResponse(pi: PiExtensionAPI, state: ExtensionState, response: BridgeInputResponse, context: PiExtensionContext): PiInputResult {
   if (response.disposition === 'pass_through') return { action: 'continue' };
-  state.pendingActionId = response.pending?.actionId;
+  // 待确认期间的新输入通常不携带 Action 摘要；已有 actionId 时保留它，避免后续确认/取消失去服务端动作。
+  if (response.pending !== undefined || state.pendingActionId === undefined) state.pendingActionId = response.pending?.actionId;
   presentMessage(pi, context, response.reply ?? 'IAR 已处理当前请求。', response.disposition, response.replySource);
   return { action: 'handled' };
 }
