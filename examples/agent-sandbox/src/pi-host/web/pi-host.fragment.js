@@ -19,6 +19,8 @@
   let piHostPendingRoute = null;
   let piHostPendingTiming = null;
   let piHostPendingConfirm = null;
+  let piHostStructuredContext = null;
+  let piHostWorkflowState = null;
   let piHostSessionInfo = null;
   let piHostExpectingEntry = false;
   let piHostEventSource = null;
@@ -219,7 +221,7 @@
    * @date 2026-10-22
    */
   function buildPiHostContextText() {
-    return JSON.stringify(buildPiHostContextSnapshot({ session: { sessionId: piHostSessionId, mode: piHostSessionInfo && piHostSessionInfo.mode, bridgeUrl: piHostSessionInfo && piHostSessionInfo.bridgeUrl }, route: piHostPendingRoute, timing: piHostPendingTiming, pending: piHostPendingConfirm, events: piHostEvents }), null, 2);
+    return JSON.stringify(buildPiHostContextSnapshot({ session: { sessionId: piHostSessionId, mode: piHostSessionInfo && piHostSessionInfo.mode, bridgeUrl: piHostSessionInfo && piHostSessionInfo.bridgeUrl }, route: piHostPendingRoute, timing: piHostPendingTiming, pending: piHostPendingConfirm, structuredContext: piHostStructuredContext, workflowState: piHostWorkflowState, events: piHostEvents }), null, 2);
   }
 
   /** 使用隐藏文本框兼容不支持 Clipboard API 的本地浏览器。
@@ -247,11 +249,12 @@
    * @date 2026-10-22
    */
   function copyPiHostContext() {
+    if (!piHostStructuredContext || !piHostWorkflowState) { setPiHostContextCopyStatus('当前会话状态尚未同步，请稍后重试'); return; }
     var text = buildPiHostContextText();
     var copyPromise = navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(text) : Promise.resolve(copyPiHostContextFallback(text));
     copyPromise.then(function (copied) {
       if (copied === false) throw new Error('copy_failed');
-      setPiHostContextCopyStatus('已复制结构化上下文');
+      setPiHostContextCopyStatus('已复制结构化上下文 + Workflow State');
     }).catch(function () { setPiHostContextCopyStatus('复制失败，请检查浏览器剪贴板权限'); });
   }
 
@@ -591,6 +594,13 @@
       if (pending) { showPiHostConfirmBox(pending); recordPiHostEvent('确认', '等待 ' + pending.actionId); }
       else { clearPiHostConfirmBoxes(); recordPiHostEvent('确认', '已清空'); }
     });
+    es.addEventListener('state', function (event) {
+      var state;
+      try { state = JSON.parse(event.data); } catch (err) { return; }
+      piHostStructuredContext = state.structuredContext || null;
+      piHostWorkflowState = state.workflowState || null;
+      recordPiHostEvent('状态', state.workflowState && state.workflowState.currentState || '-');
+    });
     es.addEventListener('notify', function (event) {
       var notification = JSON.parse(event.data);
       if (piHostBubble && !piHostBubble.gotDelta) removePiHostBubble();
@@ -617,6 +627,8 @@
     piHostPendingRoute = null;
     piHostPendingTiming = null;
     piHostPendingConfirm = null;
+    piHostStructuredContext = null;
+    piHostWorkflowState = null;
     piHostSessionInfo = null;
     piHostEvents = [];
     document.getElementById('eventList').innerHTML = '';

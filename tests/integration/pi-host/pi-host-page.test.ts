@@ -46,14 +46,36 @@ test('Pi host 结构化上下文快照版本化且不含敏感字段', () => {
     route: { functionId: 'ticket.read', pluginId: 'ticket-v1', disposition: 'handled', semanticIntent: '查询工单', semanticConfidence: 0.9, prompt: '用户原话' },
     timing: { traceId: 'trace-1', durationMs: 1234, stages: [{ stage: 'response.generate', durationMs: 999, rawPrompt: 'secret' }] },
     pending: { actionId: 'action-1', runId: 'run-1', functionId: 'ticket.create', pluginId: 'ticket-v1', riskLevel: 'high', input: { title: '不要复制' } },
+    structuredContext: {
+      schemaVersion: 'iar.pi-structured-context/v1',
+      subject: { type: 'ticket', id: 'ticket-1', status: 'resolved', source: 'context', sourceEventId: 'event-1' },
+      intent: 'ticket.lookup',
+      action: { name: 'lookup', status: 'resolved' },
+      route: { functionId: 'ticket.lookup', pluginId: 'ticket-v1' },
+      slots: { title: { status: 'resolved', sourceEventId: 'event-1', value: '不要复制' } },
+      workflow: { workflowId: 'ticket-v1', currentStep: 'normal', status: 'running' },
+      pending: { kind: 'input', status: 'none' },
+      confirmation: { state: 'not_required', scopeHash: '不要复制' },
+      factHistory: { records: [{ recordId: 'fact-1', sequence: 1, sourceEventId: 'event-1', functionId: 'ticket.lookup', pluginId: 'ticket-v1', values: { ticketId: 'ticket-1' }, createdAt: '2026-10-24T00:00:00.000Z' }], focusRecordId: 'fact-1' },
+      conversationTurns: { turns: [{ turnId: 'turn-1', sequence: 1, userText: '不要复制', assistantText: '不要复制', outcome: 'completed', actionTaken: false, completedAt: '2026-10-24T00:00:00.000Z' }], focusTurnId: 'turn-1' },
+      summary: { version: 'summary-v1', eventId: 'event-1', text: '不要复制' },
+      integrity: { criticalFieldHash: 'hash-1', lastEventId: 'event-1' }
+    },
+    workflowState: {
+      mapVersion: 'iar.workflow-map/v1', currentState: 'normal', activeState: 'normal', outcome: 'none', workflowStatus: 'running', allowedEvents: ['input'],
+      pending: { kind: 'input', status: 'none' }, confirmation: { state: 'not_required', scopeHash: '不要复制' }, route: { functionId: 'ticket.lookup', pluginId: 'ticket-v1' }
+    },
     events: [{ name: '路由', detail: 'handled' }, { name: '通知', detail: '不要复制用户内容' }],
   });
   assert.equal(snapshot.schemaVersion, 'iar.pi-host-context/v1');
   assert.deepEqual(JSON.parse(JSON.stringify(snapshot.route)), { functionId: 'ticket.read', pluginId: 'ticket-v1', disposition: 'handled', operationKind: '-', replySource: '-' });
   assert.deepEqual(JSON.parse(JSON.stringify(snapshot.timing)), { traceId: 'trace-1', durationMs: 1234, stages: [{ stage: 'response.generate', durationMs: 999, firstTokenMs: null }] });
   assert.deepEqual(JSON.parse(JSON.stringify(snapshot.pending)), { actionId: 'action-1', runId: 'run-1', functionId: 'ticket.create', pluginId: 'ticket-v1', riskLevel: 'high' });
+  assert.equal((snapshot.structuredContext as { intent: string }).intent, 'ticket.lookup');
+  assert.deepEqual(JSON.parse(JSON.stringify((snapshot.structuredContext as { conversationTurns: unknown }).conversationTurns)), { turns: [{ turnId: 'turn-1', sequence: 1, outcome: 'completed', actionTaken: false, completedAt: '2026-10-24T00:00:00.000Z' }], focusTurnId: 'turn-1' });
+  assert.equal((snapshot.workflowState as { currentState: string }).currentState, 'normal');
   assert.deepEqual(JSON.parse(JSON.stringify(snapshot.events)), [{ name: '路由', detail: 'handled' }, { name: '通知', detail: '-' }]);
-  assert.doesNotMatch(JSON.stringify(snapshot), /prompt|apiKey|rawPrompt|reasoning|input|不要复制/);
+  assert.doesNotMatch(JSON.stringify(snapshot), /prompt|apiKey|rawPrompt|reasoning|userText|assistantText|scopeHash|不要复制/);
 });
 
 /* 首页响应必须自包含：无残留标记、无外链脚本样式，
@@ -135,6 +157,7 @@ test('Pi host 页面交互入口按职责拆分且有界', () => {
   assert.match(adapter, /clearSessionBtn'\)\.onclick = clearPiHostSession/);
   assert.match(adapter, /copyContextBtn'\)\.onclick = copyPiHostContext/);
   assert.match(adapter, /navigator\.clipboard/);
+  assert.match(adapter, /当前会话状态尚未同步，请稍后重试/);
 });
 
 /* 清空会话必须同时释放服务端上下文；DELETE 失败时仍要完成本地切换并给出回收提示。 */

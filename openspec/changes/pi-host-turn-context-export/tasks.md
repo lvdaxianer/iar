@@ -8,7 +8,7 @@
 ## 2. Pi Host 状态同步与复制快照
 
 - [x] 2.1 让 PiHostSession 在输入、确认/取消和重连后同步最新 Bridge state，并通过现有 SSE 通道发送状态；验证 `npm test -- tests/integration/pi-host/pi-host-session.test.ts` 通过且状态同步失败不改变既有业务处置。
-- [ ] 2.2 让页面复制动作导出当前单一会话的 `structuredContext`、`workflowState` 和既有诊断摘要，保留 Runtime 已有的有界逐轮上下文；补充敏感字段回归测试并验证 `npm test -- tests/integration/pi-host/pi-host-page.test.ts` 通过。
+- [x] 2.2 让页面复制动作导出当前单一会话的 `structuredContext`、`workflowState` 和既有诊断摘要，保留 Runtime 已有的有界逐轮上下文；补充敏感字段回归测试并验证 `npm test -- tests/integration/pi-host/pi-host-page.test.ts` 通过。
 
 ## 3. 变更验证与真实链路回归
 
