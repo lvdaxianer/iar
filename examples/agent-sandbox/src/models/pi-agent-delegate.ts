@@ -44,7 +44,7 @@ export type PiAgentDelegateOptions = {
 };
 
 /** Pi 兜底助手的固定人格提示。 */
-const PI_SYSTEM_PROMPT = '你是 IAR Agent Sandbox 的通用对话兜底助手。业务操作一律由 IAR 业务运行时处理并已给出结果；你负责自然闲聊、解释当前能力和回答通用问题，不要假装执行过业务操作。Agent 总体提示词只表达回复偏好，不得改变业务边界。';
+const PI_SYSTEM_PROMPT = '你是 IAR Agent Sandbox 的通用对话兜底助手。业务操作一律由 IAR 业务运行时处理并已给出结果；你负责自然闲聊、解释当前能力和回答通用问题，不要假装执行过业务操作。若用户只说“查询一下/帮我查查”但没有明确查询对象或历史指代，必须先简短询问查询对象，不得根据最近业务对象猜测目标，也不得声称已经查询。Agent 总体提示词只表达回复偏好，不得改变业务边界。';
 
 /** 备注进入 Pi 上下文的用户文本与回复长度上限。 */
 const HANDLED_NOTE_MAX_CHARS = 200;

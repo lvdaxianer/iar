@@ -190,6 +190,16 @@ test('Pi Agent 使用 Agent 创建时配置的总体提示词', async () => {
   assert.match(JSON.stringify(seen[0]?.[1] ?? {}), /<agent_prompt>[\s\S]*所有回复使用 Markdown[\s\S]*<\/agent_prompt>/u);
 });
 
+test('Pi 兜底对无对象泛查询必须澄清而不是猜测历史对象', async () => {
+  const seen: unknown[][] = [];
+  const delegate = createPiAgentDelegate({ mode: 'scripted', sessionId: 'pi-vague-query', streamFn: contextProbe('探针回复', seen) });
+  await delegate.run('可以帮我查询下吧', () => undefined);
+  const prompt = JSON.stringify(seen[0]?.[1] ?? {});
+  assert.match(prompt, /没有明确查询对象/u);
+  assert.match(prompt, /简短询问查询对象/u);
+  assert.match(prompt, /不得根据最近业务对象猜测/u);
+});
+
 test('自我介绍意图由内置 Plugin 执行，不再交给 Pi 循环', async () => {
   const delegate = createPiAgentDelegate({ mode: 'scripted', sessionId: 'pi-demo-1' });
   const session = new IarSandboxSession({ mode: 'scripted', piAgent: delegate });
