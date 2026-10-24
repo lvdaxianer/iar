@@ -12,8 +12,8 @@
 
 ## 3. Browser reconnect and clear behavior
 
-- [ ] 3.1 Add a failing page-template regression test for the explicit clear request and reconnect confirm handling; verify the test fails against the current fragment.
-- [ ] 3.2 Update the Pi Host fragment to delete the old server session before rotating the local ID and to accept reconnect state safely; verify page-template and Pi Host integration tests pass.
+- [x] 3.1 Add a failing page-template regression test for the explicit clear request and reconnect confirm handling; verify the test fails against the current fragment.
+- [x] 3.2 Update the Pi Host fragment to delete the old server session before rotating the local ID and to accept reconnect state safely; verify page-template and Pi Host integration tests pass.
 
 ## 4. Integration verification
 

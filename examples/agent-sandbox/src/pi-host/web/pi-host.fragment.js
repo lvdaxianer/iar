@@ -497,6 +497,18 @@
       .then(function (res) { if (!res.ok) throw new Error('request_failed'); return res.json(); });
   }
 
+  /**
+   * 发送 Pi Host 会话删除请求；非成功响应交给调用方处理。
+   * @param path - DELETE 路径
+   * @returns 解析后的响应对象 Promise
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-24
+   */
+  function piHostDelete(path) {
+    return fetch(path, { method: 'DELETE' })
+      .then(function (res) { if (!res.ok) throw new Error('request_failed'); return res.json(); });
+  }
+
   /** 提交一轮用户输入；handled 由 entry 事件渲染，continue 由 piDone 收尾。
    * 网络失败恢复输入文本，不自动重试可能已经执行的输入。
    * @param text - 用户提交的消息
@@ -618,22 +630,38 @@
     highlightPiHostFlow([]);
   }
 
-  /** 清空会话：删除本页历史、换新会话标识并重连事件源。
-   * bridge 没有 reset 端点，旧服务端会话随旧连接关闭由服务端释放。
-   * 忙碌期间禁止清空，避免切断进行中的轮次；流式计时器一并停止。
+  /**
+   * 清空会话并先释放服务端会话；删除失败时仍切换到新会话并提示回收策略。
    * @returns 无返回值
    * @author lvdaxianer@yeah.net
-   * @date 2026-10-21
+   * @date 2026-10-24
    */
-  function clearPiHostSession() {
+  async function clearPiHostSession() {
     if (piHostBusy) return;
     if (!confirm('清空会话将删除本页聊天记录并建立全新会话，确定继续吗？')) return;
+    setPiHostBusy(true);
+    var oldSessionId = piHostSessionId;
+    if (piHostEventSource) piHostEventSource.close();
+    var notice = '';
+    try { await piHostDelete('/api/pi-host/session/' + encodeURIComponent(oldSessionId)); }
+    catch (err) { notice = '旧会话服务端清理失败，已建立新会话；旧会话将按空闲期限回收。'; }
+    resetPiHostSession(oldSessionId, notice);
+    setPiHostBusy(false);
+  }
+
+  /** 清理浏览器状态并建立新会话，服务端失败时保留可见恢复提示。
+   * @param oldSessionId - 被清理的旧会话标识
+   * @param notice - 服务端清理失败时的用户提示
+   * @returns 无返回值
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-24
+   */
+  function resetPiHostSession(oldSessionId, notice) {
     if (piHostBubble && piHostBubble.entryTimer) clearInterval(piHostBubble.entryTimer);
     try {
-      localStorage.removeItem(PI_HOST_HISTORY_PREFIX + piHostSessionId);
+      localStorage.removeItem(PI_HOST_HISTORY_PREFIX + oldSessionId);
       sessionStorage.removeItem(PI_HOST_SESSION_KEY);
     } catch (err) { /* 尽力清理，失败时新会话仍会建立。 */ }
-    if (piHostEventSource) piHostEventSource.close();
     piHostSessionId = readPiHostSessionId();
     piHostExpectingEntry = false;
     removePiHostBubble();
@@ -641,6 +669,7 @@
     resetPiHostDebugPanel();
     piHostMessagesEl.innerHTML = '';
     appendMsg('bot', PI_HOST_WELCOME);
+    if (notice) appendMsg('bot', notice, '提示');
     connectPiHostEvents();
     recordPiHostEvent('会话', '已清空');
   }
