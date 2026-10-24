@@ -11,6 +11,7 @@ import { PI_BRIDGE_VERSION } from '@iar/pi-bridge';
 import { readSessionId, type RunOperation } from './http-reservation.js';
 import { SandboxSessionManager, SessionError } from './session-manager.js';
 import { logBridgeFailure } from './safe-log.js';
+import { projectBridgeContext } from './pi-bridge-context.js';
 import type { IarSandboxSession } from './session.js';
 import type { ConfirmResult, RouteEvidence, StreamEvent, TurnResult } from './session-types.js';
 
@@ -137,10 +138,11 @@ async function handleConfirmation(session: IarSandboxSession, request: FastifyRe
   return toConfirmResponse(sessionId, result);
 }
 
-/** 返回当前 IAR 会话的最小待确认状态。 */
+/** 返回当前 IAR 会话的待确认摘要、结构化上下文和 Workflow 状态。 */
 async function handleState(session: IarSandboxSession, sessionId: string): Promise<BridgeStateResponse> {
   const state = await session.state();
-  return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, ...(state.pending === null ? {} : { pending: toPendingAction(state.pending) }) };
+  const context = projectBridgeContext(state.context);
+  return { version: PI_BRIDGE_VERSION, iarSessionId: sessionId, ...(state.pending === null ? {} : { pending: toPendingAction(state.pending) }), ...context };
 }
 
 /** 将 IAR TurnResult 转成公开输入 response。 */

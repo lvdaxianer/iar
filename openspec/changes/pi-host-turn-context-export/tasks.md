@@ -3,7 +3,7 @@
 ## 1. Bridge 安全状态协议与投影
 
 - [x] 1.1 为 Bridge state 增加可选的 `structuredContext` 与 `workflowState` 安全契约、客户端校验及旧响应兼容测试；验证 `npm test -- tests/integration/pi-bridge/client.test.ts` 通过。
-- [ ] 1.2 从权威 `BehaviorContext` 和 Workflow 投影生成 Bridge state，保留有界事实/轮次元数据并过滤原始消息、槽位值、Action input、凭据和确认授权字段；补充 state 路由测试并验证 `npm test -- tests/integration/pi-bridge` 通过。
+- [x] 1.2 从权威 `BehaviorContext` 和 Workflow 投影生成 Bridge state，保留有界事实/轮次元数据并过滤原始消息、槽位值、Action input、凭据和确认授权字段；补充 state 路由测试并验证 `npm test -- tests/integration/pi-bridge` 通过。
 
 ## 2. Pi Host 状态同步与复制快照
 

@@ -50,6 +50,14 @@ test('IAR bridge handles business input and protects confirmation isolation', as
     const state = await server.app.inject({ method: 'GET', url: `/api/bridge/v1/sessions/${first}/state` });
     assert.equal(state.statusCode, 200);
     assert.equal(state.json().pending.actionId, pending.pending.actionId);
+    const stateBody = state.json() as { structuredContext: { schemaVersion: string; conversationTurns: { turns: Array<Record<string, unknown>> }; slots: Record<string, Record<string, unknown>>; factHistory: { records: Array<Record<string, unknown>> } }; workflowState: { mapVersion: string; currentState: string } };
+    assert.equal(stateBody.structuredContext.schemaVersion, 'iar.pi-structured-context/v1');
+    assert.equal(stateBody.workflowState.mapVersion, 'iar.workflow-map/v1');
+    assert.ok(Array.isArray(stateBody.structuredContext.conversationTurns.turns));
+    assert.ok(Array.isArray(stateBody.structuredContext.factHistory.records));
+    assert.equal(Object.values(stateBody.structuredContext.slots).some((slot) => 'value' in slot), false);
+    assert.equal(JSON.stringify(stateBody).includes('scopeHash'), false);
+    assert.equal(JSON.stringify(stateBody).includes('userText'), false);
     const second = await openBridgeSession(server, 'pi-session-b');
     const secondPendingResponse = await server.app.inject({ method: 'POST', url: `/api/bridge/v1/sessions/${second}/input`, payload: { text: '帮我创建工单' } });
     const secondPending = secondPendingResponse.json() as { pending: { actionId: string } };

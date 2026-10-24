@@ -19,6 +19,7 @@
 | `buildPiHostApp` | `POST /api/pi-host/chat` | [提交聊天输入](#23-提交聊天输入) | 已覆盖 |
 | `buildPiHostApp` | `POST /api/pi-host/confirm` | [确认或取消动作](#24-确认或取消动作) | 已覆盖 |
 | `buildPiHostApp` | `DELETE /api/pi-host/session/{sessionId}` | [清空 Pi Host 会话](#25-清空-pi-host-会话) | 已覆盖 |
+| `registerPiBridgeRoutes` | `GET /api/bridge/v1/sessions/{sessionId}/state` | [读取 Bridge 结构化上下文状态](#31-读取-bridge-结构化上下文状态) | 已覆盖 |
 
 ## 2.1 页面响应
 
@@ -176,3 +177,77 @@ curl --request DELETE 'http://127.0.0.1:8788/api/pi-host/session/SESSION_PLACEHO
 - 服务端只同步脱敏的待确认摘要，不返回 Action input、提示词、reasoning 或模型原始载荷。
 - SSE 断开后服务端按空闲期限回收无客户端会话；服务关闭时释放全部会话。
 - 页面在聊天或确认请求进行中禁用清空操作，避免中途释放正在执行的会话。
+
+## 3.1 读取 Bridge 结构化上下文状态
+
+### 3.1.1 Method and URL
+
+```http
+GET http://127.0.0.1:<port>/api/bridge/v1/sessions/{sessionId}/state
+```
+
+| 项目 | 内容 |
+| --- | --- |
+| Path parameter | `sessionId`：必填，IAR 会话标识；由 `POST /api/bridge/v1/sessions` 返回，格式为 32 位 `[A-Za-z0-9_-]` |
+| Query parameters | 不适用 |
+| requestBody | 不适用 |
+| Request headers | `Accept: application/json` 可选；无认证 header |
+| Request cookies | 不适用 |
+| 幂等性 | 只读；重复读取不会改变会话业务状态 |
+
+### 3.1.2 Response
+
+成功返回 `200 OK`。`pending` 仅在存在待确认动作时出现；`structuredContext` 与 `workflowState` 始终返回当前会话的安全投影。
+
+```json
+{
+  "version": "iar.pi-bridge/v1",
+  "iarSessionId": "IAR_SESSION_PLACEHOLDER",
+  "structuredContext": {
+    "schemaVersion": "iar.pi-structured-context/v1",
+    "subject": { "type": "ticket", "id": "ticket-1", "status": "resolved", "source": "context" },
+    "intent": "ticket.lookup",
+    "action": { "name": "lookup", "status": "resolved" },
+    "route": { "functionId": "ticket.lookup", "pluginId": "ticket-plugin" },
+    "slots": { "title": { "status": "resolved" } },
+    "workflow": { "currentStep": "normal", "status": "running" },
+    "pending": { "kind": "input", "status": "none" },
+    "confirmation": { "state": "not_required" },
+    "factHistory": { "records": [], "focusRecordId": "fact-1" },
+    "conversationTurns": { "turns": [], "focusTurnId": "turn-1" },
+    "integrity": { "criticalFieldHash": "HASH_PLACEHOLDER", "lastEventId": "EVENT_PLACEHOLDER" }
+  },
+  "workflowState": {
+    "mapVersion": "iar.workflow-map/v1",
+    "currentState": "normal",
+    "activeState": "normal",
+    "outcome": "none",
+    "workflowStatus": "running",
+    "allowedEvents": ["input"],
+    "pending": { "kind": "input", "status": "none" },
+    "confirmation": { "state": "not_required" }
+  }
+}
+```
+
+`structuredContext` 保留结构化意图、路由、字段状态、已验证事实和有界轮次元数据；轮次中的用户/助手原文、槽位 `value`、参数收集值、待解析引用 `text`、确认 `scopeHash`、Action input、幂等键和 reasoning 均不返回。`workflowState` 复用运行时 Workflow projection，只保留状态、允许事件和字段/候选摘要，不产生执行授权。
+
+`404 Not Found` 或 `409 Conflict`：会话不存在、已失效或当前会话正由其他操作占用，返回统一 Bridge 错误结构：
+
+```json
+{
+  "version": "iar.pi-bridge/v1",
+  "code": "session_not_found",
+  "message": "IAR 会话请求未完成。",
+  "retryable": false
+}
+```
+
+`500 Internal Server Error`：状态读取失败，返回 `bridge_internal_error`；响应 Cookie：不适用。
+
+### 3.1.3 curl 示例
+
+```bash
+curl --request GET 'http://127.0.0.1:8788/api/bridge/v1/sessions/IAR_SESSION_PLACEHOLDER/state' \
+  --header 'Accept: application/json'
+```
