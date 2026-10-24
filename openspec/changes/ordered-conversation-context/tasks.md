@@ -16,5 +16,5 @@
 
 ## 4. End-to-end regression and release gates
 
-- [ ] 4.1 Add normal/stream/restart scenarios proving that two created tickets, previous-question references, numbered turn references, and fact references remain distinct and ordered without accidental duplicate creation. Verify ticket count, event sequence, restored turn order, and action authorization.
+- [x] 4.1 Add normal/stream/restart scenarios proving that two created tickets, previous-question references, numbered turn references, and fact references remain distinct and ordered without accidental duplicate creation. Verify ticket count, event sequence, restored turn order, and action authorization.
 - [ ] 4.2 Run the complete test/build/lint suite, OpenSpec strict validation, per-task code-review and reliability audits, then merge the task branches into `master` and archive the completed change. Record command evidence and any non-blocking dependency warnings.
