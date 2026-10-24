@@ -95,6 +95,92 @@ test('stale non-cancel workflow event cannot block a current explicit semantic r
   assert.equal(normalizeCurrentTurnWorkflowDecision(frame, '那认证方式是哪种？'), undefined);
 });
 
+test('discourse continuation restores the verified route without inventing an identifier', () => {
+  const context = createInitialContext('discourse-continuation');
+  context.route = { functionId: 'verified.function', pluginId: 'verified.plugin' };
+  const descriptor = { functionId: 'verified.function', pluginId: 'verified.plugin', actionTypes: ['query'], operationMetadata: { operations: [{ name: 'read', kind: 'read' }] } } as unknown as PluginDescriptor;
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'unknown', action: 'unknown', slots: {}, references: [], confidence: 0.2
+  };
+
+  const recovered = recoverContinuation([descriptor], context, frame, '那认证方式是哪种？');
+
+  assert.equal(recovered.functionId, 'verified.function');
+  assert.equal(recovered.pluginId, 'verified.plugin');
+  assert.equal(recovered.frame.intent, 'verified.function');
+  assert.equal(recovered.frame.pluginId, 'verified.plugin');
+  assert.equal(recovered.frame.action, 'query');
+});
+
+test('ordinal fact follow-up is normalized without changing the verified Function', () => {
+  const context = createInitialContext('ordinal-follow-up');
+  context.factHistory = {
+    records: [{
+      recordId: 'fact-ordinal', sequence: 1, sourceEventId: 'event-ordinal',
+      functionId: 'verified.function', pluginId: 'verified.plugin', values: { item: 'first' }, createdAt: '2026-10-20T00:00:00.000Z'
+    }],
+    focusRecordId: 'fact-ordinal'
+  };
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'other.function', action: 'query', slots: {}, references: [], confidence: 0.9
+  };
+
+  const normalized = normalizeContextFollowUpFrame(context, frame, '第二个记录是什么？');
+
+  assert.equal(normalized.intent, 'unknown');
+  assert.equal(normalized.action, 'query');
+  assert.equal(normalized.workflowDecision?.event, 'context_answered');
+});
+
+test('relative list query keeps the stable route when the model chooses another generic Function', () => {
+  const context = createInitialContext('relative-list-route');
+  context.route = { functionId: 'list.function', pluginId: 'list.plugin' };
+  const descriptors = [
+    { functionId: 'list.function', pluginId: 'list.plugin', actionTypes: ['query'], operationMetadata: { operations: [] } },
+    { functionId: 'generic.monitor', pluginId: 'monitor.plugin', actionTypes: ['query'], operationMetadata: { operations: [] } }
+  ] as unknown as PluginDescriptor[];
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'generic.monitor', action: 'query', slots: {}, references: [], confidence: 0.9
+  };
+
+  const recovered = recoverContinuation(descriptors, context, frame, '第一个任务跑成功了吗？');
+
+  assert.equal(recovered.functionId, 'list.function');
+  assert.equal(recovered.pluginId, 'list.plugin');
+  assert.equal(recovered.frame.intent, 'list.function');
+});
+
+test('explicit side effect wins over a model query action during stable-route recovery', () => {
+  const context = createInitialContext('relative-list-action');
+  context.route = { functionId: 'list.function', pluginId: 'list.plugin' };
+  const descriptor = { functionId: 'list.function', pluginId: 'list.plugin', actionTypes: ['query', 'execute'], operationMetadata: { operations: [] } } as unknown as PluginDescriptor;
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'list.function', action: 'query', slots: {}, references: [], confidence: 0.9
+  };
+
+  const recovered = recoverContinuation([descriptor], context, frame, '把失败的那个任务重跑一下');
+
+  assert.equal(recovered.frame.action, 'execute');
+  assert.equal(recovered.functionId, 'list.function');
+});
+
+test('multiple explicit intents are collected for clarification instead of merged into one action', () => {
+  const context = createInitialContext('multi-intent');
+  const descriptors = [
+    { functionId: 'first.function', pluginId: 'first.plugin', description: '调用统计与限流调整', actionTypes: ['update'], operationMetadata: { operations: [] } },
+    { functionId: 'second.function', pluginId: 'second.plugin', description: '报表目录与受控导出', actionTypes: ['execute'], operationMetadata: { operations: [] } }
+  ] as unknown as PluginDescriptor[];
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v1', intent: 'first.function', action: 'update', slots: {}, references: [], confidence: 0.9
+  };
+
+  const recovered = recoverContinuation(descriptors, context, frame, '把限流调到每秒 100，顺便导出今天的销售报表');
+
+  assert.equal(recovered.reasonCode, 'function_ambiguous');
+  assert.deepEqual(recovered.candidateDescriptors?.map((item) => item.functionId), ['first.function', 'second.function']);
+  assert.equal(recovered.frame.intent, 'unknown');
+});
+
 test('continuation recovery ignores model-created Function and Plugin identifiers', () => {
   const context = createInitialContext('forged-route');
   context.route = { functionId: 'verified.function', pluginId: 'verified.plugin' };

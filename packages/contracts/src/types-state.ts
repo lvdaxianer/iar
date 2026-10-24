@@ -373,6 +373,7 @@ export type EventName =
   | 'action.completed'
   | 'action.failed'
   | 'context.clarification.updated'
+  | 'context.fact.focused'
   | 'context.compacted'
   | 'context.compaction_failed';
 

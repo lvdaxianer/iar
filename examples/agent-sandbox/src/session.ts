@@ -10,7 +10,7 @@ import type { PluginDescriptor } from '@iar/plugins';
 import { confirmationScopeHash, type RouteResult, type SemanticFrame } from '@iar/runtime';
 import { SandboxSessionCore, SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, sandboxOperationKind, summarizeAction } from './session-helpers.js';
-import { classifySessionWorkflowDecision, createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption, normalizeContextFollowUpFrame, normalizeCurrentTurnWorkflowDecision, recoverContinuation, recoverFunctionCandidates, workflowDecisionReply } from './session-clarification.js';
+import { classifySessionWorkflowDecision, createSelectionState, hasVerifiedFactsForFollowUp, matchesPendingOption, normalizeContextFollowUpFrame, normalizeCurrentTurnWorkflowDecision, normalizeInformationalQueryFrame, recoverContinuation, recoverFunctionCandidates, workflowDecisionReply } from './session-clarification.js';
 import { collectFunctionCandidates } from './function-collector.js';
 import { allowsContextFollowUp, applyRouteDiagnostic, deterministicFallbackReply, finishConfirmedAction, gateIncompleteSemanticFrame, logActionResult, logRouteResult, recordAgentExchange, rejectSelection, resolveNoMatchTurn, resolveSelection, semanticIncompleteClarification } from './session-turn-helpers.js';
 import { withConfirmReplySource, withReplySource, type CompactResult, type ConfirmResult, type ExecuteTurnOutcome, type ExtractFrameOutcome, type PendingActionContext, type RouteEvidence, type StreamEvent, type StructuredInput, type TurnResult } from './session-types.js';
@@ -77,7 +77,6 @@ export class IarSandboxSession extends SandboxSessionCore {
    * @date 2026-10-19
    */
   public compact(): Promise<CompactResult> { return this.whenReady().then(() => this.replies.compact()); }
-
   /** 将会话方法绑定给流式编排，避免另一份事件与历史状态。
    * @returns 使用当前会话能力的流式组件
    * @author lvdaxianer@yeah.net
@@ -105,7 +104,7 @@ export class IarSandboxSession extends SandboxSessionCore {
       prepareAndExecute: (context) => this.routing.prepareAndExecute(context),
       fallbackReplyStreamed: (context, onDelta, onReasoningDelta) => this.replies.fallbackReplyStreamed(context, onDelta, onReasoningDelta),
       generateReplyStreamed: (context, onDelta, onReasoningDelta) => this.replies.generateReplyStreamed(context, onDelta, onReasoningDelta),
-      currentBehaviorContext: () => this.projector.current(),
+      currentBehaviorContext: () => this.projector.current(), focusFactRecord: (recordId) => session.focusFactRecord(recordId),
       pushMessages: (text, reply) => this.replies.pushMessages(text, reply),
       piAgent: this.piAgent
     });
@@ -191,7 +190,7 @@ export class IarSandboxSession extends SandboxSessionCore {
       return { status: 'clarification', reply, route, reasonCode: workflowDecision.event };
     }
     const recovered = recoverContinuation(this.pluginHost.descriptors(), behaviorContext, normalizedFrame, userText);
-    const frame = recovered.frame;
+    const frame = normalizeInformationalQueryFrame(recovered.frame, userText);
     const effectiveDescriptor = recovered.descriptor ?? selectedDescriptor;
     if (recovered.reasonCode !== undefined) {
       const evidence: RouteEvidence = { status: 'rejected', reasonCode: recovered.reasonCode, semanticIntent: frame.intent, semanticConfidence: frame.confidence, ...(recovered.functionId === undefined ? {} : { functionId: recovered.functionId }), ...(recovered.pluginId === undefined ? {} : { pluginId: recovered.pluginId }) };
@@ -244,7 +243,7 @@ export class IarSandboxSession extends SandboxSessionCore {
     }
     timing.start('action.execute');
     if (this.pending !== null) await this.cancelStalePending();
-    const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, traceId, userText, frame, route, behaviorContext: routeContext });
+    const outcome = await this.routing.prepareAndExecute({ runId: SESSION_RUN_ID, traceId, userText, frame, route, behaviorContext: routeContext, resolvedReferences: references.references });
     timing.end('action.execute');
     logActionResult(traceId, outcome);
     applyRouteDiagnostic(evidence, traceId, outcome);
@@ -284,6 +283,8 @@ export class IarSandboxSession extends SandboxSessionCore {
     });
     timing.end('response.generate', reply === undefined ? 'failed' : 'completed');
     if (reply === undefined) return { status: 'failed', reply: '模型回复超限，回复未完成。', route: evidence, reasonCode: 'model_response_too_large' };
+    const focusedRecord = resolvedReferences?.at(-1)?.record;
+    if (focusedRecord !== undefined) await this.focusFactRecord(focusedRecord.recordId);
     this.replies.pushMessages(userText, reply);
     return { status: 'clarification', reply, route: evidence, reasonCode: evidence.reasonCode, ...(resolvedReferences && resolvedReferences.length > 0 ? { disposition: 'context_answered' as const } : {}) };
   }

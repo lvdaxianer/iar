@@ -129,6 +129,11 @@ export class WorkflowEventLog {
     this.append('context.clarification.updated', runId, { pending: structuredClone(pending) as JsonValue, ...(clarification === undefined ? {} : { clarification: structuredClone(clarification) as JsonValue }), ...(pendingReference === undefined ? {} : { pendingReference: structuredClone(pendingReference) as JsonValue }), ...(collection === undefined ? {} : { collection: structuredClone(collection) as JsonValue }) });
   }
 
+  /** 记录已解析的事实焦点，供下一轮“这个/当前”指代使用。 */
+  public factFocused(runId: string, recordId: string): void {
+    this.append('context.fact.focused', runId, { recordId });
+  }
+
   /**
    * 构造并校验一个不可变事件。
    * @param eventName - 有限事件名称

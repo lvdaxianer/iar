@@ -35,6 +35,8 @@ export const EventNameSchema = Type.Union([
   Type.Literal('action.failed'),
   // 澄清事件只更新待输入状态，不携带执行授权。
   Type.Literal('context.clarification.updated'),
+  // 事实焦点事件只更新后续上下文指代，不携带执行授权。
+  Type.Literal('context.fact.focused'),
   // 上下文事件记录压缩成功或失败。
   Type.Literal('context.compacted'),
   Type.Literal('context.compaction_failed')

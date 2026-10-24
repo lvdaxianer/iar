@@ -187,6 +187,16 @@ test('semantic prompt preserves a stable route for explicit clarification follow
   assert.match(prompt, /不得据此直接执行/u);
 });
 
+test('semantic prompt keeps ordinal follow-ups on the latest list context', () => {
+  const prompt = buildSemanticUserPrompt({
+    text: '第一个任务跑成功了吗？',
+    recentMessages: [{ role: 'assistant', text: '上一轮返回了一个列表。' }],
+    behaviorContext: { route: { functionId: 'list.function', pluginId: 'list.plugin' } }
+  });
+  assert.match(prompt, /列表序号或相对项/u);
+  assert.match(prompt, /不要.*切换到另一个 Function/u);
+});
+
 test('JEV and Intent Model receive the same structured context without changing the decision contract', async () => {
   const context = createInitialContext('run-context');
   context.factHistory = {
@@ -240,7 +250,7 @@ test('normal and streaming session calls use the live structured context after a
     prompts.push(userPrompt);
     const semantic = payload.messages?.[0]?.content.includes('Semantic Extractor') === true;
     if (semantic) {
-      const frame = userPrompt.startsWith('当前用户问题：帮我创建')
+      const frame = /<current_user_question>\s*帮我创建/u.test(userPrompt)
         ? { schemaVersion: 'iar.semantic-frame/v1', intent: 'ticket.create', action: 'create', slots: { operation: 'create' }, references: [], confidence: 0.99 }
         : { schemaVersion: 'iar.semantic-frame/v1', intent: 'unknown', slots: {}, references: [], confidence: 0.2 };
       return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(frame) } }] }), { status: 200 });

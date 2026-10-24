@@ -109,7 +109,12 @@ export const systemStatusHandler: FunctionHandler = async (input) => {
   }
   if (operation === 'alerts') {
     const open = ALERTS.filter((alert) => alert.status !== 'closed').length;
-    return succeed('alerts', { alerts: [...ALERTS], summary: `当前 ${String(open)} 条活动告警，其中 P1 一条，请关注报表引擎积压` });
+    return succeed(
+      'alerts',
+      { alerts: [...ALERTS], summary: `当前 ${String(open)} 条活动告警，其中 P1 一条，请关注报表引擎积压` },
+      {},
+      ALERTS.map((alert) => ({ ...alert })),
+    );
   }
   const red = SERVICES.filter((service) => service.status === 'red').length;
   const yellow = SERVICES.filter((service) => service.status === 'yellow').length;

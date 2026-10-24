@@ -16,7 +16,7 @@ import { ScriptedModelProvider } from './models/scripted-provider.js';
 import { logModelAudit, logParameterBoundary, logSemanticFrame, type SemanticFrameDiagnostic } from './safe-log.js';
 import { SESSION_RUN_ID, SESSION_CORRELATION_ID, TURN_DEFINITION } from './session-core.js';
 import type { CompactionContext } from './session-compaction.js';
-import { buildActionInput, buildFacts, buildFunctionCallInput, buildSelfIntroductionInput, describeAction, mergeVerifiedFunctionSlots, sandboxOperationKind, toSlotMap } from './session-helpers.js';
+import { buildActionInput, buildFacts, buildFunctionCallInput, buildSelfIntroductionInput, describeAction, mergeResolvedReferenceParams, mergeVerifiedFunctionSlots, sandboxOperationKind, toSlotMap } from './session-helpers.js';
 import { collectParameters, parameterCollectionReply } from './parameter-collector.js';
 import type { ExecuteTurnOutcome, ExtractFrameOutcome, PendingActionContext, ReferenceResolution, ResolvedFactReference, RouteEvidence, SandboxMode, StructuredInput } from './session-types.js';
 
@@ -160,10 +160,24 @@ export class SandboxSessionRouting {
     const references = frame.references.filter(isHistoricalReference);
     if (references.length === 0) return { ok: true, references: [] };
     const history = behaviorContext.factHistory;
-    if (!history) return { ok: false, reasonCode: 'reference_unresolved' };
+    // 没有可信历史时，任何历史指代都必须阻断；不能让查询动作借助最近原文
+    // 绕过事实锚点，也不能把空会话中的“这个/刚才”交给 Function 或 Pi 猜测。
+    if (!history || history.records.length === 0) return { ok: false, reasonCode: 'reference_unresolved' };
     const resolved: ResolvedFactReference[] = [];
     for (const reference of references) {
       const scopedHistory = restrictToPendingCandidates(history, behaviorContext.pendingReference);
+      const scopedFunctionId = frame.intent !== 'unknown' ? frame.intent : behaviorContext.route.functionId;
+      const ordinal = this.resolveOrdinalFactReference(scopedHistory, reference as FactRelationCandidateReference, scopedFunctionId);
+      if (ordinal.status === 'resolved') {
+        resolved.push({ text: reference.text, record: ordinal.record });
+        continue;
+      }
+      const qualified = this.resolveQualifiedFactReference(scopedHistory, reference as FactRelationCandidateReference);
+      if (qualified.status === 'resolved') {
+        resolved.push({ text: reference.text, record: qualified.record });
+        continue;
+      }
+      if (qualified.status === 'ambiguous') return ambiguousReference(reference, qualified.candidates);
       const result = resolveFactRelationCandidates(scopedHistory, reference as FactRelationCandidateReference);
       if (result.status === 'resolved') {
         resolved.push({ text: reference.text, record: result.record });
@@ -173,6 +187,28 @@ export class SandboxSessionRouting {
       return { ok: false, reasonCode: 'reference_unresolved' };
     }
     return { ok: true, references: resolved };
+  }
+
+  /** 按当前文本中的通用状态限定筛选已验证记录；无法唯一收敛时不执行。 */
+  private resolveQualifiedFactReference(history: NonNullable<BehaviorContext['factHistory']>, reference: FactRelationCandidateReference): ReturnType<typeof resolveFactRelationCandidates> {
+    const requiredStatus = reference.text.match(/(?:失败|错误|异常)/u) ? 'failed' : reference.text.match(/(?:成功|完成)/u) ? 'success' : undefined;
+    if (requiredStatus === undefined) return { status: 'unresolved', reason: 'missing_anchor' };
+    const candidates = history.records.filter((record) => record.values.status === requiredStatus);
+    if (candidates.length === 1 && candidates[0] !== undefined) return { status: 'resolved', record: structuredClone(candidates[0]) };
+    return candidates.length > 1 ? { status: 'ambiguous', candidates: candidates.slice(0, 12) } : { status: 'unresolved', reason: 'out_of_range' };
+  }
+
+  /** 将明确的列表序号绑定到同一 Function 的已验证记录，避免回复模型重新排序。 */
+  private resolveOrdinalFactReference(history: NonNullable<BehaviorContext['factHistory']>, reference: FactRelationCandidateReference, functionId: string | undefined): ReturnType<typeof resolveFactRelationCandidates> {
+    const match = reference.text.match(/第\s*([一二三四五六七八九十百\d]+)\s*(?:个|条|项|位)/u);
+    if (match === null || functionId === undefined) return { status: 'unresolved', reason: 'missing_anchor' };
+    const digits: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 百: 100 };
+    const ordinalValue = /^\d+$/u.test(match[1]!) ? Number(match[1]) : digits[match[1]!];
+    if (ordinalValue === undefined || !Number.isSafeInteger(ordinalValue) || ordinalValue < 1) return { status: 'unresolved', reason: 'invalid_offset' };
+    const ordinal = ordinalValue;
+    const records = history.records.filter((record) => record.functionId === functionId);
+    const record = records[ordinal - 1];
+    return record === undefined ? { status: 'unresolved', reason: 'out_of_range' } : { status: 'resolved', record: structuredClone(record) };
   }
 
 
@@ -186,11 +222,11 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-18
    */
-  public async prepareAndExecute(context: { runId: string; traceId?: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext }): Promise<ExecuteTurnOutcome> {
-    const { route, frame, behaviorContext, userText, runId, traceId = runId } = context;
+  public async prepareAndExecute(context: { runId: string; traceId?: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext; resolvedReferences?: readonly ResolvedFactReference[] }): Promise<ExecuteTurnOutcome> {
+    const { route, frame, behaviorContext, userText, runId, traceId = runId, resolvedReferences = [] } = context;
     const resolved = this.resolveFunctionContext(route);
     if (!resolved.ok) return resolved.result;
-    const prepared = this.prepareFunctionInput({ traceId, route, frame, behaviorContext, userText, functionRecord: resolved.functionRecord });
+    const prepared = this.prepareFunctionInput({ traceId, route, frame, behaviorContext, userText, functionRecord: resolved.functionRecord, resolvedReferences });
     if (!prepared.ok) return prepared.result;
     const operationKind = sandboxOperationKind(route.functionId!, prepared.input, resolved.functionRecord.operations);
     const action = this.createAction({ runId, functionId: route.functionId!, pluginId: route.pluginId!, input: prepared.input, policy: resolved.manifest.policy, operations: resolved.functionRecord.operations });
@@ -223,9 +259,9 @@ export class SandboxSessionRouting {
    * @author lvdaxianer@yeah.net
    * @date 2026-10-23
    */
-  private prepareFunctionInput(context: { traceId: string; route: RouteResult; frame: SemanticFrame; behaviorContext: BehaviorContext; userText: string; functionRecord: PluginFunctionRecord }): { ok: true; input: JsonValue } | { ok: false; result: ExecuteTurnOutcome } {
-    const { traceId, route, frame, behaviorContext, userText, functionRecord } = context;
-    const slots = mergeVerifiedFunctionSlots(frame.slots, behaviorContext, functionRecord.definition.inputSchema);
+  private prepareFunctionInput(context: { traceId: string; route: RouteResult; frame: SemanticFrame; behaviorContext: BehaviorContext; userText: string; functionRecord: PluginFunctionRecord; resolvedReferences: readonly ResolvedFactReference[] }): { ok: true; input: JsonValue } | { ok: false; result: ExecuteTurnOutcome } {
+    const { traceId, route, frame, behaviorContext, userText, functionRecord, resolvedReferences } = context;
+    const slots = mergeResolvedReferenceParams(mergeVerifiedFunctionSlots(frame.slots, behaviorContext, functionRecord.definition.inputSchema), resolvedReferences, route.functionId ?? frame.intent);
     const proposal = route.functionCallProposal;
     const proposalCompatible = proposal !== undefined && isFunctionCallProposalCompatible(proposal.operation, frame.action, functionRecord.operations);
     // 当前语义帧和用户文本是本轮的最高优先级。route.propose 可能带有旧的或默认的

@@ -111,9 +111,10 @@ export function findSandboxOperation(operations: readonly SandboxOperation[], na
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-export function succeed(operation: string, payload: Record<string, JsonValue>, declaredFacts: Record<string, JsonValue> = {}): FunctionHandlerResult {
+export function succeed(operation: string, payload: Record<string, JsonValue>, declaredFacts: Record<string, JsonValue> = {}, declaredFactRecords: readonly Record<string, JsonValue>[] = []): FunctionHandlerResult {
   const facts = selectTrustedFacts(declaredFacts);
-  return { status: 'succeeded', output: { accepted: true, operation, ...payload, facts }, response: { schemaVersion: SCHEMA_VERSIONS.functionResponse, mode: 'model' } };
+  const factRecords = declaredFactRecords.map((values) => ({ values: selectTrustedFacts(values) })).filter((record) => Object.keys(record.values).length > 0);
+  return { status: 'succeeded', output: { accepted: true, operation, ...payload, facts, ...(factRecords.length > 0 ? { factRecords } : {}) }, response: { schemaVersion: SCHEMA_VERSIONS.functionResponse, mode: 'model' } };
 }
 
 /** 只把短小 JSON 原子字段复制到通用事实信封。 */
@@ -176,12 +177,13 @@ export function sandboxInputSchema(): Record<string, unknown> {
 export function sandboxOutputSchema(): Record<string, unknown> {
   const factValue = { anyOf: [{ type: 'string', maxLength: MAX_TRUSTED_FACT_STRING_LENGTH }, { type: 'number' }, { type: 'boolean' }, { type: 'null' }] };
   const facts = { type: 'object', maxProperties: MAX_TRUSTED_FACTS, propertyNames: { pattern: TRUSTED_FACT_KEY_PATTERN, maxLength: MAX_TRUSTED_FACT_KEY_LENGTH }, additionalProperties: factValue };
+  const factRecords = { type: 'array', maxItems: MAX_TRUSTED_FACTS, items: { type: 'object', properties: { values: facts }, required: ['values'], additionalProperties: false } };
   return {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     oneOf: [
       {
         type: 'object',
-        properties: { accepted: { const: true }, operation: { type: 'string', minLength: 1 }, facts },
+        properties: { accepted: { const: true }, operation: { type: 'string', minLength: 1 }, facts, factRecords },
         required: ['accepted', 'operation'],
         additionalProperties: true
       },

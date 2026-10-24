@@ -304,6 +304,13 @@ export class SandboxSessionCore {
     await this.drainWorkflowEvents();
   }
 
+  /** 保存当前已解析事实的透明焦点，不改变执行授权或待确认状态。 */
+  protected async focusFactRecord(recordId: string): Promise<void> {
+    if (this.projector.current().factHistory?.focusRecordId === recordId) return;
+    this.workflowEventLog.factFocused(SESSION_RUN_ID, recordId);
+    await this.drainWorkflowEvents();
+  }
+
   /** 保存连续澄清状态与当前 pending，供重启后继续安全恢复。 */
   protected async updateClarificationState(clarification: ClarificationState, pending: PendingInput = this.projector.current().pending, pendingReference: PendingReference | null | undefined = undefined, collection: CollectionState | null | undefined = undefined): Promise<void> {
     const eventLog = this.workflowEventLog as unknown as { clarificationUpdated: (runId: string, input: PendingInput, state: ClarificationState, reference: PendingReference | null | undefined, collection: CollectionState | null | undefined) => void };

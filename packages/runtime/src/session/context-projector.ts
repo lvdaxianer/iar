@@ -182,6 +182,13 @@ export class BehaviorContextProjector {
       this.applyCompactedState(payload);
       return;
     }
+    if (event.eventName === 'context.fact.focused') {
+      const recordId = payload.recordId;
+      const history = this.state.factHistory;
+      if (typeof recordId !== 'string' || history === undefined || !history.records.some((record) => record.recordId === recordId)) throw new Error('事实焦点无效');
+      this.state.factHistory = { ...history, focusRecordId: recordId };
+      return;
+    }
     if (event.eventName === 'context.clarification.updated' && (!isPendingInput(payload.pending) || (payload.clarification !== undefined && !isClarificationState(payload.clarification)) || (payload.collection !== undefined && payload.collection !== null && !isCollectionState(payload.collection)) || (payload.pendingReference !== undefined && payload.pendingReference !== null && !isPendingReference(payload.pendingReference)))) {
       throw new Error('澄清 pending 状态无效');
     }
@@ -262,14 +269,18 @@ export class BehaviorContextProjector {
 
   /** 从成功 Action 的公开输出中投影有界、可追溯事实。 */
   private applyTrustedFacts(payload: Record<string, unknown>, eventId: string, occurredAt: string): void {
-    const input = readFactRecordInput(payload);
-    if (!input) return;
+    const inputs = readFactRecordInputs(payload);
+    if (inputs.length === 0) return;
     const history = this.state.factHistory ?? { records: [] };
     if (history.records.some((record) => record.sourceEventId === eventId)) return;
-    const values = collectTrustedFactValues(input.publicFacts);
-    if (values === undefined) return;
-    const record = createFactRecord(input.functionId, input.pluginId, eventId, occurredAt, history.records, values);
-    this.state.factHistory = appendFactRecord(history, record);
+    let nextHistory = history;
+    for (const [index, input] of inputs.entries()) {
+      const values = collectTrustedFactValues(input.publicFacts);
+      if (values === undefined) continue;
+      const record = createFactRecord(input.functionId, input.pluginId, eventId, occurredAt, nextHistory.records, values, index);
+      nextHistory = appendFactRecord(nextHistory, record);
+    }
+    if (nextHistory.records.length > history.records.length) this.state.factHistory = nextHistory;
   }
 
   /** 确保每个事实事件都不能把投影推进到非法状态。 */
@@ -313,13 +324,21 @@ function isBoundedFactValue(value: unknown): value is TrustedFactValue {
 }
 
 /** 读取成功动作中用于创建事实记录的动态来源信息。 */
-function readFactRecordInput(payload: Record<string, unknown>): { functionId: string; pluginId: string; publicFacts: Record<string, unknown> } | undefined {
-  if (payload.resultStatus !== 'succeeded' || !isRecord(payload.output)) return undefined;
+function readFactRecordInputs(payload: Record<string, unknown>): Array<{ functionId: string; pluginId: string; publicFacts: Record<string, unknown> }> {
+  if (payload.resultStatus !== 'succeeded' || !isRecord(payload.output)) return [];
   const functionId = stringValue(payload.functionId);
   const pluginId = stringValue(payload.pluginId);
   const publicFacts = payload.output.facts;
-  if (!functionId || !pluginId || !isRecord(publicFacts)) return undefined;
-  return { functionId, pluginId, publicFacts };
+  if (!functionId || !pluginId) return [];
+  const inputs: Array<{ functionId: string; pluginId: string; publicFacts: Record<string, unknown> }> = [];
+  if (isRecord(publicFacts)) inputs.push({ functionId, pluginId, publicFacts });
+  const factRecords = payload.output.factRecords;
+  if (Array.isArray(factRecords)) {
+    for (const item of factRecords.slice(0, MAX_TRUSTED_FACTS)) {
+      if (isRecord(item) && isRecord(item.values)) inputs.push({ functionId, pluginId, publicFacts: item.values });
+    }
+  }
+  return inputs;
 }
 
 /** 过滤 Plugin 事实信封中的字段和值，阻止任意对象进入可信上下文。 */
@@ -334,9 +353,9 @@ function collectTrustedFactValues(publicFacts: Record<string, unknown>): Record<
 }
 
 /** 创建可在事件重放中稳定复现的不透明事实记录。 */
-function createFactRecord(functionId: string, pluginId: string, eventId: string, occurredAt: string, records: VerifiedFactRecord[], values: Record<string, TrustedFactValue>): VerifiedFactRecord {
+function createFactRecord(functionId: string, pluginId: string, eventId: string, occurredAt: string, records: VerifiedFactRecord[], values: Record<string, TrustedFactValue>, index = 0): VerifiedFactRecord {
   const sequence = (records.at(-1)?.sequence ?? 0) + 1;
-  const recordId = `fact-${createHash(HASH_ALGORITHM).update(eventId).digest('hex')}`.slice(0, MAX_FACT_RECORD_ID_LENGTH);
+  const recordId = `fact-${createHash(HASH_ALGORITHM).update(`${eventId}:${String(index)}`).digest('hex')}`.slice(0, MAX_FACT_RECORD_ID_LENGTH);
   return { recordId, sequence, sourceEventId: eventId, functionId, pluginId, values, createdAt: occurredAt };
 }
 

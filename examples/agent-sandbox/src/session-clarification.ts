@@ -4,14 +4,18 @@ import { classifyWorkflowDecision, projectWorkflowContext, type RouteResult, typ
 import type { WorkflowDecision } from '@iar/contracts';
 import type { RouteEvidence, TurnResult } from './session-types.js';
 
-const GENERIC_CONTINUATION_PATTERN = /(继续|修改|改成|调整|调到|设为|提高|降低|执行这个|按这个|照这个|重试|再试|重新|proceed|retry|change|update|adjust|set|run)/iu;
+const GENERIC_CONTINUATION_PATTERN = /(?:^(?:那|那么|接着|接下来|另外|此外|上述|这|这个|那个)|继续|修改|改成|调整|调到|设为|提高|降低|执行这个|按这个|照这个|重试|再试|重新|proceed|retry|change|update|adjust|set|run)/iu;
 const UPDATE_CONTINUATION_PATTERN = /(修改|改成|调整|调到|设为|提高|降低|change|update|adjust|set)/iu;
-const QUERY_CONTINUATION_PATTERN = /(查询|查一下|现在.*(?:多少|什么)|状态|是多少|query|status|how many)/iu;
-const EXECUTE_CONTINUATION_PATTERN = /(继续执行|执行这个|重试|再试|重新执行|proceed|retry|run|execute)/iu;
+const QUERY_CONTINUATION_PATTERN = /(查询|查一下|现在.*(?:多少|什么)|状态|结果|成功了吗|跑完了吗|有没有完成|怎么样|是多少|query|status|how many)/iu;
+const INFORMATIONAL_QUERY_PATTERN = /(怎么|如何|流程|方式|方法|能不能|是否可以|为什么|什么是|how to|can i|why)/iu;
+const EXECUTE_CONTINUATION_PATTERN = /(继续执行|执行这个|重试|再试|重跑|再跑|重新跑|重新执行|proceed|retry|run|execute)/iu;
 const EXPLICIT_SIDE_EFFECT_PATTERN = /(创建|新增|修改|改成|调整|调到|设为|删除|重跑|导出|申请|执行|重试|create|update|change|adjust|delete|export|apply|execute|retry)/iu;
 const EXPLICIT_NEW_TOPIC_PATTERN = /(换个话题|换一个话题|开始新的话题|另起一个话题|new topic|different topic)/iu;
 const EXPLICIT_CANCEL_PATTERN = /(取消|算了|不用了|放弃|不做了|cancel|stop|abort)/iu;
 const CONFIRMATION_ONLY_PATTERN = /^(?:直接)?(?:确认|同意|批准|confirm|approve)(?:上一个|当前|这个)?(?:操作|动作)?$/iu;
+const DISCOURSE_CONTINUATION_PATTERN = /^(?:那|那么|接着|接下来|另外|此外|上述|这|这个|那个)/u;
+const RELATIVE_LIST_QUERY_PATTERN = /(?:第\s*(?:[一二三四五六七八九十百\d]+)\s*(?:个|条|项|位)|最后一个|失败的那个|成功的那个|这个(?:条目|记录)?|那个(?:条目|记录)?)/u;
+const MULTI_INTENT_PATTERN = /(顺便|同时|另外|以及|并且|再加上|and|also|as well)/iu;
 
 /** 将当前动态 Plugin 描述转换为有限、不具备执行权限的选择状态。 */
 export function createSelectionState(descriptors: readonly PluginDescriptor[], unresolvedStreak: number, reasonCode: string): { state: ClarificationState; options: NonNullable<PendingInput['options']> } {
@@ -26,7 +30,7 @@ export function hasVerifiedFactsForFollowUp(context: BehaviorContext, evidence: 
   return evidence.semanticIntent === 'unknown'
     && evidence.reasonCode !== 'reference_unresolved'
     && (context.factHistory?.records.length ?? 0) > 0
-    && (userText.length === 0 || isLikelyFactFollowUp(userText));
+    && (userText.length === 0 || isLikelyFactFollowUp(context, userText));
 }
 
 /** 将有可信事实依据的查询归一化为上下文回答，避免模型事件阻断只读追问。 */
@@ -55,14 +59,18 @@ export function normalizeContextFollowUpFrame(context: BehaviorContext, frame: S
 export function normalizeCurrentTurnWorkflowDecision(frame: SemanticFrame, userText: string): SemanticFrame['workflowDecision'] {
   const decision = frame.workflowDecision;
   if (decision === undefined) return undefined;
+  // 确认接口已经单独完成上一轮确认；下一条普通问题不能被模型重复携带的
+  // confirmation_accepted/rejected 事件阻断，应重新按当前用户问题路由。
+  if (decision.event === 'confirmation_accepted' || decision.event === 'confirmation_rejected') return undefined;
   if (decision.event === 'new_topic' && EXPLICIT_NEW_TOPIC_PATTERN.test(userText)) return decision;
   if (decision.event === 'workflow_cancelled' && EXPLICIT_CANCEL_PATTERN.test(userText)) return decision;
   return undefined;
 }
 
 /** 只有带有明确上下文指代或事实查询词时，才把未知输入视为事实追问。 */
-function isLikelyFactFollowUp(userText: string): boolean {
-  return /(刚才|之前|上一|上一个|这个|那个|这张|那张|编号|单号|进度|状态|处理到哪|第几个|第几位|多少|哪一个|哪些|记录|回执)/u.test(userText);
+function isLikelyFactFollowUp(context: BehaviorContext, userText: string): boolean {
+  if (/(刚才|之前|上一|上一个|这个|那个|这张|那张|编号|单号|进度|状态|结果|处理到哪|第几个|第几位|第\s*(?:[一二三四五六七八九十百\d]+)\s*(?:个|条|项|位)|最后一个|失败的那个|成功的那个|多少|哪一个|哪些|记录|回执|持续多久|开始时间|级别|等级)/u.test(userText)) return true;
+  return (context.factHistory?.records ?? []).some((record) => Object.values(record.values).some((value) => typeof value === 'string' && value.length > 0 && userText.includes(value)));
 }
 
 /** 只把有历史指代且没有副作用动作的当前输入视为事实追问候选。 */
@@ -70,8 +78,8 @@ function isContextFollowUpCandidate(context: BehaviorContext, frame: SemanticFra
   return (context.factHistory?.records.length ?? 0) > 0
     && (frame.action === 'query' || frame.action === 'unknown')
     && !CONFIRMATION_ONLY_PATTERN.test(userText.trim())
-    && !EXPLICIT_SIDE_EFFECT_PATTERN.test(userText)
-    && isLikelyFactFollowUp(userText);
+    && (!EXPLICIT_SIDE_EFFECT_PATTERN.test(userText) || QUERY_CONTINUATION_PATTERN.test(userText))
+    && isLikelyFactFollowUp(context, userText);
 }
 
 /** 用户正在回答已有澄清选项时视为进展，不增加新的 unresolved 次数。 */
@@ -87,6 +95,14 @@ export type ContinuationRecovery = {
   candidateDescriptors?: PluginDescriptor[];
   reasonCode?: ContinuationRecoveryReasonCode;
 };
+
+/** 将“如何做”类询问固定为只读语义，并丢弃模型附带的副作用 operation。 */
+export function normalizeInformationalQueryFrame(frame: SemanticFrame, userText: string): SemanticFrame {
+  if (!INFORMATIONAL_QUERY_PATTERN.test(userText)) return frame;
+  const slots = { ...frame.slots };
+  delete slots.operation;
+  return { ...frame, action: 'query', slots };
+}
 
 export type ContinuationRecoveryReasonCode = 'function_unavailable' | 'plugin_unavailable' | 'function_ambiguous' | 'plugin_ambiguous';
 
@@ -125,14 +141,43 @@ export function recoverContinuation(descriptors: readonly PluginDescriptor[], co
   if (!hasParameterCollection && context.pending.status !== 'required' && CONFIRMATION_ONLY_PATTERN.test(userText.trim())) {
     return { frame: clearUntrustedContinuationTarget(frame) };
   }
+  const hasStableRoute = context.route.functionId !== undefined || context.route.pluginId !== undefined;
+  if (INFORMATIONAL_QUERY_PATTERN.test(userText) && !hasStableRoute) {
+    const candidates = findSharedDescriptorCandidates(descriptors, userText);
+    if (candidates.length > 1) return { frame: clearUntrustedContinuationTarget(frame), candidateDescriptors: candidates, reasonCode: 'function_ambiguous' };
+  }
+  if (INFORMATIONAL_QUERY_PATTERN.test(userText) && !hasStableRoute && !CONFIRMATION_ONLY_PATTERN.test(userText.trim())) {
+    return { frame: { ...frame, action: 'query' } };
+  }
   const target = context.collection?.kind === 'parameters'
     ? { functionId: context.collection.functionId, pluginId: context.collection.pluginId }
-    : (eventAllowsRecovery || (workflowEvent === undefined && GENERIC_CONTINUATION_PATTERN.test(userText))) && (context.route.functionId !== undefined || context.route.pluginId !== undefined)
+    : (eventAllowsRecovery || (workflowEvent === undefined && ((GENERIC_CONTINUATION_PATTERN.test(userText) && !RELATIVE_LIST_QUERY_PATTERN.test(userText)) || QUERY_CONTINUATION_PATTERN.test(userText) || EXECUTE_CONTINUATION_PATTERN.test(userText)))) && (context.route.functionId !== undefined || context.route.pluginId !== undefined)
       ? { functionId: context.route.functionId, pluginId: context.route.pluginId }
       : undefined;
-  if (target === undefined) return { frame };
+  if (target === undefined) {
+    const candidates = MULTI_INTENT_PATTERN.test(userText) ? findAmbiguousTextDescriptors(descriptors, userText) : [];
+    return candidates.length > 1 ? { frame: clearUntrustedContinuationTarget(frame), candidateDescriptors: candidates, reasonCode: 'function_ambiguous' } : { frame };
+  }
   if (!hasParameterCollection && hasAmbiguousTextDescriptorEvidence(descriptors, userText)) {
     return { frame: clearUntrustedContinuationTarget(frame) };
+  }
+  const stableMatches = findMatchingDescriptors(descriptors, target.functionId, target.pluginId);
+  const canPreferDiscourseRoute = !hasParameterCollection
+    && DISCOURSE_CONTINUATION_PATTERN.test(userText)
+    && (frame.action === 'query' || (frame.action === 'unknown' && !EXPLICIT_SIDE_EFFECT_PATTERN.test(userText)))
+    && stableMatches.length === 1
+    && stableMatches[0] !== undefined;
+  if (canPreferDiscourseRoute) {
+    const descriptor = stableMatches[0]!;
+    return { frame: recoverContinuationFrame(frame, context, descriptor, userText), descriptor, functionId: descriptor.functionId, pluginId: descriptor.pluginId };
+  }
+  // Direct callers may provide the pre-normalization frame used by the workflow
+  // recovery contract. Runtime turns normalize trusted fact follow-ups to
+  // intent=unknown before reaching this point, so this branch only preserves
+  // the verified route for the already-classified relative query shape.
+  if (!hasParameterCollection && frame.intent !== 'unknown' && frame.action === 'query' && RELATIVE_LIST_QUERY_PATTERN.test(userText) && stableMatches.length === 1 && stableMatches[0] !== undefined) {
+    const descriptor = stableMatches[0]!;
+    return { frame: recoverContinuationFrame(frame, context, descriptor, userText), descriptor, functionId: descriptor.functionId, pluginId: descriptor.pluginId };
   }
   const currentFrame = hasParameterCollection ? frame : normalizeAuthorizedFrame(descriptors, frame, userText, target.functionId);
   if (!hasParameterCollection && frame.intent === 'unknown') {
@@ -144,6 +189,11 @@ export function recoverContinuation(descriptors: readonly PluginDescriptor[], co
   const currentFunctionIsAuthorized = currentFrame.intent !== 'unknown'
     && descriptors.some((descriptor) => descriptor.functionId === currentFrame.intent && (currentFrame.pluginId === undefined || descriptor.pluginId === currentFrame.pluginId));
   if (!hasParameterCollection && currentFunctionIsAuthorized && (target.functionId === undefined || currentFrame.intent !== target.functionId)) return { frame: currentFrame };
+  if (!hasParameterCollection && currentFunctionIsAuthorized && stableMatches.length === 1 && stableMatches[0] !== undefined) {
+    const requestedAction = inferRequestedContinuationAction(userText);
+    if (requestedAction !== undefined && !stableMatches[0].actionTypes.includes(requestedAction)) return { frame: clearUntrustedContinuationTarget(currentFrame) };
+    return { frame: recoverContinuationFrame(currentFrame, context, stableMatches[0], userText), descriptor: stableMatches[0], functionId: stableMatches[0].functionId, pluginId: stableMatches[0].pluginId };
+  }
   const matches = findMatchingDescriptors(descriptors, target.functionId, target.pluginId);
   if (matches.length !== 1) return { frame: currentFrame, ...(target.functionId === undefined ? {} : { functionId: target.functionId }), ...(target.pluginId === undefined ? {} : { pluginId: target.pluginId }), ...(matches.length > 1 ? { candidateDescriptors: matches } : {}), reasonCode: resolveRecoveryReason(descriptors, target, matches.length) };
   const descriptor = matches[0];
@@ -206,10 +256,30 @@ function chooseTextDescriptor(descriptors: readonly PluginDescriptor[], userText
 
 /** 当前轮同时命中多个授权 descriptor 时，阻止历史稳定路由兜底。 */
 function hasAmbiguousTextDescriptorEvidence(descriptors: readonly PluginDescriptor[], userText: string): boolean {
+  const scored = findAmbiguousTextDescriptors(descriptors, userText);
+  return scored.length > 1;
+}
+
+/** 返回当前轮同时命中的多个授权 descriptor，供澄清而不是合并执行。 */
+function findAmbiguousTextDescriptors(descriptors: readonly PluginDescriptor[], userText: string): PluginDescriptor[] {
   const scored = scoreTextDescriptors(descriptors, userText, 'unknown');
   const first = scored[0];
   const second = scored[1];
-  return first !== undefined && second !== undefined && first.score >= 2 && second.score >= 2 && second.score * 2 >= first.score;
+  return first !== undefined && second !== undefined && first.score >= 2 && second.score >= 2 && second.score * 2 >= first.score
+    ? scored.slice(0, MAX_CLARIFICATION_OPTIONS).map((item) => item.descriptor)
+    : [];
+}
+
+/** 对仅凭共享自然语言名词无法区分的咨询请求返回候选，禁止凭单个动作词抢路由。 */
+function findSharedDescriptorCandidates(descriptors: readonly PluginDescriptor[], userText: string): PluginDescriptor[] {
+  const normalizedText = normalizeLexicalText(userText);
+  if (normalizedText.length < 2) return [];
+  const features = descriptors.map((descriptor) => descriptorFeatures(descriptor));
+  const frequency = new Map<string, number>();
+  for (const set of features) for (const feature of set) frequency.set(feature, (frequency.get(feature) ?? 0) + 1);
+  const shared = new Set([...frequency.entries()].filter(([feature, count]) => count > 1 && feature.length >= 2 && normalizedText.includes(feature)).map(([feature]) => feature));
+  if (shared.size === 0) return [];
+  return descriptors.filter((_descriptor, index) => [...(features[index] ?? [])].some((feature) => shared.has(feature))).slice(0, MAX_CLARIFICATION_OPTIONS);
 }
 
 /** 计算当前文本对授权 descriptor 的闭集证据分数。 */
@@ -268,9 +338,9 @@ function resolveRecoveryReason(descriptors: readonly PluginDescriptor[], target:
 
 /** 在 descriptor 声明范围内恢复当前轮动作，无法唯一确定时保留 unknown。 */
 function recoverAction(frameAction: SemanticFrame['action'], descriptor: PluginDescriptor, context: BehaviorContext, userText: string): SemanticFrame['action'] {
-  if (frameAction !== 'unknown') return isDeclaredAction(frameAction, descriptor) ? frameAction : 'unknown';
   const inferred = inferContinuationAction(userText, descriptor);
   if (inferred !== undefined) return inferred;
+  if (frameAction !== 'unknown') return isDeclaredAction(frameAction, descriptor) ? frameAction : 'unknown';
   const operation = context.collection?.kind === 'parameters' ? context.collection.collected.operation : context.slots.operation?.value;
   if (typeof operation === 'string') {
     const operationKind = descriptor.operationMetadata.operations.find((item) => item.name === operation)?.kind;

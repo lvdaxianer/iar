@@ -64,7 +64,7 @@ export const dipManageOperations: readonly SandboxOperation[] = [
   { name: 'search', kind: 'read', description: '检索 DIP 集成知识库，返回相关度最高的 3 条说明' },
   { name: 'list', kind: 'read', description: '列出全部 DIP 集成任务及最近运行状态' },
   { name: 'detail', kind: 'read', description: '查看单个集成任务的配置、来源目标与最近错误' },
-  { name: 'rerun', kind: 'action', description: '重新运行指定（或默认）集成任务，生成新实例' },
+  { name: 'rerun', kind: 'action', description: '重跑/重新运行指定（或默认）集成任务，生成新实例' },
   { name: 'stop', kind: 'action', description: '停止指定集成任务并中断当前运行实例' }
 ];
 
@@ -159,7 +159,13 @@ export const dipManageHandler: FunctionHandler = async (input) => {
   }
   if (operation === 'list') {
     const failed = DIP_TASKS.filter((task) => task.status === 'failed').length;
-    return succeed('list', { tasks: [...DIP_TASKS], summary: `共 ${String(DIP_TASKS.length)} 个集成任务，${String(failed)} 个失败，1 个运行中` });
+    const factRecords = DIP_TASKS.map((task) => ({
+      taskId: String(task.taskId ?? ''),
+      name: String(task.name ?? ''),
+      status: String(task.status ?? ''),
+      ...(task.lastRunAt === undefined ? {} : { lastRunAt: String(task.lastRunAt) })
+    }));
+    return succeed('list', { tasks: [...DIP_TASKS], summary: `共 ${String(DIP_TASKS.length)} 个集成任务，${String(failed)} 个失败，1 个运行中` }, {}, factRecords);
   }
   const task = resolveTask(parsed.query, parsed.params);
   if (!task) return fail('dip.task_not_found');

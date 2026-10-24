@@ -3,7 +3,7 @@ import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
 import { allowsContextFollowUp, applyRouteDiagnostic, canPassThrough, deterministicFallbackReply, gateIncompleteSemanticFrame, logActionResult, logRouteResult, pendingBridgeResult, resolveNoMatchTurn, runPiAgentDelegate, semanticIncompleteClarification } from './session-turn-helpers.js';
-import { classifySessionWorkflowDecision, hasVerifiedFactsForFollowUp, matchesPendingOption, normalizeContextFollowUpFrame, normalizeCurrentTurnWorkflowDecision, recoverContinuation, recoverFunctionCandidates, workflowDecisionReply } from './session-clarification.js';
+import { classifySessionWorkflowDecision, hasVerifiedFactsForFollowUp, matchesPendingOption, normalizeContextFollowUpFrame, normalizeCurrentTurnWorkflowDecision, normalizeInformationalQueryFrame, recoverContinuation, recoverFunctionCandidates, workflowDecisionReply } from './session-clarification.js';
 import type { ActionDefinition, ActionResult, BehaviorContext, CollectionState, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
@@ -37,11 +37,12 @@ export type StreamTurnContext = {
   functionDescriptors: PluginDescriptor[];
   routeFrame: (traceId: string, runId: string, frame: SemanticFrame, behaviorContext: BehaviorContext, currentMessage: string, recentMessages: Array<{ role: string; text: string }>, selectedDescriptor?: PluginDescriptor) => Promise<RouteResult>;
   resolveReferences: (frame: SemanticFrame, behaviorContext: BehaviorContext) => ReferenceResolution;
-  prepareAndExecute: (context: { runId: string; traceId?: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext }) => Promise<ExecuteTurnOutcome>;
+  prepareAndExecute: (context: { runId: string; traceId?: string; userText: string; frame: SemanticFrame; route: RouteResult; behaviorContext: BehaviorContext; resolvedReferences?: readonly ResolvedFactReference[] }) => Promise<ExecuteTurnOutcome>;
   /** 兜底与执行后回复分别保留增量回调和超限错误。 */
   fallbackReplyStreamed: (context: { traceId: string; runId: string; userText: string; reasonCode: string; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[]; resolvedReferences?: ResolvedFactReference[] }, onDelta: (delta: string) => void, onReasoningDelta?: (delta: string) => void) => Promise<string>;
   generateReplyStreamed: (context: { traceId: string; runId: string; userText: string; action: ActionDefinition; actionResult: ActionResult; operationKind: 'read' | 'action'; behaviorContext: BehaviorContext; recentMessages: Array<{ role: string; text: string }>; functionDescriptors: PluginDescriptor[] }, onDelta: (delta: string) => void, onReasoningDelta?: (delta: string) => void) => Promise<string>;
   currentBehaviorContext: () => BehaviorContext;
+  focusFactRecord: (recordId: string) => Promise<void>;
   /** 仅完整回复可写入宿主持有的历史。 */
   pushMessages: (userText: string, reply: string) => void;
   /** 可选的进程内 Pi 委托，未命中业务路由时接管 eligible 输入。 */
@@ -170,7 +171,7 @@ export class SandboxSessionStreamTurn {
       return { status: 'clarification', reply, route, reasonCode: workflowDecision.event };
     }
     const recovered = recoverContinuation(this.context.functionDescriptors, behaviorContext, normalizedFrame, userText);
-    const frame = recovered.frame;
+    const frame = normalizeInformationalQueryFrame(recovered.frame, userText);
     const effectiveDescriptor = recovered.descriptor ?? selectedDescriptor;
     if (recovered.reasonCode !== undefined) {
       const evidence: RouteEvidence = { status: 'rejected', reasonCode: recovered.reasonCode, semanticIntent: frame.intent, semanticConfidence: frame.confidence, ...(recovered.functionId === undefined ? {} : { functionId: recovered.functionId }), ...(recovered.pluginId === undefined ? {} : { pluginId: recovered.pluginId }) };
@@ -229,7 +230,7 @@ export class SandboxSessionStreamTurn {
     emit({ type: 'stage', stage: 'action' });
     if (this.context.hasPending()) await this.context.cancelStalePending();
     timing.start('action.execute');
-    const outcome = await this.context.prepareAndExecute({ runId: SESSION_RUN_ID, traceId, userText, frame, route, behaviorContext: routeContext });
+    const outcome = await this.context.prepareAndExecute({ runId: SESSION_RUN_ID, traceId, userText, frame, route, behaviorContext: routeContext, resolvedReferences: references.references });
     timing.end('action.execute');
     logActionResult(traceId, outcome);
     applyRouteDiagnostic(evidence, traceId, outcome);
@@ -292,6 +293,8 @@ export class SandboxSessionStreamTurn {
     timing.end('response.reasoning', 'completed');
     timing.end('response.generate', reply === undefined ? 'failed' : 'completed');
     if (reply === undefined) return { status: 'failed', reply: '模型回复超限，回复未完成。', route: evidence, reasonCode: 'model_response_too_large' };
+    const focusedRecord = resolvedReferences?.at(-1)?.record;
+    if (focusedRecord !== undefined) await this.context.focusFactRecord(focusedRecord.recordId);
     this.context.pushMessages(userText, reply);
     return { status: 'clarification', reply, route: evidence, reasonCode: evidence.reasonCode, ...(resolvedReferences && resolvedReferences.length > 0 ? { disposition: 'context_answered' as const } : {}) };
   }

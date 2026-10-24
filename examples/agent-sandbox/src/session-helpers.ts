@@ -91,9 +91,12 @@ export function buildActionInput(functionId: string, slots: Record<string, JsonV
   if (functionId.trim().length === 0) return { missing: ['functionId'], reasonCode: 'function_missing' };
   if (actionType === 'unknown') return { missing: ['actionType'], reasonCode: 'action_type_missing' };
   const rawOperation = stringSlot(slots, 'operation');
-  const query = userText.length > 0 ? userText : stringSlot(slots, 'query');
+  // Action Handler 的 query 仍是统一协议中的原始补充文本，但在当前轮存在
+  // 明确自我纠正时必须移除已撤回的旧值。否则下游只按 query 做通用解析时，
+  // 可能把第一个数字误认为最终值。该处理只识别通用纠正结构，不读取业务词。
+  const query = userText.length > 0 ? normalizeCorrectedActionQuery(userText) : stringSlot(slots, 'query');
   const expectedKind = actionType === 'query' ? 'read' : 'action';
-  const operation = chooseCompatibleOperation(operations, rawOperation, expectedKind);
+  const operation = chooseCompatibleOperation(operations, rawOperation, expectedKind, userText);
   const params = inheritFactParams(functionId, paramsSlot(slots), userText, behaviorContext);
   if (!operation) return { missing: ['operation'], reasonCode: 'operation_missing', expectedOperation: (operations.filter((item) => item.kind === expectedKind).map((item) => item.name).join('|') || 'unknown').slice(0, 256), actualOperation: 'missing' };
   if (operation === 'search' && !query) return { missing: ['query'], reasonCode: 'query_missing' };
@@ -102,6 +105,36 @@ export function buildActionInput(functionId: string, slots: Record<string, JsonV
   if (query) input.query = query.slice(0, 500);
   if (params) input.params = params;
   return { input };
+}
+
+/** 将同一 Function 的已解析列表事实按字段名并入参数，当前轮槽位保持最高优先级。 */
+export function mergeResolvedReferenceParams(slots: Record<string, JsonValue>, references: readonly import('./session-types.js').ResolvedFactReference[], functionId: string): Record<string, JsonValue> {
+  const params = isRecord(slots.params) ? { ...slots.params } : {};
+  for (const reference of references) {
+    if (reference.record.functionId !== functionId) continue;
+    for (const [field, value] of Object.entries(reference.record.values)) {
+      if (typeof value === 'string' && value.length > 0 && !Object.hasOwn(params, field)) params[field] = value;
+    }
+  }
+  return Object.keys(params).length > 0 ? { ...slots, params } : slots;
+}
+
+/**
+ * 移除当前轮自我纠正表达中的旧字面值，保留目标对象和最终替代值。
+ *
+ * 只在同一文本包含多个数字且出现纠正/替换连接词时生效，避免改变普通
+ * 查询和单值动作的原始语义。参数字段仍由 Semantic Frame/Schema 校验决定。
+ */
+function normalizeCorrectedActionQuery(text: string): string {
+  const numbers = text.match(/\d+(?:\.\d+)?/g) ?? [];
+  if (numbers.length < 2) return text;
+  const marker = /(?:不对|而是|改成|调到|设为|换成|变更为)/g;
+  let lastMarker: RegExpExecArray | null = null;
+  let match: RegExpExecArray | null;
+  while ((match = marker.exec(text)) !== null) lastMarker = match;
+  if (lastMarker === null) return text;
+  const before = text.slice(0, lastMarker.index).replace(/\d+(?:\.\d+)?/g, '');
+  return `${before}${text.slice(lastMarker.index)}`.replace(/\s{2,}/g, ' ').trim();
 }
 
 /** 只把当前 Function Schema 已声明且已验证的上下文槽位作为补参基线。 */
@@ -155,14 +188,22 @@ export function buildSelfIntroductionInput(descriptors: readonly PluginDescripto
 }
 
 /** 选择与固定语义动作类型兼容的操作目录项。 */
-function chooseCompatibleOperation(operations: readonly PluginOperation[], rawOperation: string | undefined, expectedKind: 'read' | 'action'): string | undefined {
+function chooseCompatibleOperation(operations: readonly PluginOperation[], rawOperation: string | undefined, expectedKind: 'read' | 'action', userText: string): string | undefined {
   if (rawOperation) {
     const explicit = operations.find((item) => item.name === rawOperation);
     if (explicit?.kind === expectedKind) return explicit.name;
+    if (expectedKind === 'action') return matchOperationFromText(operations, userText, expectedKind);
     return undefined;
   }
-  if (expectedKind === 'action') return undefined;
+  if (expectedKind === 'action') return matchOperationFromText(operations, userText, expectedKind);
   return operations.find((item) => item.kind === expectedKind)?.name;
+}
+
+/** 在已验证的 Operation 描述中寻找当前轮的唯一动作表达，不创建新的操作标识。 */
+function matchOperationFromText(operations: readonly PluginOperation[], userText: string, expectedKind: 'read' | 'action'): string | undefined {
+  const text = userText.trim().toLocaleLowerCase();
+  const matches = operations.filter((operation) => operation.kind === expectedKind && operation.description.length >= 2 && text.includes(operation.description.split(/[（(，,。；;、/]/u)[0]!.toLocaleLowerCase()));
+  return matches.length === 1 ? matches[0]!.name : undefined;
 }
 
 /**
