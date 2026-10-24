@@ -95,6 +95,35 @@ test('stale non-cancel workflow event cannot block a current explicit semantic r
   assert.equal(normalizeCurrentTurnWorkflowDecision(frame, '那认证方式是哪种？'), undefined);
 });
 
+test('explicit standalone cancellation is recovered when the model omits its workflow event', () => {
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v2', intent: 'ticket.create', action: 'create', slots: {}, references: [], confidence: 0.86
+  };
+
+  assert.equal(normalizeCurrentTurnWorkflowDecision(frame, '算了，不建了')?.event, 'workflow_cancelled');
+});
+
+test('historical effectiveness question remains a fact follow-up after compaction', () => {
+  const context = createInitialContext('post-compaction-history');
+  context.factHistory = {
+    records: [{
+      recordId: 'fact-limit', sequence: 1, sourceEventId: 'event-limit',
+      functionId: 'api.gateway', pluginId: 'api-gateway-v1',
+      values: { newLimit: '100/s' }, createdAt: '2026-10-24T00:00:00.000Z'
+    }],
+    focusRecordId: 'fact-limit'
+  };
+  const frame: SemanticFrame = {
+    schemaVersion: 'iar.semantic-frame/v2', intent: 'api.gateway', action: 'update', slots: {}, references: [], confidence: 0.89
+  };
+
+  const normalized = normalizeContextFollowUpFrame(context, frame, '刚才那个调整生效了吗？');
+
+  assert.equal(normalized.intent, 'unknown');
+  assert.equal(normalized.action, 'query');
+  assert.equal(normalized.workflowDecision?.event, 'context_answered');
+});
+
 test('discourse continuation restores the verified route without inventing an identifier', () => {
   const context = createInitialContext('discourse-continuation');
   context.route = { functionId: 'verified.function', pluginId: 'verified.plugin' };

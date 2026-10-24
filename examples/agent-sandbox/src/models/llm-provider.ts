@@ -159,7 +159,7 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
       return { system: SEMANTIC_SYSTEM_PROMPT, user: buildSemanticUserPrompt(input), thinking: { type: 'disabled' } };
     }
     if (request.profile.role === 'context.compact') {
-      return { system: COMPACT_SYSTEM_PROMPT, user: buildCompactionUserPrompt(input) };
+      return { system: COMPACT_SYSTEM_PROMPT, user: buildCompactionUserPrompt(input), thinking: { type: 'disabled' } };
     }
     return { system: buildResponseSystemPrompt(input), user: buildResponseUserPrompt(input) };
   }

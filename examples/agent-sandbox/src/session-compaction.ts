@@ -2,7 +2,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-18
  */
-import { SCHEMA_VERSIONS, type BehaviorContext, type CompactionResult, type EventEnvelope } from '@iar/contracts';
+import { COMPACTION_LIMITS, SCHEMA_VERSIONS, type BehaviorContext, type CompactionResult, type EventEnvelope } from '@iar/contracts';
 import { ContextCompactorAdapter, type ModelGateway } from '@iar/runtime';
 import { BehaviorContextProjector, ContextCompactionService, type CompactionRequest } from '@iar/runtime';
 import { InMemoryEventStore } from '@iar/storage';
@@ -52,8 +52,8 @@ export class SandboxSessionCompaction {
    * @date 2026-10-17
    */
   public async compact(): Promise<CompactResult> {
-    const events = await this.context.eventStore.list();
     const current = this.context.projector.current();
+    const events = this.selectCompactionEvents(await this.context.eventStore.list(), current);
     const hashBefore = current.integrity.criticalFieldHash;
     // 至少保留最后一个事件，事件不足时不调用模型。
     if (events.length < 2) {
@@ -68,6 +68,31 @@ export class SandboxSessionCompaction {
       input: { behaviorContext: current, eventsToCompact: events.slice(0, -1) }
     });
     return this.finishCompaction({ events, current, hashBefore, compactSeq, occurredAt, compacted });
+  }
+
+  /**
+   * 选择本次压缩的有界事件窗口，保留最新事件作为压缩后的第一条保留事件。
+   * EventLog 和当前投影仍保留完整历史，不在这里删除或重置旧事件。
+   *
+   * @param events - 当前会话的完整事件列表
+   * @param current - 当前投影，用于保留事实记录引用的来源事件
+   * @returns 不超过公共压缩上限且包含事实来源的事件窗口
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-24
+   */
+  private selectCompactionEvents(events: EventEnvelope[], current: BehaviorContext): EventEnvelope[] {
+    const compactable = events.filter((event) => event.eventName !== 'context.updated' && event.eventName !== 'message.received' && event.eventName !== 'message.sent');
+    const factSources = new Set((current.factHistory?.records ?? []).map((record) => record.sourceEventId));
+    const required = compactable.filter((event) => factSources.has(event.eventId)).slice(-COMPACTION_LIMITS.maxEvents);
+    const remaining = Math.max(0, COMPACTION_LIMITS.maxEvents - required.length);
+    const recent = compactable.filter((event) => !factSources.has(event.eventId)).slice(-remaining);
+    const selected = [...required, ...recent];
+    const latest = compactable.at(-1);
+    if (latest && !selected.some((event) => event.eventId === latest.eventId)) {
+      selected.shift();
+      selected.push(latest);
+    }
+    return selected.sort((left, right) => events.indexOf(left) - events.indexOf(right));
   }
 
   /** 记录模型或运行时压缩结果，失败时保留可验证的旧投影。

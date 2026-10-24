@@ -6,7 +6,7 @@ import type { RouteEvidence, TurnResult } from './session-types.js';
 
 const GENERIC_CONTINUATION_PATTERN = /(?:^(?:那|那么|接着|接下来|另外|此外|上述|这|这个|那个)|继续|修改|改成|调整|调到|设为|提高|降低|上调|下调|往上调|往下调|增加|减少|加上|减去|执行这个|按这个|照这个|重试|再试|重新|proceed|retry|change|update|adjust|increase|decrease|set|run)/iu;
 const UPDATE_CONTINUATION_PATTERN = /(修改|改成|调整|调到|设为|提高|降低|上调|下调|往上调|往下调|增加|减少|加上|减去|change|update|adjust|increase|decrease|set)/iu;
-const QUERY_CONTINUATION_PATTERN = /(查询|查一下|现在.*(?:多少|什么)|状态|结果|成功了吗|跑完了吗|有没有完成|怎么样|是多少|query|status|how many)/iu;
+const QUERY_CONTINUATION_PATTERN = /(查询|查一下|现在.*(?:多少|什么)|状态|结果|成功了吗|生效了吗|跑完了吗|有没有完成|怎么样|是多少|query|status|how many)/iu;
 const INFORMATIONAL_QUERY_PATTERN = /(怎么|如何|流程|方式|方法|能不能|是否可以|为什么|什么是|how to|can i|why)/iu;
 const EXECUTE_CONTINUATION_PATTERN = /(继续执行|执行这个|重试|再试|重跑|再跑|重新跑|重新执行|proceed|retry|run|execute)/iu;
 const EXPLICIT_SIDE_EFFECT_PATTERN = /(创建|新增|修改|改成|调整|调到|设为|删除|重跑|导出|申请|执行|重试|create|update|change|adjust|delete|export|apply|execute|retry)/iu;
@@ -16,6 +16,18 @@ const CONFIRMATION_ONLY_PATTERN = /^(?:直接)?(?:确认|同意|批准|confirm|a
 const DISCOURSE_CONTINUATION_PATTERN = /^(?:那|那么|接着|接下来|另外|此外|上述|这|这个|那个)/u;
 const RELATIVE_LIST_QUERY_PATTERN = /(?:第\s*(?:[一二三四五六七八九十百\d]+)\s*(?:个|条|项|位)|最后一个|失败的那个|成功的那个|这个(?:条目|记录)?|那个(?:条目|记录)?)/u;
 const MULTI_INTENT_PATTERN = /(顺便|同时|另外|以及|并且|再加上|and|also|as well)/iu;
+
+/**
+ * 判断输入是否为不带新副作用目标的明确取消语句。
+ *
+ * @param userText - 当前用户输入
+ * @returns 是否可以穿过 Bridge pending 门禁进入取消判定
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-24
+ */
+export function isExplicitStandaloneCancellation(userText: string): boolean {
+  return EXPLICIT_CANCEL_PATTERN.test(userText) && !EXPLICIT_SIDE_EFFECT_PATTERN.test(userText);
+}
 
 /** 将当前动态 Plugin 描述转换为有限、不具备执行权限的选择状态。 */
 export function createSelectionState(descriptors: readonly PluginDescriptor[], unresolvedStreak: number, reasonCode: string): { state: ClarificationState; options: NonNullable<PendingInput['options']> } {
@@ -55,9 +67,23 @@ export function normalizeContextFollowUpFrame(context: BehaviorContext, frame: S
   return normalized;
 }
 
-/** 丢弃模型把上一轮新话题事件错误延续到当前明确业务请求的结果。 */
+/**
+ * 丢弃模型把上一轮新话题事件错误延续到当前明确业务请求，并补齐明确取消语句。
+ *
+ * @param frame - 当前模型抽取的语义帧
+ * @param userText - 当前用户输入
+ * @returns 经过当前文本边界校验后的工作流事件
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-24
+ */
 export function normalizeCurrentTurnWorkflowDecision(frame: SemanticFrame, userText: string): SemanticFrame['workflowDecision'] {
   const decision = frame.workflowDecision;
+  const explicitCancellation = isExplicitStandaloneCancellation(userText);
+  if (explicitCancellation) return {
+    schemaVersion: SCHEMA_VERSIONS.workflowDecision,
+    userIntent: 'cancel_workflow',
+    event: 'workflow_cancelled'
+  };
   if (decision === undefined) return undefined;
   // 确认接口已经单独完成上一轮确认；下一条普通问题不能被模型重复携带的
   // confirmation_accepted/rejected 事件阻断，应重新按当前用户问题路由。
@@ -76,7 +102,7 @@ function isLikelyFactFollowUp(context: BehaviorContext, userText: string): boole
 /** 只把有历史指代且没有副作用动作的当前输入视为事实追问候选。 */
 function isContextFollowUpCandidate(context: BehaviorContext, frame: SemanticFrame, userText: string): boolean {
   return ((context.factHistory?.records.length ?? 0) > 0 || hasCancelledConversationTurn(context, userText))
-    && (frame.action === 'query' || frame.action === 'unknown')
+    && (frame.action === 'query' || frame.action === 'unknown' || QUERY_CONTINUATION_PATTERN.test(userText))
     && !CONFIRMATION_ONLY_PATTERN.test(userText.trim())
     && (!EXPLICIT_SIDE_EFFECT_PATTERN.test(userText) || QUERY_CONTINUATION_PATTERN.test(userText))
     && isLikelyFactFollowUp(context, userText);

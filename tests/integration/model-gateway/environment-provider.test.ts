@@ -165,6 +165,23 @@ test('normal provider resolves endpoint, API key, and model ID from profile envi
   }
 });
 
+test('context compaction disables reasoning so structured output cannot be exhausted by hidden thinking', async () => {
+  const restoreEnvironment = setEnvironment({
+    IAR_TEST_NORMAL_ENDPOINT: 'https://normal.example/v1',
+    IAR_TEST_NORMAL_API_KEY: 'normal-secret',
+    IAR_TEST_NORMAL_MODEL: 'normal-env-model'
+  });
+  const fetchStub = installFetch({ choices: [{ message: { content: '{"ok":true}' } }] });
+  try {
+    await new BrainModelProvider().complete(request(normalProfile({ role: 'context.compact' })));
+    const body = JSON.parse(String(fetchStub.requests[0]?.init?.body)) as { thinking?: unknown };
+    assert.deepEqual(body.thinking, { type: 'disabled' });
+  } finally {
+    fetchStub.restore();
+    restoreEnvironment();
+  }
+});
+
 test('response generation does not inherit the extraction disabled-thinking policy', async () => {
   const restoreEnvironment = setEnvironment({
     IAR_TEST_NORMAL_ENDPOINT: 'https://normal.example/v1',

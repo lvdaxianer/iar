@@ -84,6 +84,20 @@ test('压缩组件始终读取重置后的当前事件存储', async () => {
   } finally { session.dispose(); }
 });
 
+test('长单会话压缩只发送有界事件窗口并保留当前上下文', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    for (let index = 0; index < 100; index += 1) await session.turn('查询服务状态');
+    const before = await session.state();
+    assert.ok(before.events.length > 128);
+    const compacted = await session.compact();
+    assert.equal(compacted.ok, true);
+    const after = await session.state();
+    assert.equal(after.context.integrity.criticalFieldHash, compacted.hashAfter);
+    assert.equal(after.context.conversationTurns?.turns.length, before.context.conversationTurns?.turns.length);
+  } finally { session.dispose(); }
+});
+
 /* 先生成旧工作流再重置，确保后续流式路由和取消使用新状态。
  * pending 标识、轮次计数和 done 事件共同验证状态及事件边界。
  * 重置前的对话使旧事件和工作流确实存在，避免空状态假阳性。
@@ -167,6 +181,30 @@ test('带取消语气的参数自我修正仍恢复原动作并重新确认', as
     if (confirmed.status !== 'executed') return;
     assert.equal(confirmed.actionResult?.status, 'succeeded');
     assert.equal(confirmed.actionResult?.output && typeof confirmed.actionResult.output === 'object' && !Array.isArray(confirmed.actionResult.output) ? confirmed.actionResult.output.newLimit : undefined, '200/s');
+  } finally { session.dispose(); }
+});
+
+test('Bridge pending 允许明确取消语句进入会话状态机', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    const pending = await session.bridgeTurn('帮我创建一张工单，说咖啡机坏了');
+    assert.equal(pending.status, 'awaiting_confirmation');
+    const cancelled = await session.bridgeTurn('算了，不建了');
+    assert.equal(cancelled.status, 'clarification');
+    assert.equal(cancelled.reasonCode, 'workflow_cancelled');
+    assert.equal((await session.state()).pending, null);
+  } finally { session.dispose(); }
+});
+
+test('流式 Bridge pending 允许明确取消语句进入会话状态机', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    const pending = await session.bridgeTurnStreamed('帮我创建一张工单，说投影仪坏了', () => undefined);
+    assert.equal(pending.status, 'awaiting_confirmation');
+    const cancelled = await session.bridgeTurnStreamed('算了，不建了', () => undefined);
+    assert.equal(cancelled.status, 'clarification');
+    assert.equal(cancelled.reasonCode, 'workflow_cancelled');
+    assert.equal((await session.state()).pending, null);
   } finally { session.dispose(); }
 });
 

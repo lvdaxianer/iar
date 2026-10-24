@@ -1,6 +1,7 @@
 /** 普通与 bridge 单轮输入的编排组件。 */
 import { resolveSandboxTraceId } from './safe-log.js';
 import { SESSION_RUN_ID } from './session-core.js';
+import { isExplicitStandaloneCancellation } from './session-clarification.js';
 import { pendingBridgeResult } from './session-turn-helpers.js';
 import type { ExtractFrameOutcome, PendingActionContext, RouteEvidence, StructuredInput, TurnResult } from './session-types.js';
 import { recordTurnTiming, TurnTimingTracker } from './turn-timing.js';
@@ -33,7 +34,7 @@ export class SandboxSessionTurn {
     const traceId = resolveSandboxTraceId(`trace-sandbox-${String(turnId)}`);
     const timing = new TurnTimingTracker(traceId);
     try {
-      if (bridgeMode && this.context.hasPending()) return this.withTiming(pendingBridgeResult(), timing);
+      if (bridgeMode && this.context.hasPending() && !isExplicitStandaloneCancellation(userText)) return this.withTiming(pendingBridgeResult(), timing);
       const pendingAction = this.context.pendingAction();
       const behaviorContext = this.context.currentBehaviorContext();
       const selection = this.context.resolveSelection(userText, behaviorContext);

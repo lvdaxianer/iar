@@ -168,8 +168,9 @@ export const COMPACT_SYSTEM_PROMPT = `你是 IAR（Intent Action Runtime）的 C
 2. 必须原样保留 state.subject、state.intent、state.action、state.route、state.slots、state.workflow、state.pending、state.confirmation；可信 factHistory 及其来源由运行时保留。
 3. 不得重新选择 Function 或 Plugin，不得改变 confirmation、workflow 或可信 factHistory。
 4. 只输出一个 JSON 对象，不要输出 Markdown、解释文字或代码围栏。
-5. 输出必须符合 iar.compaction-result/v1：{ "schemaVersion": "iar.compaction-result/v1", "summary": string, "state": {...}, "references": [...], "preservedFacts": [...], "warnings": [...] }。
-preservedFacts 必须包含：subject、action、functionId、pluginId、slots、workflow.currentStep、pending、confirmation、intent、idempotencyKey、factHistory。`;
+5. 输出必须符合 iar.compaction-result/v1，且只能使用以下字段：{ "schemaVersion": "iar.compaction-result/v1", "summary": string, "state": {...}, "references": [{ "text": string, "resolvedTo": string, "sourceEventId": string }], "preservedFacts": string[], "warnings": string[] }。
+6. references 中每项只能有 text、resolvedTo、sourceEventId 三个字段；resolvedTo 必须是来源事件或当前结构化槽位中出现的稳定事实值（例如 receipt、target、newLimit），绝不能填写 fact record ID、eventId、eventName、occurredAt 或其他事件对象字段；sourceEventId 必须是包含该事实值的不可变事件 ID。无法绑定时，references 必须为空数组。
+7. preservedFacts 必须是字符串路径数组，不能是对象；数组必须包含：subject、action、functionId、pluginId、slots、workflow.currentStep、pending、confirmation、intent、idempotencyKey、factHistory。`;
 
 /** 模型提示词层的边界输入。 */
 export type PromptLayers = {
@@ -272,6 +273,8 @@ const COMPACTION_POLICY = `{
     "state.confirmation",
     "preservedFacts"
   ],
+  "referencesItemShape": { "text": "string", "resolvedTo": "string", "sourceEventId": "string" },
+  "preservedFactsItemType": "string",
   "requiredPreservedFacts": ["factHistory"],
   "preserveEventReferences": true
 }`;

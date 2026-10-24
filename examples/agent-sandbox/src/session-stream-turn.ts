@@ -3,7 +3,7 @@ import type { PiAgentDelegate } from './models/pi-agent-delegate.js';
 import { SESSION_RUN_ID } from './session-core.js';
 import { buildEvidence, summarizeAction } from './session-helpers.js';
 import { allowsContextFollowUp, applyRouteDiagnostic, canPassThrough, deterministicFactFollowUpReply, deterministicFallbackReply, deterministicOrderCandidateReply, deterministicReferenceReply, gateIncompleteSemanticFrame, logActionResult, logRouteResult, pendingBridgeResult, resolveNoMatchTurn, runPiAgentDelegate, semanticIncompleteClarification } from './session-turn-helpers.js';
-import { classifySessionWorkflowDecision, hasVerifiedFactsForFollowUp, matchesPendingOption, normalizeContextFollowUpFrame, normalizeCurrentTurnWorkflowDecision, normalizeInformationalQueryFrame, recoverContinuation, recoverFunctionCandidates, workflowDecisionReply } from './session-clarification.js';
+import { classifySessionWorkflowDecision, hasVerifiedFactsForFollowUp, isExplicitStandaloneCancellation, matchesPendingOption, normalizeContextFollowUpFrame, normalizeCurrentTurnWorkflowDecision, normalizeInformationalQueryFrame, recoverContinuation, recoverFunctionCandidates, workflowDecisionReply } from './session-clarification.js';
 import type { ActionDefinition, ActionResult, BehaviorContext, CollectionState, PendingReference, VerifiedFactRecord } from '@iar/contracts';
 import type { SemanticFrame } from '@iar/runtime';
 import type { RouteResult } from '@iar/runtime';
@@ -96,7 +96,7 @@ export class SandboxSessionStreamTurn {
   private async executeStreamTurn(context: { userText: string; traceId: string; emit: (event: StreamEvent) => void; timing: TurnTimingTracker; bridgeMode: boolean; structuredInput?: StructuredInput }): Promise<TurnResult> {
     const { userText, traceId, emit, timing, bridgeMode, structuredInput } = context;
     emit({ type: 'stage', stage: 'semantic' });
-    if (bridgeMode && this.context.hasPending()) return withReplySource(pendingBridgeResult());
+    if (bridgeMode && this.context.hasPending() && !isExplicitStandaloneCancellation(userText)) return withReplySource(pendingBridgeResult());
     const pendingAction = this.context.pendingAction();
     const behaviorContext = this.context.currentBehaviorContext();
     const selection = this.context.resolveSelection(userText, behaviorContext);
