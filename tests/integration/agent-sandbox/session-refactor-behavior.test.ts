@@ -338,6 +338,36 @@ test('已完成动作的状态追问仍使用可信事实上下文', async () =>
   } finally { session.dispose(); }
 });
 
+test('无对象泛查询不会吸附上一轮 Function', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    const pending = await session.turn('帮我创建一张工单，描述是会议室投影仪连不上');
+    assert.equal(pending.status, 'awaiting_confirmation');
+    if (pending.status !== 'awaiting_confirmation') return;
+    assert.equal((await session.confirm(true)).status, 'executed');
+
+    const query = await session.turn('可以帮我查询下吧');
+    assert.equal(query.status, 'clarification');
+    assert.equal(query.route.functionId, undefined);
+    assert.doesNotMatch(query.reply, /工单已创建|ticket-20261018/u);
+    assert.match(query.reply, /查询|对象|补充/u);
+  } finally { session.dispose(); }
+});
+
+test('明确新话题不会继承旧工单目标', async () => {
+  const session = new IarSandboxSession({ mode: 'scripted' });
+  try {
+    const pending = await session.turn('帮我创建一张工单，描述是会议室投影仪连不上');
+    assert.equal(pending.status, 'awaiting_confirmation');
+    if (pending.status !== 'awaiting_confirmation') return;
+    assert.equal((await session.confirm(true)).status, 'executed');
+
+    const limit = await session.turn('把订单接口限流调到每秒 200 次');
+    assert.equal(limit.status, 'awaiting_confirmation');
+    assert.equal(limit.route.functionId, 'api.gateway');
+  } finally { session.dispose(); }
+});
+
 test('空会话的历史指代不会被业务名词误判为新动作', async () => {
   const session = new IarSandboxSession({ mode: 'scripted' });
   try {

@@ -163,9 +163,12 @@ export function recoverContinuation(descriptors: readonly PluginDescriptor[], co
   if (INFORMATIONAL_QUERY_PATTERN.test(userText) && !hasStableRoute && !CONFIRMATION_ONLY_PATTERN.test(userText.trim())) {
     return { frame: { ...frame, action: 'query' } };
   }
+  if (isStaleRouteWithoutCurrentEvidence(descriptors, context, frame, userText)) {
+    return { frame: clearUntrustedContinuationTarget(frame) };
+  }
   const target = context.collection?.kind === 'parameters'
     ? { functionId: context.collection.functionId, pluginId: context.collection.pluginId }
-    : (eventAllowsRecovery || (workflowEvent === undefined && ((GENERIC_CONTINUATION_PATTERN.test(userText) && !RELATIVE_LIST_QUERY_PATTERN.test(userText)) || QUERY_CONTINUATION_PATTERN.test(userText) || EXECUTE_CONTINUATION_PATTERN.test(userText)))) && (context.route.functionId !== undefined || context.route.pluginId !== undefined)
+    : (eventAllowsRecovery || (workflowEvent === undefined && ((GENERIC_CONTINUATION_PATTERN.test(userText) && !RELATIVE_LIST_QUERY_PATTERN.test(userText)) || hasTrustedQueryContinuationEvidence(descriptors, context, frame, userText) || EXECUTE_CONTINUATION_PATTERN.test(userText)))) && (context.route.functionId !== undefined || context.route.pluginId !== undefined)
       ? { functionId: context.route.functionId, pluginId: context.route.pluginId }
       : undefined;
   if (target === undefined) {
@@ -217,6 +220,40 @@ export function recoverContinuation(descriptors: readonly PluginDescriptor[], co
     return { frame: clearUntrustedContinuationTarget(currentFrame) };
   }
   return { frame: recoverContinuationFrame(currentFrame, context, descriptor, userText), descriptor, functionId: descriptor.functionId, pluginId: descriptor.pluginId };
+}
+
+/** 判断模型是否把上一目标带入了当前无对象、无指代的新查询。
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-24
+ */
+function isStaleRouteWithoutCurrentEvidence(descriptors: readonly PluginDescriptor[], context: BehaviorContext, frame: SemanticFrame, userText: string): boolean {
+  const previousFunctionId = context.route.functionId;
+  if (previousFunctionId === undefined || frame.intent !== previousFunctionId) return false;
+  if (!isBareQueryRequest(userText)) return false;
+  if (frame.references.length > 0 || GENERIC_CONTINUATION_PATTERN.test(userText) || isLikelyFactFollowUp(context, userText)) return false;
+  if (EXPLICIT_SIDE_EFFECT_PATTERN.test(userText)) return false;
+  return chooseTextDescriptor(descriptors, userText, frame.action)?.functionId !== previousFunctionId;
+}
+
+/** 判断当前查询是否有足够证据继续使用同一稳定路由。
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-24
+ */
+function hasTrustedQueryContinuationEvidence(descriptors: readonly PluginDescriptor[], context: BehaviorContext, frame: SemanticFrame, userText: string): boolean {
+  if (!QUERY_CONTINUATION_PATTERN.test(userText)) return false;
+  if (isBareQueryRequest(userText)) return false;
+  if (frame.references.length > 0 || isLikelyFactFollowUp(context, userText)) return true;
+  const currentDescriptor = chooseTextDescriptor(descriptors, userText, frame.action);
+  return currentDescriptor !== undefined
+    && (currentDescriptor.functionId === context.route.functionId || currentDescriptor.pluginId === context.route.pluginId);
+}
+
+/** 判断输入是否只有泛化查询动作而没有查询对象。
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-24
+ */
+function isBareQueryRequest(userText: string): boolean {
+  return /^(?:可以|能否|能不能|请|麻烦)?(?:帮我)?(?:查询|查一下|查下|查查)(?:一下|下)?(?:吧|吗|呢)?[\s。！？!?]*$/iu.test(userText.trim());
 }
 
 /**
