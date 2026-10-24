@@ -256,6 +256,28 @@ async function openPiHostEvents(port: number, sessionId: string): Promise<{ read
   return { reader, firstChunk: new TextDecoder().decode(first.value) };
 }
 
+/**
+ * 在限定时间内读取指定 SSE 事件，避免回归测试无限等待断开的连接。
+ *
+ * @param opened - 已建立的 SSE 读取器和首帧
+ * @param eventName - 要等待的事件名称
+ * @returns 已读取的 SSE 文本
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-24
+ */
+async function readPiHostEvent(opened: { reader: ReadableStreamDefaultReader<Uint8Array>; firstChunk: string }, eventName: string): Promise<string> {
+  let body = opened.firstChunk;
+  while (!body.includes(`event: ${eventName}`)) {
+    const next = await Promise.race([
+      opened.reader.read().then((result) => result.done ? '' : new TextDecoder().decode(result.value)),
+      new Promise<string>((resolve) => setTimeout(() => resolve(''), 100))
+    ]);
+    if (next.length === 0) return body;
+    body += next;
+  }
+  return body;
+}
+
 test('Pi host refresh reuses the same server session after SSE disconnect', async t => {
   let openCount = 0;
   const { app, closeClients } = buildPiHostApp({ mode: 'scripted', client: makeFakeBridge({ onOpen: () => { openCount += 1; } }) });
@@ -299,6 +321,59 @@ test('Pi host expires detached sessions after the configured idle lifetime', asy
   assert.equal(firstChat.statusCode, 200);
   await new Promise<void>((resolve) => setTimeout(resolve, 5));
   const secondChat = await app.inject({ method: 'POST', url: '/api/pi-host/chat', payload: { session: 'idle-demo', text: '你是谁' } });
+  assert.equal(secondChat.statusCode, 200);
+  assert.equal(openCount, 2);
+});
+
+test('Pi host refresh synchronizes the current pending confirmation without Action input', async t => {
+  const pending = { actionId: 'action-8', runId: 'run-8', functionId: 'api.gateway', pluginId: 'api-gateway-v1', riskLevel: 'high', confirmationRequired: true };
+  const client = makeFakeBridge({ input: () => ({ version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo', disposition: 'awaiting_confirmation', reply: '请确认', pending, route: businessRoute() }) });
+  const { app, closeClients } = buildPiHostApp({ mode: 'scripted', client });
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  t.after(async () => { await closeClients(); await app.close(); });
+  const address = app.server.address();
+  assert.ok(address && typeof address === 'object');
+  const first = await openPiHostEvents(address.port, 'pending-refresh-demo');
+  const chat = await app.inject({ method: 'POST', url: '/api/pi-host/chat', payload: { session: 'pending-refresh-demo', text: '删除告警规则' } });
+  assert.equal(chat.statusCode, 200);
+  await first.reader.cancel();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  const second = await openPiHostEvents(address.port, 'pending-refresh-demo');
+  const sync = await readPiHostEvent(second, 'confirm');
+  assert.match(sync, /event: confirm/);
+  assert.match(sync, /action-8/);
+  assert.doesNotMatch(sync, /input|提示词|reasoning/);
+  await second.reader.cancel();
+});
+
+test('Pi host reconnect sends null confirmation state when no action is pending', async t => {
+  const { app, closeClients } = buildPiHostApp({ mode: 'scripted', client: makeFakeBridge() });
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  t.after(async () => { await closeClients(); await app.close(); });
+  const address = app.server.address();
+  assert.ok(address && typeof address === 'object');
+  const opened = await openPiHostEvents(address.port, 'empty-refresh-demo');
+  const sync = await readPiHostEvent(opened, 'confirm');
+  assert.match(sync, /event: confirm/);
+  assert.match(sync, /data: null/);
+  await opened.reader.cancel();
+});
+
+test('Pi host does not resurrect an expired session when SSE reconnects', async t => {
+  let openCount = 0;
+  const { app, closeClients } = buildPiHostApp({ mode: 'scripted', sessionIdleMs: 1, client: makeFakeBridge({ onOpen: () => { openCount += 1; } }) });
+  await app.listen({ port: 0, host: '127.0.0.1' });
+  t.after(async () => { await closeClients(); await app.close(); });
+  const address = app.server.address();
+  assert.ok(address && typeof address === 'object');
+  const firstChat = await app.inject({ method: 'POST', url: '/api/pi-host/chat', payload: { session: 'expired-refresh-demo', text: '你是谁' } });
+  assert.equal(firstChat.statusCode, 200);
+  await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  const opened = await openPiHostEvents(address.port, 'expired-refresh-demo');
+  const sync = await readPiHostEvent(opened, 'confirm');
+  assert.match(sync, /data: null/);
+  await opened.reader.cancel();
+  const secondChat = await app.inject({ method: 'POST', url: '/api/pi-host/chat', payload: { session: 'expired-refresh-demo', text: '你是谁' } });
   assert.equal(secondChat.statusCode, 200);
   assert.equal(openCount, 2);
 });

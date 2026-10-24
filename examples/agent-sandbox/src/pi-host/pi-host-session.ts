@@ -5,7 +5,7 @@
  * @author lvdaxianer@yeah.net
  * @date 2026-10-21
  */
-import { createIarExtension, IarBridgeClient, type BridgeCapabilityDescriptor, type BridgeConfirmResponse, type BridgeInputResponse, type BridgeInputStreamHandlers, type BridgePendingAction, type BridgeReplySource, type BridgeTimingSummary, type IarBridgeClientLike, type PiExtensionAPI, type PiExtensionContext, type PiInputResult } from '@iar/pi-bridge';
+import { createIarExtension, IarBridgeClient, type BridgeCapabilityDescriptor, type BridgeConfirmResponse, type BridgeInputResponse, type BridgeInputStreamHandlers, type BridgePendingAction, type BridgeReplySource, type BridgeStateResponse, type BridgeTimingSummary, type IarBridgeClientLike, type PiExtensionAPI, type PiExtensionContext, type PiInputResult } from '@iar/pi-bridge';
 import { createPiAgentDelegate, type PiAgentDelegate } from '../models/pi-agent-delegate.js';
 import type { SandboxMode } from '../session-types.js';
 
@@ -58,12 +58,12 @@ export type PiHostSessionOptions = {
 export type PiHostInputResult = { action: 'handled' | 'continue' };
 
 /** 可观测 client：在转发响应的同时提取路由证据和待确认状态。 */
-function observeClient(client: IarBridgeClientLike, hooks: { input?: (response: BridgeInputResponse) => void; confirm?: (response: BridgeConfirmResponse) => void; stream?: BridgeInputStreamHandlers }): IarBridgeClientLike {
+function observeClient(client: IarBridgeClientLike, hooks: { input?: (response: BridgeInputResponse) => void; confirm?: (response: BridgeConfirmResponse) => void; state?: (response: BridgeStateResponse) => void; stream?: BridgeInputStreamHandlers }): IarBridgeClientLike {
   return {
     openSession: (request) => client.openSession(request),
     input: async (sessionId, text) => { const response = client.inputStream ? await client.inputStream(sessionId, text, hooks.stream ?? {}) : await client.input(sessionId, text); hooks.input?.(response); return response; },
     confirm: async (sessionId, actionId, accepted) => { const response = await client.confirm(sessionId, actionId, accepted); hooks.confirm?.(response); return response; },
-    state: (sessionId) => client.state(sessionId)
+    state: async (sessionId) => { const response = await client.state(sessionId); hooks.state?.(response); return response; }
   };
 }
 
@@ -76,6 +76,8 @@ export class PiHostSession {
   private readonly context: PiExtensionContext;
   /** 当前 pass-through 请求携带的有界能力目录。 */
   private passThroughDescriptors: BridgeCapabilityDescriptor[] = [];
+  /** 当前 IAR 会话的脱敏待确认摘要；不保存 Action input。 */
+  private pendingAction: BridgePendingAction | null = null;
   /** 同一会话的轮次串行，保持与 Pi 单会话输入队列一致的语义。 */
   private chain: Promise<unknown> = Promise.resolve();
   /** 当前轮收集的 entry，handled 后以备注形式写进 Pi 委托上下文。 */
@@ -86,8 +88,9 @@ export class PiHostSession {
     this.delegate = options.piAgent ?? createPiAgentDelegate({ mode: options.mode, sessionId: options.sessionId, ...(options.systemPrompt === undefined ? {} : { systemPrompt: options.systemPrompt }) });
     const baseClient = options.client ?? new IarBridgeClient({ baseUrl: options.bridgeUrl ?? process.env.IAR_PI_BRIDGE_URL ?? 'http://127.0.0.1:8787' });
     const client = observeClient(baseClient, {
-      input: (response) => { this.passThroughDescriptors = response.disposition === 'pass_through' ? response.capabilityContext?.functionDescriptors ?? [] : []; this.publishRoute(response); if (response.timing) this.events.onTiming?.(response.timing); this.events.onConfirm?.(response.pending ?? null); },
-      confirm: (response) => { this.events.onConfirm?.(response.pending ?? null); },
+      input: (response) => { this.passThroughDescriptors = response.disposition === 'pass_through' ? response.capabilityContext?.functionDescriptors ?? [] : []; this.pendingAction = response.pending ?? null; this.publishRoute(response); if (response.timing) this.events.onTiming?.(response.timing); this.events.onConfirm?.(this.pendingAction); },
+      confirm: (response) => { this.pendingAction = response.pending ?? null; this.events.onConfirm?.(this.pendingAction); },
+      state: (response) => { this.pendingAction = response.pending ?? null; },
       stream: { onReasoningDelta: (delta) => this.events.onIarReasoningDelta?.(delta), onDelta: (delta) => this.events.onIarDelta?.(delta) }
     });
     const pi: PiExtensionAPI = {
@@ -109,6 +112,17 @@ export class PiHostSession {
   public async start(): Promise<void> {
     await this.chain;
     await this.handlers.get('session_start')?.({}, this.context);
+  }
+
+  /**
+   * 返回当前会话的脱敏待确认摘要，供 SSE 重连同步。
+   *
+   * @returns 待确认摘要副本或 null
+   * @author lvdaxianer@yeah.net
+   * @date 2026-10-24
+   */
+  public pendingConfirmation(): BridgePendingAction | null {
+    return this.pendingAction === null ? null : { ...this.pendingAction };
   }
 
   /** 处理一轮用户输入：先走 IAR input hook，未命中再交给 Pi Agent。 */
@@ -134,6 +148,7 @@ export class PiHostSession {
   public async dispose(): Promise<void> {
     await this.chain;
     await this.handlers.get('session_shutdown')?.({}, this.context);
+    this.pendingAction = null;
     this.delegate.reset();
   }
 

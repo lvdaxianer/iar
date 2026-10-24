@@ -70,7 +70,15 @@ export function buildPiHostApp(options: PiHostServerOptions): { app: FastifyInst
       send: (event, data) => { if (!reply.raw.writableEnded) reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); },
       close: () => { if (!reply.raw.writableEnded) reply.raw.end(); }
     };
+    sweepSessions();
     sessionClients.add(client);
+    const existing = sessions.get(sessionId);
+    if (existing) {
+      existing.lastUsedAt = Date.now();
+      client.send('confirm', existing.session.pendingConfirmation());
+    } else {
+      client.send('confirm', null);
+    }
     const heartbeat = setInterval(() => { if (!reply.raw.writableEnded) reply.raw.write(': ping\n\n'); }, HEARTBEAT_INTERVAL_MS);
     request.raw.on('close', () => {
       clearInterval(heartbeat);
