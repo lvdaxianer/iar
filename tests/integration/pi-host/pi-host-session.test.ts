@@ -166,6 +166,28 @@ test('Pi host session forwards iar-cancel and clears the pending banner', async 
   assert.deepEqual(confirmations, [{ actionId: 'action-7', accepted: false }]);
   assert.deepEqual(probe.entries.at(-1), { customType: 'iar-bridge', data: { content: '已取消该操作。', disposition: 'cancelled' } });
   assert.deepEqual(probe.confirms.at(-1), null);
+  assert.deepEqual(probe.recorded.at(-1), { userText: '（取消操作）', reply: '已取消该操作。' });
+});
+
+test('Pi host session preserves pending confirmation when a new input is blocked', async () => {
+  const confirmations: Array<{ actionId: string; accepted: boolean }> = [];
+  let inputCount = 0;
+  const client = makeFakeBridge({
+    input: () => {
+      inputCount += 1;
+      if (inputCount === 1) return { version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo', disposition: 'awaiting_confirmation', reply: '请确认', route: businessRoute(), pending: { actionId: 'action-8', runId: 'run-8', functionId: 'api.gateway', pluginId: 'api-gateway-v1', riskLevel: 'high', confirmationRequired: true } };
+      return { version: PI_BRIDGE_VERSION, iarSessionId: 'iar-demo', disposition: 'clarification', reply: '当前有待确认的 IAR 操作，请使用 /iar-confirm 或 /iar-cancel。', reasonCode: 'pending_confirmation', route: { status: 'rejected', reasonCode: 'pending_confirmation', semanticIntent: 'unknown', semanticConfidence: 0 } };
+    },
+    onConfirm: (actionId, accepted) => { confirmations.push({ actionId, accepted }); }
+  });
+  const probe = makeProbe({ client });
+  await probe.session.start();
+  await probe.session.handleUserInput('把订单接口限流调到每秒 50 次');
+  assert.equal((probe.confirms.at(-1) as { actionId?: string } | undefined)?.actionId, 'action-8');
+  await probe.session.handleUserInput('调到每秒 60 次');
+  assert.equal((probe.confirms.at(-1) as { actionId?: string } | undefined)?.actionId, 'action-8');
+  assert.equal(await probe.session.confirm(false), true);
+  assert.deepEqual(confirmations, [{ actionId: 'action-8', accepted: false }]);
 });
 
 test('Pi host session fails closed when the bridge is unavailable', async () => {

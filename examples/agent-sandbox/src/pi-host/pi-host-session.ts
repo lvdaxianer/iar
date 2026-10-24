@@ -58,10 +58,10 @@ export type PiHostSessionOptions = {
 export type PiHostInputResult = { action: 'handled' | 'continue' };
 
 /** 可观测 client：在转发响应的同时提取路由证据和待确认状态。 */
-function observeClient(client: IarBridgeClientLike, hooks: { input?: (response: BridgeInputResponse) => void; confirm?: (response: BridgeConfirmResponse) => void; state?: (response: BridgeStateResponse) => void; stream?: BridgeInputStreamHandlers }): IarBridgeClientLike {
+function observeClient(client: IarBridgeClientLike, hooks: { input?: (response: BridgeInputResponse) => BridgeInputResponse | void; confirm?: (response: BridgeConfirmResponse) => void; state?: (response: BridgeStateResponse) => void; stream?: BridgeInputStreamHandlers }): IarBridgeClientLike {
   return {
     openSession: (request) => client.openSession(request),
-    input: async (sessionId, text) => { const response = client.inputStream ? await client.inputStream(sessionId, text, hooks.stream ?? {}) : await client.input(sessionId, text); hooks.input?.(response); return response; },
+    input: async (sessionId, text) => { const response = client.inputStream ? await client.inputStream(sessionId, text, hooks.stream ?? {}) : await client.input(sessionId, text); return hooks.input?.(response) ?? response; },
     confirm: async (sessionId, actionId, accepted) => { const response = await client.confirm(sessionId, actionId, accepted); hooks.confirm?.(response); return response; },
     state: async (sessionId) => { const response = await client.state(sessionId); hooks.state?.(response); return response; }
   };
@@ -88,7 +88,7 @@ export class PiHostSession {
     this.delegate = options.piAgent ?? createPiAgentDelegate({ mode: options.mode, sessionId: options.sessionId, ...(options.systemPrompt === undefined ? {} : { systemPrompt: options.systemPrompt }) });
     const baseClient = options.client ?? new IarBridgeClient({ baseUrl: options.bridgeUrl ?? process.env.IAR_PI_BRIDGE_URL ?? 'http://127.0.0.1:8787' });
     const client = observeClient(baseClient, {
-      input: (response) => { this.passThroughDescriptors = response.disposition === 'pass_through' ? response.capabilityContext?.functionDescriptors ?? [] : []; this.pendingAction = response.pending ?? null; this.publishRoute(response); if (response.timing) this.events.onTiming?.(response.timing); this.events.onConfirm?.(this.pendingAction); },
+      input: (response) => { const effective = response.pending === undefined && this.pendingAction !== null && response.route?.reasonCode === 'pending_confirmation' ? { ...response, pending: this.pendingAction } : response; this.passThroughDescriptors = effective.disposition === 'pass_through' ? effective.capabilityContext?.functionDescriptors ?? [] : []; if (effective.pending !== undefined || this.pendingAction === null) this.pendingAction = effective.pending ?? null; this.publishRoute(effective); if (effective.timing) this.events.onTiming?.(effective.timing); this.events.onConfirm?.(this.pendingAction); return effective; },
       confirm: (response) => { this.pendingAction = response.pending ?? null; this.events.onConfirm?.(this.pendingAction); },
       state: (response) => { this.pendingAction = response.pending ?? null; },
       stream: { onReasoningDelta: (delta) => this.events.onIarReasoningDelta?.(delta), onDelta: (delta) => this.events.onIarDelta?.(delta) }
@@ -138,6 +138,11 @@ export class PiHostSession {
       const command = this.commands.get(accepted ? 'iar-confirm' : 'iar-cancel');
       if (!command) return false;
       await command.handler('', this.context);
+      // 确认结果也是 IAR 已处理轮次；写入 Pi transcript，避免后续咨询仍把动作当成“只待确认”。
+      const handled = this.collectedEntries.at(-1)?.data;
+      if (typeof handled === 'object' && handled !== null && 'content' in handled && typeof (handled as { content: unknown }).content === 'string') {
+        this.delegate.recordHandledTurn(accepted ? '（确认执行）' : '（取消操作）', (handled as { content: string }).content);
+      }
       return true;
     });
     this.chain = run.catch(() => false);
