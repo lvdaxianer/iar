@@ -162,6 +162,48 @@ The semantic extraction call SHALL receive a bounded workflow context and transi
 - **WHEN** a response model produces text claiming that a Function is confirmed or executed
 - **THEN** the runtime ignores that text for workflow transitions and requires the validated event, route, policy and confirmation path
 
+### Requirement: Intent model input has a total context budget
+
+意图识别模型请求 SHALL 在发送前通过一个统一的总字符预算校验，覆盖所有结构化上下文、历史消息与候选描述。
+
+#### Scenario: A normal long session stays within budget
+
+- **WHEN** a session contains multiple bounded context collections whose combined serialized input is below the configured limit
+- **THEN** the runtime sends the complete selected context and records the measured input size
+
+#### Scenario: An oversized session is bounded before the provider call
+
+- **WHEN** the combined intent model input exceeds the configured limit
+- **THEN** the runtime deterministically reduces lower-priority context before invoking the provider and never sends an over-budget request
+
+### Requirement: Context reduction preserves intent-critical data
+
+预算裁剪 SHALL 按固定优先级保留当前请求和结构化工作流状态，并以完整字段、消息或轮次为单位移除较低优先级上下文。
+
+#### Scenario: The current request survives truncation
+
+- **WHEN** an oversized session contains a current user request and older conversation content
+- **THEN** the current request and current workflow state remain available while older content is removed first
+
+#### Scenario: Structured context remains valid after truncation
+
+- **WHEN** turns, facts or recent messages are reduced to fit the budget
+- **THEN** each retained collection remains independently ordered, schema-valid and non-authoritative unless it was already trusted structured state
+
+### Requirement: Context reduction is safely observable
+
+意图识别运行时 SHALL 暴露有界诊断元数据，包括输入大小、是否发生裁剪和各上下文层保留数量，不包含完整原文、凭证、完整 prompt 或模型响应。
+
+#### Scenario: An input is reduced
+
+- **WHEN** the budget assembler removes one or more context items
+- **THEN** the decision audit records that reduction occurred and the bounded retained-layer counts
+
+#### Scenario: Diagnostic metadata cannot leak model payloads
+
+- **WHEN** an operator inspects decision diagnostics
+- **THEN** diagnostics contain only bounded sizes, flags, counts and stable identifiers, not raw prompt content or provider secrets
+
 ### Requirement: Model inputs expose separate ordered context collections
 
 The system SHALL provide bounded conversation turns and verified fact records as separate ordered model input fields, including stable IDs, sequence numbers, current focus and outcome metadata.
