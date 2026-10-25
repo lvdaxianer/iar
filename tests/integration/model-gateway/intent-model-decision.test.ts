@@ -266,8 +266,9 @@ test('does not expose provider error, prompt, or user input in public result', a
   if (!result.ok) {
     assert.equal(result.error.message, '模型主 provider 和 fallback 均失败');
     const metadata = result.audit[0]?.metadata as Record<string, unknown>;
-    assert.deepEqual(Object.keys(metadata).sort(), ['candidateCount', 'decisionBackend', 'promptVersion', 'provider', 'reason']);
+    assert.deepEqual(Object.keys(metadata).sort(), ['candidateCount', 'contextBudget', 'decisionBackend', 'promptVersion', 'provider', 'reason']);
     assert.equal(metadata.candidateCount, 1);
+    assert.equal(typeof metadata.contextBudget, 'object');
   }
 });
 /** 延迟 provider 期间修改原请求，验证 Prompt 与结果校验共用初始快照。 */
