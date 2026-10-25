@@ -7,8 +7,8 @@
 
 ## 2. Intent prompt integration
 
-- [ ] 2.1 将 semantic.extract 的 Prompt 组装接入统一预算模块，保留现有分栏、引用 scope 和候选授权边界；通过语义 Prompt 集成测试验证长会话裁剪和当前消息优先级。
-- [ ] 2.2 将 function.select 与 plugin.select 的 Intent Model 输入接入统一预算模块；通过 intent-prompt 和 decision adapter 测试验证候选顺序、structured context、recent messages 和预算失败语义不变。
+- [x] 2.1 将 semantic.extract 的 Prompt 组装接入统一预算模块，保留现有分栏、引用 scope 和候选授权边界；通过语义 Prompt 集成测试验证长会话裁剪和当前消息优先级。
+- [x] 2.2 将 function.select 与 plugin.select 的 Intent Model 输入接入统一预算模块；通过 intent-prompt 和 decision adapter 测试验证候选顺序、structured context、recent messages 和预算失败语义不变。
 
 ## 3. Safe diagnostics
 

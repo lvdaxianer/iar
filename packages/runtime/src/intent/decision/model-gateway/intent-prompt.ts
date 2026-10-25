@@ -6,6 +6,7 @@
  */
 import { ACTION_TYPES, type BehaviorContext, type JsonValue } from '@iar/contracts';
 import type { DecisionCandidate, DecisionRequest } from '../types.js';
+import { assembleIntentContext, IntentContextBudgetError, IntentContextSerializationError, type ContextBudgetSection } from './context-budget.js';
 const DECISION_TYPES = ['function.select', 'plugin.select'] as const;
 const REQUEST_KEYS = ['decisionType', 'decisionVersion', 'threshold', 'candidates'] as const;
 const CANDIDATE_KEYS = ['candidateId', 'priority', 'specificity', 'requiredSlots', 'riskLevel', 'evidenceCodes', 'description', 'functionId', 'actionTypes'] as const;
@@ -93,17 +94,63 @@ export function buildIntentDecisionInput(request: DecisionRequest, currentMessag
   try {
     const normalizedRequest = canonicalizeDecisionRequest(request);
     const promptRequest = { ...normalizedRequest, candidateIds: normalizedRequest.candidates.map((candidate) => candidate.candidateId) } as unknown as JsonValue;
-    return cloneJsonValue({
-      promptVersion: INTENT_DECISION_PROMPT_VERSION,
-      systemPrompt: INTENT_DECISION_SYSTEM_PROMPT,
-      request: promptRequest,
-      ...(currentMessage === undefined ? {} : { currentMessage }),
-      ...(behaviorContext === undefined ? {} : { behaviorContext }),
-      ...(recentMessages === undefined ? {} : { recentMessages })
-    } as unknown as JsonValue);
+    const projection = projectIntentBehaviorContext(behaviorContext);
+    const sections: ContextBudgetSection[] = [
+      { name: 'promptVersion', value: INTENT_DECISION_PROMPT_VERSION, priority: 'required' },
+      { name: 'systemPrompt', value: INTENT_DECISION_SYSTEM_PROMPT, priority: 'required' },
+      { name: 'request', value: promptRequest, priority: 'required' },
+      ...(currentMessage === undefined ? [] : [{ name: 'currentMessage', value: currentMessage, priority: 'required' as const }]),
+      ...(projection === undefined ? [] : [{ name: 'behaviorContext', value: projection.base, priority: 'required' as const }]),
+      ...(projection?.factHistoryRecords === undefined ? [] : [{ name: 'factHistory', value: projection.factHistoryRecords, priority: 'optional' as const, itemized: true, path: ['behaviorContext', 'factHistory', 'records'] }]),
+      ...(projection?.summary === undefined ? [] : [{ name: 'summary', value: projection.summary, priority: 'optional' as const, path: ['behaviorContext', 'summary'] }]),
+      ...(recentMessages === undefined ? [] : [{ name: 'recentMessages', value: recentMessages as unknown as JsonValue, priority: 'optional' as const, itemized: true }]),
+      ...(projection?.conversationTurnRecords === undefined ? [] : [{ name: 'conversationTurns', value: projection.conversationTurnRecords, priority: 'optional' as const, itemized: true, path: ['behaviorContext', 'conversationTurns', 'turns'] }])
+    ];
+    return cloneJsonValue(assembleIntentContext({ sections }).context);
   } catch (error) {
+    if (error instanceof IntentContextBudgetError) throw invalidRequest('上下文超出预算');
+    if (error instanceof IntentContextSerializationError) throw stableRequestError('输入必须可 JSON 序列化');
     throw toStableRequestError(error);
   }
+}
+
+type IntentBehaviorContextProjection = {
+  base: JsonValue;
+  factHistoryRecords?: JsonValue;
+  conversationTurnRecords?: JsonValue;
+  summary?: JsonValue;
+};
+
+function projectIntentBehaviorContext(context: BehaviorContext | undefined): IntentBehaviorContextProjection | undefined {
+  if (context === undefined) return undefined;
+  const base = cloneJsonValue(context as unknown as JsonValue) as Record<string, JsonValue>;
+  const factHistory = base.factHistory;
+  const conversationTurns = base.conversationTurns;
+  const summary = base.summary;
+  delete base.factHistory;
+  delete base.conversationTurns;
+  delete base.summary;
+  const projection: IntentBehaviorContextProjection = { base };
+  const factHistoryRecord = asRecord(factHistory);
+  const conversationTurnsRecord = asRecord(conversationTurns);
+  if (factHistoryRecord !== undefined) {
+    const records = factHistoryRecord.records;
+    delete factHistoryRecord.records;
+    base.factHistory = factHistoryRecord;
+    if (records !== undefined) projection.factHistoryRecords = records;
+  }
+  if (conversationTurnsRecord !== undefined) {
+    const turns = conversationTurnsRecord.turns;
+    delete conversationTurnsRecord.turns;
+    base.conversationTurns = conversationTurnsRecord;
+    if (turns !== undefined) projection.conversationTurnRecords = turns;
+  }
+  if (summary !== undefined) projection.summary = summary;
+  return projection;
+}
+
+function asRecord(value: JsonValue | undefined): Record<string, JsonValue> | undefined {
+  return value !== undefined && typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, JsonValue> : undefined;
 }
 
 /**
