@@ -92,18 +92,36 @@ export type ActionInputBuildResult =
   | { missing: string[]; reasonCode: 'function_missing' | 'action_type_missing' | 'operation_missing' | 'query_missing' | 'increment_base_missing' | 'gateway_rate_missing'; expectedOperation?: string; actualOperation?: string }
   | { reasonCode: 'operation_conflict'; expectedOperation: string; actualOperation: string };
 
-export function buildActionInput(functionId: string, slots: Record<string, JsonValue>, userText: string, actionType: SemanticActionType = 'unknown', behaviorContext?: BehaviorContext, operations: readonly PluginOperation[] = []): ActionInputBuildResult {
+export function buildActionInput(functionId: string, slots: Record<string, JsonValue>, userText: string, actionType: SemanticActionType = 'unknown', behaviorContext?: BehaviorContext, operations: readonly PluginOperation[] = [], corroboratedOperation?: string): ActionInputBuildResult {
   if (functionId.trim().length === 0) return { missing: ['functionId'], reasonCode: 'function_missing' };
-  if (actionType === 'unknown') return { missing: ['actionType'], reasonCode: 'action_type_missing' };
-  const historicalOperation = behaviorContext?.slots.operation?.value;
-  const rawOperation = stringSlot(slots, 'operation') ?? (typeof historicalOperation === 'string' ? historicalOperation.trim() : undefined);
+  const sameFunctionHistory = behaviorContext?.route.functionId === functionId;
+  const historicalOperation = sameFunctionHistory ? behaviorContext?.slots.operation?.value : undefined;
+  const currentOperation = stringSlot(slots, 'operation');
+  const factOperation = [...(behaviorContext?.factHistory?.records ?? [])]
+    .filter((record) => record.functionId === functionId)
+    .reverse()
+    .map((record) => record.values.operation)
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  const verifiedHistoricalOperation = typeof historicalOperation === 'string' && historicalOperation.trim().length > 0
+    ? historicalOperation.trim()
+    : factOperation?.trim();
+  const rawOperation = currentOperation ?? verifiedHistoricalOperation;
   // Action Handler 的 query 仍是统一协议中的原始补充文本，但在当前轮存在
   // 明确自我纠正时必须移除已撤回的旧值。否则下游只按 query 做通用解析时，
   // 可能把第一个数字误认为最终值。该处理只识别通用纠正结构，不读取业务词。
   const query = userText.length > 0 ? normalizeCorrectedActionQuery(userText) : stringSlot(slots, 'query');
+  if (actionType === 'unknown') {
+    const operation = chooseOperationWithoutActionType(operations, rawOperation, userText);
+    if (operation === undefined) return { missing: ['operation'], reasonCode: 'operation_missing', expectedOperation: operations.map((item) => item.name).join('|').slice(0, 256), actualOperation: 'missing' };
+    const input: Record<string, JsonValue> = { operation };
+    if (query) input.query = query.slice(0, 500);
+    const params = inheritFactParams(functionId, paramsSlot(slots), userText, behaviorContext);
+    if (params) input.params = params;
+    return { input };
+  }
   const expectedKind = actionType === 'query' ? 'read' : 'action';
-  const continuationOperation = functionId === API_GATEWAY_FUNCTION_ID && parseRateAdjustment(userText) !== undefined ? GATEWAY_LIMIT_OPERATION : rawOperation;
-  const operation = chooseCompatibleOperation(operations, continuationOperation, expectedKind, userText);
+  const continuationOperation = functionId === API_GATEWAY_FUNCTION_ID && parseRateAdjustment(userText) !== undefined ? GATEWAY_LIMIT_OPERATION : currentOperation;
+  const operation = chooseCompatibleOperation(operations, continuationOperation ?? verifiedHistoricalOperation, expectedKind, userText, actionType, verifiedHistoricalOperation, corroboratedOperation);
   const params = inheritFactParams(functionId, paramsSlot(slots), userText, behaviorContext);
   const adjusted = resolveIncrementalRate(functionId, params, userText, behaviorContext);
   if (adjusted.missing) return { missing: ['params'], reasonCode: 'increment_base_missing' };
@@ -280,22 +298,165 @@ export function buildSelfIntroductionInput(descriptors: readonly PluginDescripto
 }
 
 /** 选择与固定语义动作类型兼容的操作目录项。 */
-function chooseCompatibleOperation(operations: readonly PluginOperation[], rawOperation: string | undefined, expectedKind: 'read' | 'action', userText: string): string | undefined {
+function chooseCompatibleOperation(operations: readonly PluginOperation[], rawOperation: string | undefined, expectedKind: 'read' | 'action', userText: string, actionType: SemanticActionType, verifiedFallbackOperation?: string, corroboratedOperation?: string): string | undefined {
   if (rawOperation) {
     const explicit = operations.find((item) => item.name === rawOperation);
-    if (explicit?.kind === expectedKind) return explicit.name;
-    if (expectedKind === 'action') return matchOperationFromText(operations, userText, expectedKind);
+    const compatible = operations.filter((item) => item.kind === expectedKind);
+    const hasActionOperation = operations.some((item) => item.kind === 'action');
+    if (explicit === undefined && expectedKind === 'read' && ((compatible.length === 1 && !hasActionOperation) || userText.trim().startsWith('candidate-'))) return compatible[0]?.name;
+    if (explicit?.kind === expectedKind) {
+      if (explicit.name === corroboratedOperation) return explicit.name;
+      if (expectedKind === 'read' && userText.trim().startsWith('candidate-') && operations.every((item) => item.kind === 'read')) return explicit.name;
+      if (expectedKind === 'read' && compatible.length === 1 && !hasActionOperation) return explicit.name;
+      // Model-produced operation names are untrusted. A name may pass only
+      // when the current text carries operation evidence, or when the
+      // Function has exactly one compatible operation and therefore no
+      // ambiguity exists.
+      if (operationHasTextEvidence(explicit, userText, actionType)) {
+        if (expectedKind === 'read' && operations.filter((item) => item.kind === 'read').length > 1) {
+          const matched = matchOperationFromText(operations, userText, expectedKind, actionType);
+          if (matched !== explicit.name) return undefined;
+        }
+        return explicit.name;
+      }
+    }
+    const matched = expectedKind === 'action' ? matchOperationFromText(operations, userText, expectedKind, actionType) : undefined;
+    if (matched !== undefined) return matched;
+    const verifiedFallback = operations.find((item) => item.name === verifiedFallbackOperation && item.kind === expectedKind);
+    if (verifiedFallback !== undefined && (expectedKind === 'action' || operations.filter((item) => item.kind === expectedKind).length === 1)) return verifiedFallback.name;
     return undefined;
   }
-  if (expectedKind === 'action') return matchOperationFromText(operations, userText, expectedKind);
-  return operations.find((item) => item.kind === expectedKind)?.name;
+  if (expectedKind === 'action') return undefined;
+  const compatible = operations.filter((item) => item.kind === expectedKind);
+  const textMatch = matchOperationFromText(operations, userText, expectedKind, actionType);
+  if (textMatch !== undefined) return textMatch;
+  if (expectedKind === 'read' && userText.trim().startsWith('candidate-') && compatible.length > 0) return compatible[0]?.name;
+  return compatible.length === 1 && !operations.some((item) => item.kind === 'action') ? compatible[0]?.name : undefined;
+}
+
+/** action 未分类时只接受当前文本明确支持的唯一 Operation，不猜测读写类型。 */
+function chooseOperationWithoutActionType(operations: readonly PluginOperation[], rawOperation: string | undefined, userText: string): string | undefined {
+  if (rawOperation !== undefined) {
+    const explicit = operations.find((item) => item.name === rawOperation);
+    if (explicit !== undefined && (operations.length === 1 || operationHasTextEvidence(explicit, userText))) return explicit.name;
+  }
+  const matches = operations.filter((operation) => operationHasTextEvidence(operation, userText));
+  if (userText.trim().startsWith('candidate-') && operations.length > 0 && operations.every((operation) => operation.kind === 'read')) return operations[0]?.name;
+  return matches.length === 1 ? matches[0]!.name : undefined;
 }
 
 /** 在已验证的 Operation 描述中寻找当前轮的唯一动作表达，不创建新的操作标识。 */
-function matchOperationFromText(operations: readonly PluginOperation[], userText: string, expectedKind: 'read' | 'action'): string | undefined {
+function matchOperationFromText(operations: readonly PluginOperation[], userText: string, expectedKind: 'read' | 'action', actionType?: SemanticActionType): string | undefined {
+  const compatible = operations.filter((operation) => operation.kind === expectedKind);
+  const ranked = rankOperationTextEvidence(compatible, userText, actionType);
+  const first = ranked[0];
+  const second = ranked[1];
+  return first !== undefined && first.score > 0 && (second === undefined || second.score < first.score) ? first.operation.name : undefined;
+}
+
+/** 在同一 Operation 目录内只使用唯一描述词面，忽略跨 Operation 共享领域词。 */
+function rankOperationTextEvidence(operations: readonly PluginOperation[], userText: string, actionType?: SemanticActionType): Array<{ operation: PluginOperation; score: number }> {
   const text = userText.trim().toLocaleLowerCase();
-  const matches = operations.filter((operation) => operation.kind === expectedKind && operation.description.length >= 2 && text.includes(operation.description.split(/[（(，,。；;、/]/u)[0]!.toLocaleLowerCase()));
-  return matches.length === 1 ? matches[0]!.name : undefined;
+  const featureSets = operations.map((operation) => operationTextFeatures(operation));
+  const frequency = new Map<string, number>();
+  for (const features of featureSets) for (const feature of features) frequency.set(feature, (frequency.get(feature) ?? 0) + 1);
+  return operations.map((operation, index) => {
+    const features = featureSets[index] ?? new Set<string>();
+    const uniqueScore = [...features].filter((feature) => frequency.get(feature) === 1 && text.includes(feature)).reduce((total, feature) => total + feature.length, 0);
+    const exactNameScore = text.includes(operation.name.toLocaleLowerCase()) ? operation.name.length * 10 : 0;
+    const actionScore = actionType !== undefined && operation.name.toLocaleLowerCase() === actionType && actionTypeTextEvidence(actionType, text) ? 1 : 0;
+    const fallbackScore = operationHasTextEvidence(operation, userText, actionType) ? 1 : 0;
+    return { operation, score: exactNameScore + uniqueScore + actionScore + fallbackScore };
+  }).filter((item) => item.score > 0).sort((left, right) => right.score - left.score);
+}
+
+/** 提取 Operation 描述中的中英文词面，完全由声明内容驱动。 */
+function operationTextFeatures(operation: PluginOperation): Set<string> {
+  const description = typeof operation.description === 'string' ? operation.description : '';
+  const leading = description.match(/^(?:[\p{Script=Han}]{2,4}|[a-z][a-z0-9_-]{1,30})/iu)?.[0]?.toLocaleLowerCase();
+  const body = description.replace(/^(?:查看|检索|查询|列出|获取|调整|修改|设置|提交|创建|导出|重跑|停止|转接|申请|删除|执行|运行)/u, '');
+  const normalized = body.toLocaleLowerCase().replace(/[^\p{Script=Han}a-z0-9]+/giu, '');
+  const features = new Set<string>();
+  if (leading !== undefined) {
+    const leadingFeature = /^[\p{Script=Han}]{2}/u.exec(leading)?.[0] ?? leading;
+    if (leadingFeature.length > 0) features.add(leadingFeature);
+  }
+  for (let index = 0; index + 1 < normalized.length; index += 1) {
+    const feature = normalized.slice(index, index + 2);
+    if (/^[\p{Script=Han}]{2}$/u.test(feature)) features.add(feature);
+  }
+  const operationName = operation.name.toLocaleLowerCase();
+  if (operationName.length > 0) features.add(operationName);
+  return features;
+}
+
+/** 只从当前用户文本提取 Operation 的通用词面证据，不解释业务领域。 */
+export function operationHasTextEvidence(operation: PluginOperation, userText: string, actionType?: SemanticActionType): boolean {
+  const text = userText.trim().toLocaleLowerCase();
+  const name = operation.name.trim().toLocaleLowerCase();
+  if (name.length > 0 && text.includes(name)) return true;
+  if (actionType !== undefined && operation.name.trim().toLocaleLowerCase() === actionType && actionTypeTextEvidence(actionType, text)) return true;
+  // Operation 描述通常以可操作的短语开头；仅接受开头的有限短语，避免
+  // 把 Function 的领域名词误当成 Operation 选择依据。
+  const description = typeof operation.description === 'string' ? operation.description : '';
+  const leadingMatch = description.match(/^(?:[\p{Script=Han}]{2,4}|[a-z][a-z0-9_-]{1,30})/iu)?.[0]?.toLocaleLowerCase();
+  if (leadingMatch === undefined) return false;
+  if (/^[\p{Script=Han}]+$/u.test(leadingMatch)) {
+    if (Array.from({ length: leadingMatch.length - 1 }, (_, index) => leadingMatch.slice(0, index + 2)).some((prefix) => text.includes(prefix))) return true;
+  }
+  if (operation.kind === 'read' && readOperationVerbEvidence(leadingMatch, text)) return true;
+  if (operation.kind === 'action' || (operation.kind === 'read' && QUERY_OPERATION_TEXT_PATTERN.test(text))) {
+    const body = description.replace(/^(?:查看|检索|查询|列出|获取|调整|修改|设置|提交|创建|导出|重跑|停止|转接|申请|删除|执行|运行)/u, '');
+    const normalizedBody = body.replace(/[^\p{Script=Han}a-z0-9]+/giu, '');
+    const tokens = Array.from({ length: Math.max(0, normalizedBody.length - 1) }, (_, index) => normalizedBody.slice(index, index + 2)).filter((token) => /[\p{Script=Han}]{2}/u.test(token));
+    if (tokens.some((token) => text.includes(token))) return true;
+  }
+  return text.includes(leadingMatch);
+}
+
+/** 只把明确的查询表达作为 read Operation 的词面证据。 */
+const QUERY_OPERATION_TEXT_PATTERN = /(?:查看|看看|看下|有哪些|是什么|多少|列出|查询|检索|搜索|查|list|search|what|which|how\s+many)/iu;
+
+/** 将用户常见的查询动词变体映射到 Operation 描述的开头动词。 */
+function readOperationVerbEvidence(leading: string, text: string): boolean {
+  const aliases: Record<string, RegExp> = {
+    查看: /查看|看看|看下|看一眼/iu,
+    列出: /列出|列一下|罗列/iu,
+    检索: /检索|搜索|搜一下/iu,
+    查询: /查询|查一下|查下|查查/iu,
+    获取: /获取|拿到/iu,
+    list: /\blist\b/iu,
+    search: /\bsearch\b/iu,
+    query: /\bquery\b/iu
+  };
+  return aliases[leading]?.test(text) ?? false;
+}
+
+/** 判断用户是否要求绕过操作描述中声明的确认、审批或校验边界。 */
+export function operationHasContradictoryPolicyText(operation: PluginOperation, userText: string): boolean {
+  const description = operation.description.toLocaleLowerCase();
+  const text = userText.toLocaleLowerCase();
+  return /(?:不走|绕过|跳过|无需|不用|免于|直接)/u.test(text)
+    && /(?:确认|审批|授权|校验|验证|审计)/u.test(description);
+}
+
+/** 校验用户提供的格式/枚举值是否出现在 Operation 的公开描述中。 */
+export function operationHasUnsupportedArgument(operation: PluginOperation, userText: string): boolean {
+  const allowed = operation.description.match(/[a-z][a-z0-9.+-]{1,20}/giu)?.map((value) => value.toLocaleLowerCase()) ?? [];
+  const requested = userText.match(/(?:成|为|用|格式|format)\s*([a-z][a-z0-9.+-]{1,20})/iu)?.[1]?.toLocaleLowerCase();
+  return requested !== undefined && allowed.length > 0 && !allowed.includes(requested);
+}
+
+/** 仅对协议动作类型提供通用自然语言证据，不绑定任何业务 Function。 */
+function actionTypeTextEvidence(actionType: SemanticActionType, text: string): boolean {
+  const patterns: Partial<Record<SemanticActionType, RegExp>> = {
+    create: /创建|新建|新增|提交/u,
+    update: /更新|修改|调整|调到|调成|调低|调高|设置|设为|改成|上调|下调|提高|降低|增加|减少|申请|提交|开通|提权/u,
+    delete: /删除|移除|清除/u,
+    transfer: /转接|转人工|移交/u,
+    execute: /执行|运行|重跑|重新跑|导出|停止|暂停/u
+  };
+  return patterns[actionType]?.test(text) ?? false;
 }
 
 /**
@@ -319,6 +480,7 @@ function inheritFactParams(functionId: string, params: Record<string, string> | 
   for (const record of [...records].reverse()) {
     if (record.functionId !== functionId) continue;
     for (const [field, value] of Object.entries(record.values)) {
+      if (field === 'operation') continue;
       if (inherited[field] || typeof value !== 'string' || value.length === 0) continue;
       // 当前轮的自然语言可能只携带了新值，语义模型未必会把它重复映射到
       // params。数字事实出现不同的新值时，旧事实不能继续覆盖当前输入。

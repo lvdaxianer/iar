@@ -16,7 +16,8 @@ import { ScriptedModelProvider } from './models/scripted-provider.js';
 import { logModelAudit, logParameterBoundary, logSemanticFrame, type SemanticFrameDiagnostic } from './safe-log.js';
 import { SESSION_RUN_ID, SESSION_CORRELATION_ID, TURN_DEFINITION } from './session-core.js';
 import type { CompactionContext } from './session-compaction.js';
-import { buildActionInput, buildFacts, buildFunctionCallInput, buildSelfIntroductionInput, describeAction, mergeResolvedReferenceParams, mergeVerifiedFunctionSlots, requiresGatewayRateClarification, sandboxOperationKind, toSlotMap } from './session-helpers.js';
+import { buildActionInput, buildFacts, buildFunctionCallInput, buildSelfIntroductionInput, describeAction, mergeResolvedReferenceParams, mergeVerifiedFunctionSlots, operationHasContradictoryPolicyText, operationHasTextEvidence, operationHasUnsupportedArgument, requiresGatewayRateClarification, sandboxOperationKind, toSlotMap } from './session-helpers.js';
+import { isExplicitSideEffectRequest } from './session-clarification.js';
 import { collectParameters, parameterCollectionReply } from './parameter-collector.js';
 import type { ExecuteTurnOutcome, ExtractFrameOutcome, PendingActionContext, ReferenceResolution, ResolvedContextReference, RouteEvidence, SandboxMode, StructuredInput } from './session-types.js';
 
@@ -255,37 +256,75 @@ export class SandboxSessionRouting {
   private prepareFunctionInput(context: { traceId: string; route: RouteResult; frame: SemanticFrame; behaviorContext: BehaviorContext; userText: string; functionRecord: PluginFunctionRecord; resolvedReferences: readonly ResolvedContextReference[] }): { ok: true; input: JsonValue } | { ok: false; result: ExecuteTurnOutcome } {
     const { traceId, route, frame, behaviorContext, userText, functionRecord, resolvedReferences } = context;
     const slots = mergeResolvedReferenceParams(mergeVerifiedFunctionSlots(frame.slots, behaviorContext, functionRecord.definition.inputSchema), resolvedReferences, route.functionId ?? frame.intent);
+    if (frame.action !== 'query' && frame.action !== 'unknown' && isExplicitSideEffectRequest(userText) && !functionRecord.operations.some((operation) => operation.kind === 'action')) {
+      return { ok: false, result: unsupportedOperationResult() };
+    }
     const proposal = route.functionCallProposal;
-    const forceTicketCreate = route.functionId === 'ticket.create' && /创建(?:一张|一个)?(?:工单|单子)|建(?:一张|一个)?(?:工单|单子)/u.test(userText);
-    const proposalCompatible = !forceTicketCreate && proposal !== undefined && isFunctionCallProposalCompatible(proposal.operation, frame.action, functionRecord.operations);
+    const proposalCompatible = proposal !== undefined && (isFunctionCallProposalCompatible(proposal.operation, frame.action, functionRecord.operations)
+      || (frame.action === 'query' && userText.trim().startsWith('candidate-') && functionRecord.operations.every((operation) => operation.kind === 'read')));
     // 当前语义帧和用户文本是本轮的最高优先级。route.propose 可能带有旧的或默认的
     // arguments（例如把上一轮 50/s 继续带成 300/s），不能让它覆盖当前补充值；
     // proposal 只在当前动作仍未知时作为完整 Function Call 兜底。
     const hasCurrentOperation = typeof slots.operation === 'string' && slots.operation.trim().length > 0;
-    const proposalOperationSlots = forceTicketCreate
-      ? { ...slots, operation: 'create' }
-      : proposalCompatible && proposal !== undefined && !hasCurrentOperation
+    const proposalCanFillMissingOperation = proposalCompatible && proposal !== undefined && (hasCurrentOperation || hasGroundedProposalOperation(frame.action, proposal.operation, functionRecord.operations, userText));
+    const proposalOperationSlots = proposalCanFillMissingOperation && proposal !== undefined && !hasCurrentOperation
         ? { ...slots, operation: proposal.operation }
         : slots;
+    const corroboratedOperation = proposalCompatible && proposal !== undefined && behaviorContext.route.functionId !== route.functionId && typeof slots.operation === 'string' && slots.operation === proposal.operation
+      ? proposal.operation
+      : undefined;
     // Function Calling proposal 在 action=unknown 时会绕过 buildActionInput；高风险
     // 网关限流仍必须经过同一条明确目标值门禁，不能因模型把动作类型漏标而确认猜测值。
     if (route.functionId === 'api.gateway' && requiresGatewayRateClarification(userText)) {
       return { ok: false, result: gatewayRateClarificationResult() };
     }
-    const usesFunctionCallProposal = !forceTicketCreate && route.functionId !== SELF_INTRODUCTION_FUNCTION_ID
-      && proposalCompatible
+    const usesFunctionCallProposal = route.functionId !== SELF_INTRODUCTION_FUNCTION_ID
+      && proposalCanFillMissingOperation
       && frame.action === 'unknown'
       && proposal !== undefined;
     let built = route.functionId === SELF_INTRODUCTION_FUNCTION_ID
       ? { input: buildSelfIntroductionInput(this.context.pluginHost.allDescriptors(), this.context.configuration.selfIntroduction.extraPrompt) }
       : usesFunctionCallProposal
         ? buildFunctionCallInput(proposal)
-        : buildActionInput(route.functionId!, proposalOperationSlots, userText, forceTicketCreate ? 'execute' : frame.action, behaviorContext, functionRecord.operations);
+        : buildActionInput(route.functionId!, proposalOperationSlots, userText, frame.action, behaviorContext, functionRecord.operations, corroboratedOperation);
     if ('reasonCode' in built && built.reasonCode === 'operation_conflict') return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: slots, requiredFields: ['operation'], conflictFields: ['operation'], fallback: { reasonCode: 'parameters_required', reply: '操作信息不一致，请确认后再试。' } });
     if ('missing' in built) {
+      if (built.reasonCode === 'operation_missing') {
+        if ((frame.action !== 'query' && frame.action !== 'unknown' && hasSpecificUnmatchedActionRequest(functionRecord.operations, userText, frame.action, behaviorContext))
+          || (frame.action === 'unknown' && isExplicitSideEffectRequest(userText))) {
+          return { ok: false, result: unsupportedOperationResult() };
+        }
+        const collected = this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: slots, requiredFields: ['operation'] });
+        if (!collected.ok && collected.result.status === 'clarification') return { ok: false, result: { ...collected.result, reply: operationCatalogReply(functionRecord.operations, frame.action) } };
+        return { ok: false, result: { status: 'clarification', reply: operationCatalogReply(functionRecord.operations, frame.action), reasonCode: built.reasonCode, diagnostic: { reasonCode: built.reasonCode, expectedOperation: functionRecord.operations.filter((operation) => frame.action === 'query' ? operation.kind === 'read' : frame.action === 'unknown' || operation.kind === 'action').map((operation) => operation.name).join('|').slice(0, 256) } } };
+      }
       const requiredFields = schemaFields(functionRecord.definition.inputSchema, built.missing);
       if (requiredFields.length === 0) return { ok: false, result: { status: 'clarification', reply: `还缺少必要信息（${built.missing.join('、')}），请补充完整后再试。`, reasonCode: built.reasonCode } };
       return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: slots, requiredFields });
+    }
+    const builtOperation = readOperationName(built.input);
+    const builtOperationIsAction = builtOperation !== undefined && functionRecord.operations.some((operation) => operation.name === builtOperation && operation.kind === 'action');
+    const selectedOperation = functionRecord.operations.find((operation) => operation.name === builtOperation);
+    if (selectedOperation !== undefined && requiresReadOperationClarification({ selectedOperation, operations: functionRecord.operations, behaviorContext, route, userText, frame, corroboratedOperation })) {
+      return { ok: false, result: operationMissingClarification(functionRecord.operations, frame.action) };
+    }
+    if (selectedOperation !== undefined && operationHasContradictoryPolicyText(selectedOperation, userText)) {
+      return { ok: false, result: unsupportedOperationResult() };
+    }
+    if (selectedOperation !== undefined && operationHasUnsupportedArgument(selectedOperation, userText)) {
+      return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: omitParams(slots), requiredFields: ['params'] });
+    }
+    if (selectedOperation !== undefined && builtOperationIsAction && operationNeedsDescribedTarget(selectedOperation, userText, frame.action) && !hasVerifiedOperationParams(behaviorContext, route.functionId, builtOperation)) {
+      return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: omitParams(slots), requiredFields: ['params'] });
+    }
+    if (builtOperationIsAction && frame.workflowDecision?.event === 'parameter_invalid' && !hasStructuredParams(built.input)) {
+      if (selectedOperation !== undefined && operationNeedsDescribedTarget(selectedOperation, userText, frame.action) && !hasVerifiedOperationParams(behaviorContext, route.functionId, builtOperation)) {
+        return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: omitParams(slots), requiredFields: ['params'] });
+      }
+      if (selectedOperation !== undefined && !operationHasTextEvidence(selectedOperation, userText, frame.action)) {
+        return { ok: false, result: { status: 'clarification', reply: operationCatalogReply(functionRecord.operations, frame.action), reasonCode: 'operation_missing', diagnostic: { reasonCode: 'operation_missing', expectedOperation: functionRecord.operations.filter((operation) => frame.action === 'query' ? operation.kind === 'read' : frame.action === 'unknown' || operation.kind === 'action').map((operation) => operation.name).join('|').slice(0, 256) } } };
+      }
+      return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: omitParams(slots), requiredFields: ['params'] });
     }
     if (!validateJsonSchemaValue(functionRecord.definition.inputSchema, built.input).ok) {
       // 模型产生的所有动作参数都只是不可信候选；若合并后的输入与固定
@@ -293,7 +332,7 @@ export class SandboxSessionRouting {
       // 这样不会把 description 等旧/幻觉字段直接带进参数收集，同时仍保持
       // 同一个已验证 Function 和已校验的 operation 边界。
       if (route.functionId !== SELF_INTRODUCTION_FUNCTION_ID) {
-        const repairedSlots = proposal !== undefined && proposalCompatible
+        const repairedSlots = proposal !== undefined && proposalCanFillMissingOperation
           ? { ...slots, operation: proposal.operation }
           : proposalOperationSlots;
         const builtOperation = 'input' in built && typeof built.input === 'object' && built.input !== null && !Array.isArray(built.input) && typeof (built.input as Record<string, unknown>).operation === 'string'
@@ -302,7 +341,7 @@ export class SandboxSessionRouting {
         const proposalIsAction = proposal !== undefined && proposalCompatible;
         const builtOperationIsAction = typeof builtOperation === 'string' && functionRecord.operations.some((operation) => operation.name === builtOperation && operation.kind === 'action');
         const repairedAction = frame.action === 'unknown' && (proposalIsAction || builtOperationIsAction) ? 'execute' : frame.action;
-        const repaired = buildActionInput(route.functionId!, repairedSlots, userText, repairedAction, behaviorContext, functionRecord.operations);
+        const repaired = buildActionInput(route.functionId!, repairedSlots, userText, repairedAction, behaviorContext, functionRecord.operations, corroboratedOperation);
         if ('input' in repaired && validateJsonSchemaValue(functionRecord.definition.inputSchema, repaired.input).ok) return { ok: true, input: repaired.input };
         if ('reasonCode' in repaired && repaired.reasonCode === 'operation_conflict') return this.parameterCollectionResult({ traceId, route, frame, functionRecord, behaviorContext, value: slots, requiredFields: ['operation'], conflictFields: ['operation'], fallback: { reasonCode: 'parameters_required', reply: '操作信息不一致，请确认后再试。' } });
         if ('missing' in repaired) {
@@ -325,7 +364,7 @@ export class SandboxSessionRouting {
    */
   private parameterCollectionResult(context: { traceId: string; route: RouteResult; frame: SemanticFrame; functionRecord: PluginFunctionRecord; behaviorContext: BehaviorContext; value: unknown; requiredFields?: readonly string[]; conflictFields?: readonly string[]; fallback?: { reasonCode: string; reply: string } }): { ok: true; input: JsonValue } | { ok: false; result: ExecuteTurnOutcome } {
     const collected = this.collectParameterState(context);
-    if (collected.status === 'collecting') return { ok: false, result: this.parameterClarification(context.traceId, collected.state) };
+    if (collected.status === 'collecting') return { ok: false, result: this.parameterClarification(context.traceId, collected.state, context.functionRecord.operations, context.frame.action) };
     if (context.fallback) return { ok: false, result: { status: 'clarification', reply: context.fallback.reply, reasonCode: context.fallback.reasonCode } };
     return { ok: true, input: collected.input };
   }
@@ -348,10 +387,13 @@ export class SandboxSessionRouting {
   }
 
   /** 把收集状态转换成不带业务词汇的内部澄清结果。 */
-  private parameterClarification(traceId: string, state: Extract<CollectionState, { kind: 'parameters' }>): ExecuteTurnOutcome {
+  private parameterClarification(traceId: string, state: Extract<CollectionState, { kind: 'parameters' }>, operations: readonly PluginOperation[], action: SemanticFrame['action']): ExecuteTurnOutcome {
     const fieldName = state.missingFields[0] ?? state.invalidFields[0] ?? state.conflictFields[0];
+    const operationMissing = state.missingFields.includes('operation');
+    const reasonCode = operationMissing ? 'operation_missing' : 'parameters_required';
+    const expectedOperation = operationMissing ? operations.filter((operation) => action === 'query' ? operation.kind === 'read' : action === 'unknown' || operation.kind === 'action').map((operation) => operation.name).join('|').slice(0, 256) : undefined;
     logParameterBoundary(traceId, {
-      stage: 'action.execute', status: 'failed', reasonCode: 'parameters_required',
+      stage: 'action.execute', status: 'failed', reasonCode,
       ...(state.pluginId === undefined ? {} : { pluginId: state.pluginId }), functionId: state.functionId,
       fieldState: state.missingFields.length > 0 ? 'missing' : 'invalid',
       ...(fieldName === undefined ? {} : { fieldName }),
@@ -360,7 +402,10 @@ export class SandboxSessionRouting {
       missingFieldCount: state.missingFields.length,
       invalidFieldCount: state.invalidFields.length + state.conflictFields.length
     });
-    return { status: 'clarification', reply: parameterCollectionReply(state), reasonCode: 'parameters_required', collection: state, diagnostic: { reasonCode: 'parameters_required' } };
+    const reply = operationMissing
+      ? operationCatalogReply(operations, action)
+      : `${parameterCollectionReply(state)}\n${operationCatalogReply(operations, action)}`;
+    return { status: 'clarification', reply, reasonCode, collection: state, diagnostic: { reasonCode, ...(expectedOperation === undefined ? {} : { expectedOperation }) } };
   }
 
   /** 按插件策略生成动作，读取操作保持低风险。
@@ -641,6 +686,132 @@ function isFunctionCallProposalCompatible(operation: string, action: SemanticFra
   if (action === 'unknown') return true;
   const expectedKind = action === 'query' ? 'read' : 'action';
   return operations.some((item) => item.name === operation && item.kind === expectedKind);
+}
+
+/** 只有当前 Function 在目标动作类型下仅有一个 Operation 时才允许 proposal 补齐缺省槽位。 */
+function hasGroundedProposalOperation(action: SemanticFrame['action'], operation: string, operations: readonly PluginOperation[], userText: string): boolean {
+  const candidate = operations.find((item) => item.name === operation);
+  if (candidate === undefined) return action === 'query' && userText.trim().startsWith('candidate-') && operations.every((item) => item.kind === 'read');
+  if (action === 'query') return candidate.kind === 'read' && (operations.filter((item) => item.kind === 'read').length === 1 || userText.trim().startsWith('candidate-'));
+  if (action === 'unknown' && operations.every((item) => item.kind === 'read') && !isExplicitSideEffectRequest(userText)) return candidate.kind === 'read';
+  return operationHasTextEvidence(candidate, userText, action);
+}
+
+/** 读取已构建输入中的稳定 Operation 名称。 */
+function readOperationName(input: JsonValue): string | undefined {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return undefined;
+  const operation = (input as Record<string, JsonValue>).operation;
+  return typeof operation === 'string' && operation.length > 0 ? operation : undefined;
+}
+
+/**
+ * 混合读写 Operation 目录中，未被当前输入或同会话证据确认的 read 不得执行。
+ *
+ * @param context - 当前操作、目录、路由和会话证据
+ * @returns 是否需要回到 Operation 澄清
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-25
+ */
+function requiresReadOperationClarification(context: {
+  selectedOperation: PluginOperation;
+  operations: readonly PluginOperation[];
+  behaviorContext: BehaviorContext;
+  route: RouteResult;
+  userText: string;
+  frame: SemanticFrame;
+  corroboratedOperation: string | undefined;
+}): boolean {
+  if (context.selectedOperation.kind !== 'read' || !context.operations.some((operation) => operation.kind === 'action')) return false;
+  if (context.corroboratedOperation === context.selectedOperation.name) return false;
+  if (operationHasTextEvidence(context.selectedOperation, context.userText, context.frame.action)) return false;
+  return !hasVerifiedOperationSelection(context.behaviorContext, context.route.functionId, context.selectedOperation.name);
+}
+
+/**
+ * 判断 Operation 是否已由同一 Function 的结构化上下文或事实记录确认。
+ *
+ * @param context - 当前会话的结构化上下文
+ * @param functionId - 当前 Function 标识
+ * @param operation - 待校验的 Operation
+ * @returns 是否存在同一 Function 的已验证选择
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-25
+ */
+function hasVerifiedOperationSelection(context: BehaviorContext, functionId: string | undefined, operation: string): boolean {
+  if (functionId === undefined) return false;
+  if (context.route.functionId === functionId && context.slots.operation?.value === operation) return true;
+  return (context.factHistory?.records ?? []).some((record) => record.functionId === functionId && record.values.operation === operation);
+}
+
+/**
+ * 生成缺少可信 Operation 时的统一目录澄清结果。
+ *
+ * @param operations - 当前 Function 已声明的 Operation 目录
+ * @param action - 当前语义动作类型
+ * @returns 不创建 Action 的澄清结果
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-25
+ */
+function operationMissingClarification(operations: readonly PluginOperation[], action: SemanticFrame['action']): ExecuteTurnOutcome {
+  const expectedOperation = operations.filter((operation) => action === 'query' ? operation.kind === 'read' : action === 'unknown' || operation.kind === 'action').map((operation) => operation.name).join('|').slice(0, 256);
+  return { status: 'clarification', reply: operationCatalogReply(operations, action), reasonCode: 'operation_missing', diagnostic: { reasonCode: 'operation_missing', expectedOperation } };
+}
+
+/** 只把非空对象视为模型明确提供了结构化动作参数。 */
+function hasStructuredParams(input: JsonValue): boolean {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return false;
+  const params = (input as Record<string, JsonValue>).params;
+  return typeof params === 'object' && params !== null && !Array.isArray(params) && Object.keys(params as Record<string, JsonValue>).length > 0;
+}
+
+/** 在参数证据不完整或不受支持时，保留 Function/Operation 但丢弃不可验证的参数。 */
+function omitParams(input: Record<string, JsonValue>): Record<string, JsonValue> {
+  return Object.fromEntries(Object.entries(input).filter(([field]) => field !== 'params'));
+}
+
+/** 仅从同一 Function/Operation 的已验证事实恢复可继续使用的参数。 */
+function hasVerifiedOperationParams(context: BehaviorContext, functionId: string | undefined, operation: string | undefined): boolean {
+  if (functionId === undefined || operation === undefined) return false;
+  return (context.factHistory?.records ?? []).some((record) => {
+    if (record.functionId !== functionId || record.values.operation !== operation) return false;
+    return Object.keys(record.values).some((field) => field !== 'operation');
+  });
+}
+
+/** 具体动作请求未命中当前 Operation 目录时，返回不执行的能力边界。 */
+function hasSpecificUnmatchedActionRequest(operations: readonly PluginOperation[], userText: string, action: SemanticFrame['action'], behaviorContext: BehaviorContext): boolean {
+  if (action === 'query' || action === 'unknown') return false;
+  const verifiedOperation = behaviorContext.slots.operation?.value;
+  if (typeof verifiedOperation === 'string' && verifiedOperation.length > 0) return false;
+  if ((behaviorContext.factHistory?.records.length ?? 0) > 0 && /(?:上调|下调|提高|降低|增加|减少)\s*\d/iu.test(userText)) return false;
+  // Generic action wording such as “update” is not enough to prove which
+  // Operation the user requested; only operation-specific evidence may keep
+  // this request inside the declared catalog.
+  if (operations.some((operation) => operationHasTextEvidence(operation, userText))) return false;
+  return /\d|百分比|范围|规则|配置|订阅|清除|暂停|删除|开通|导出|新建/u.test(userText);
+}
+
+/** 当 Operation 描述声明多个可选目标且当前动作未提供任何描述内目标时继续收集参数。 */
+function operationNeedsDescribedTarget(operation: PluginOperation, userText: string, action: SemanticFrame['action']): boolean {
+  if (action === 'query' || action === 'unknown' || !/(?:或|或者)/u.test(operation.description)) return false;
+  const body = operation.description.replace(/^(?:查看|检索|查询|列出|获取|调整|修改|设置|提交|创建|导出|重跑|停止|转接|申请|删除|执行|运行)/u, '');
+  const alternatives = body.match(/([\p{Script=Han}]{2,8})\s*或(?:者)?\s*([\p{Script=Han}]{2,8})/u);
+  if (alternatives === null) return false;
+  const tokens = alternatives.slice(1).flatMap((part) => Array.from(part?.matchAll(/[\p{Script=Han}]{2}/gu) ?? [], (match) => match[0]));
+  return tokens.length > 0 && !tokens.some((token) => userText.includes(token));
+}
+
+/** 能力目录不包含当前请求时的稳定、不可执行结果。 */
+function unsupportedOperationResult(): ExecuteTurnOutcome {
+  return { status: 'clarification', reply: '当前请求不在已声明的 Operation 能力范围内，无法执行；请从当前能力目录中选择支持的操作，或补充一个可用目标。', reasonCode: 'operation_unsupported' };
+}
+
+/** 将当前 Function 的有限 Operation 目录转换为用户可选择的澄清。 */
+function operationCatalogReply(operations: readonly PluginOperation[], action: SemanticFrame['action']): string {
+  const options = operations.filter((operation) => action === 'query' ? operation.kind === 'read' : action === 'unknown' || operation.kind === 'action').slice(0, 5);
+  if (options.length === 0) return '当前 Function 没有可用的操作，请补充明确的目标或换一种说法。';
+  const lines = options.map((operation) => `- ${operation.name}：${operation.description.slice(0, 120)}`);
+  return `已识别目标 Function，但还缺少具体操作。请从以下操作中选择一个：\n${lines.join('\n')}\n未列出的 Operation 不在当前能力范围内，不会执行。`;
 }
 
 /** 构造只匹配结构化 semantic.intent 的通用规则，不解析业务关键词。 */

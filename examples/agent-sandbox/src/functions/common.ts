@@ -112,7 +112,7 @@ export function findSandboxOperation(operations: readonly SandboxOperation[], na
  * @date 2026-10-18
  */
 export function succeed(operation: string, payload: Record<string, JsonValue>, declaredFacts: Record<string, JsonValue> = {}, declaredFactRecords: readonly Record<string, JsonValue>[] = []): FunctionHandlerResult {
-  const facts = selectTrustedFacts(declaredFacts);
+  const facts = selectTrustedFacts({ operation, ...declaredFacts });
   const factRecords = declaredFactRecords.map((values) => ({ values: selectTrustedFacts(values) })).filter((record) => Object.keys(record.values).length > 0);
   return { status: 'succeeded', output: { accepted: true, operation, ...payload, facts, ...(factRecords.length > 0 ? { factRecords } : {}) }, response: { schemaVersion: SCHEMA_VERSIONS.functionResponse, mode: 'model' } };
 }

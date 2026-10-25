@@ -49,6 +49,8 @@ const PI_SYSTEM_PROMPT = '你是 IAR Agent Sandbox 的通用对话兜底助手�
 /** 备注进入 Pi 上下文的用户文本与回复长度上限。 */
 const HANDLED_NOTE_MAX_CHARS = 200;
 const HANDLED_REPLY_MAX_CHARS = 300;
+const PI_TRANSCRIPT_MAX_MESSAGES = 40;
+const PI_TRANSCRIPT_MAX_CHARS = 24_000;
 
 /** Pi 单轮调用的默认超时，超出后中止 Agent 运行并回退 IAR 兜底。 */
 const DEFAULT_PI_RUN_TIMEOUT_MS = 120_000;
@@ -73,13 +75,17 @@ export function createPiAgentDelegate(options: PiAgentDelegateOptions): PiAgentD
       activeDescriptors = functionDescriptors ?? [];
       try { return await runAgentTurn(agent, text, onDelta); } finally { activeDescriptors = []; }
     },
-    recordHandledTurn: (userText, reply) => { agent.state.messages.push(createHandledNote(userText, reply)); },
+    recordHandledTurn: (userText, reply) => {
+      agent.state.messages.push(createHandledNote(userText, reply));
+      boundPiTranscript(agent);
+    },
     reset: () => { activeDescriptors = []; agent = createAgent(options.sessionId, runtime.model, streamFn, () => activeDescriptors, options.systemPrompt); }
   };
 }
 
 /** 运行一轮 Pi Agent 并收集回复文本；超时或异常终态交给调用方回退。 */
 async function runAgentTurn(agent: Agent, text: string, onDelta: (delta: string) => void): Promise<string> {
+  boundPiTranscript(agent);
   let reply = '';
   let stopReason: string | undefined;
   const unsubscribe = agent.subscribe((event) => {
@@ -98,6 +104,20 @@ async function runAgentTurn(agent: Agent, text: string, onDelta: (delta: string)
   }
   if (reply.length === 0 || stopReason === 'aborted' || stopReason === 'error') throw new Error('Pi Agent 回复未完成。');
   return reply;
+}
+
+/** 只保留有界的 Pi 兜底对话历史，避免长会话把真实模型推到上下文边界。 */
+function boundPiTranscript(agent: Agent): void {
+  const messages = agent.state.messages;
+  while (messages.length > PI_TRANSCRIPT_MAX_MESSAGES || transcriptSize(messages) > PI_TRANSCRIPT_MAX_CHARS) {
+    messages.shift();
+  }
+  if (messages[0]?.role === 'assistant') messages.shift();
+}
+
+/** 计算 Pi transcript 的有界文本大小，不读取业务字段或路由内容。 */
+function transcriptSize(messages: ReadonlyArray<AgentMessage>): number {
+  return messages.reduce((total, message) => total + (typeof message.content === 'string' ? message.content.length : String(JSON.stringify(message.content)).length), 0);
 }
 
 /** 将当前启用能力作为不可信数据上下文传给 Pi，不授予模型执行权限。 */

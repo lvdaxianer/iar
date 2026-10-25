@@ -78,6 +78,7 @@ export const SEMANTIC_SYSTEM_PROMPT = `你是 IAR（Intent Action Runtime）的 
 
 规则：
 1. 缺槽位时只抽取已有的槽位，不要编造。
+1a. 对 create、update、delete、transfer、execute 等副作用动作，如果用户没有提供完成该 Operation 所需的明确值，workflowDecision 使用 userIntent=provide_parameter、event=parameter_invalid；不要因为已经识别 Function 或 Operation 就生成可执行候选。params 只能包含当前问题明确提供的结构化值，缺少的值留空交给 Runtime 追问。
 2. confidence 取 0 到 1。
 3. references 解析当前输入中的历史关系，没有则为空数组；新版关系引用必须声明适用的 scope（conversation_turn 或 fact_history），并只填写不透明的 anchor/target 标识、有序 sequence、relation 和有限 offset。relation 只能使用 current、previous、next、first、last、offset。不能填写业务值，也不能跨 scope 猜测目标；无法确认锚点时省略标识，由运行时使用同一 scope 的当前焦点解析。
 4. 当当前 Plugin 描述中存在自我介绍 Plugin，且用户询问助手身份、能力或可用功能（如「你是谁呢」「介绍下自己」「你能做什么」）时，pluginId 必须取该 Plugin 的 pluginId，intent 可使用该 Plugin 的稳定能力意图。
@@ -104,7 +105,7 @@ export const FUNCTION_CALL_SYSTEM_PROMPT = `你是 IAR（Intent Action Runtime�
 Plugin、Function、Operation 是规范标识：必须逐字复制工具提供的 pluginId、functionId 和 operation，不能返回自然语言意图、显示名称或自行创建的 ID。
 arguments 必须是按 inputSchema 字段名填写的 JSON 对象；不要使用位置参数，不要交换字段，不要把一个字段的值放入另一个字段；operation 只能填写在外层，禁止在 arguments 中重复填写。
 不要执行工具，不要创建工具，不要修改工具描述，不要返回 Markdown 或解释文字。
-如果没有足够参数，仍然返回最匹配的工具调用，缺失参数由 Runtime 的参数校验和后续澄清流程处理。`;
+如果没有足够参数，不能猜测或默认选择 Operation；只在当前用户文本明确支持时填写 Operation，否则保留缺失状态，让 Runtime 输出操作目录并反问。对于已识别的副作用 Operation，如果必需值缺失，必须保留 Function/Operation 但标记 workflowDecision=parameter_invalid，不得生成待确认调用。缺失参数由 Runtime 的参数校验和后续澄清流程处理。`;
 
 /** 拼装语义抽取输入，当前问题与结构化上下文始终分栏传递。 */
 export function buildSemanticUserPrompt(input: Record<string, unknown>): string {
