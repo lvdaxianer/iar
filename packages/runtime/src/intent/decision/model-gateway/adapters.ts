@@ -10,7 +10,7 @@ import type { DecisionRequest } from '../types.js';
 import { MODEL_NO_PROFILE_MESSAGE, type ModelGatewayInvocationOptions, type ModelGatewayResult, type ModelInvocation, type ModelOutputValidation } from './types.js';
 import { ModelGateway } from './gateway.js';
 import { DecisionBackendResolver } from './decision-backend.js';
-import { buildIntentDecisionInput, canonicalizeDecisionRequest } from './intent-prompt.js';
+import { buildIntentDecisionInput, buildIntentDecisionInputWithBudget, canonicalizeDecisionRequest } from './intent-prompt.js';
 import { validateFunctionCallProposal, validateNestedFunctionCallProposal, type FunctionCallProposal, type FunctionToolDefinition, type NestedFunctionCallProposal, type NestedFunctionCandidateDefinition, type NestedFunctionToolDefinition } from './function-call.js';
 
 /** Semantic Extractor 的最小结构化返回。 */
@@ -247,14 +247,17 @@ export class IntentModelDecisionAdapter {
     const snapshot = createDecisionInvocationSnapshot(invocation, this.role);
     if (!snapshot) return Promise.resolve(invalidDecisionResult('Intent Model decision request 无效'));
     let input: JsonValue;
+    let contextBudget: ModelInvocation['contextBudget'];
     try {
-      input = buildIntentDecisionInput(snapshot.request, snapshot.currentMessage, snapshot.behaviorContext, snapshot.recentMessages);
+      const assembled = buildIntentDecisionInputWithBudget(snapshot.request, snapshot.currentMessage, snapshot.behaviorContext, snapshot.recentMessages);
+      input = assembled.input;
+      contextBudget = assembled.diagnostics;
     } catch {
       // Prompt builder 的底层异常统一收敛为稳定 invalid_request。
       return Promise.resolve(invalidDecisionResult('Intent Model decision request 无效'));
     }
     const crossBackendInput = options?.crossBackendFallback === true ? decisionModelInput(snapshot.request, snapshot.currentMessage, snapshot.behaviorContext, snapshot.recentMessages) : undefined;
-    return this.gateway.invoke(this.role, { traceId: snapshot.traceId, runId: snapshot.runId, input }, (raw) => validateDecisionResult(snapshot.request, raw), decisionOptions('intent-model', profileId, options, crossBackendInput));
+    return this.gateway.invoke(this.role, { traceId: snapshot.traceId, runId: snapshot.runId, input, ...(contextBudget === undefined ? {} : { contextBudget }) }, (raw) => validateDecisionResult(snapshot.request, raw), decisionOptions('intent-model', profileId, options, crossBackendInput));
   }
 }
 

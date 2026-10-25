@@ -6,7 +6,7 @@
  */
 import { ACTION_TYPES, type BehaviorContext, type JsonValue } from '@iar/contracts';
 import type { DecisionCandidate, DecisionRequest } from '../types.js';
-import { assembleIntentContext, IntentContextBudgetError, IntentContextSerializationError, type ContextBudgetSection } from './context-budget.js';
+import { assembleIntentContext, IntentContextBudgetError, IntentContextSerializationError, type ContextBudgetDiagnostics, type ContextBudgetSection } from './context-budget.js';
 const DECISION_TYPES = ['function.select', 'plugin.select'] as const;
 const REQUEST_KEYS = ['decisionType', 'decisionVersion', 'threshold', 'candidates'] as const;
 const CANDIDATE_KEYS = ['candidateId', 'priority', 'specificity', 'requiredSlots', 'riskLevel', 'evidenceCodes', 'description', 'functionId', 'actionTypes'] as const;
@@ -91,6 +91,11 @@ class StableIntentDecisionRequestError extends TypeError {
  * @date 2026-10-17
  */
 export function buildIntentDecisionInput(request: DecisionRequest, currentMessage?: string, behaviorContext?: BehaviorContext, recentMessages?: Array<{ role: string; text: string }>): JsonValue {
+  return buildIntentDecisionInputWithBudget(request, currentMessage, behaviorContext, recentMessages).input;
+}
+
+/** 构造带无原文预算诊断的 Intent Model 输入，供 ModelGateway audit 使用。 */
+export function buildIntentDecisionInputWithBudget(request: DecisionRequest, currentMessage?: string, behaviorContext?: BehaviorContext, recentMessages?: Array<{ role: string; text: string }>): { input: JsonValue; diagnostics: ContextBudgetDiagnostics } {
   try {
     const normalizedRequest = canonicalizeDecisionRequest(request);
     const promptRequest = { ...normalizedRequest, candidateIds: normalizedRequest.candidates.map((candidate) => candidate.candidateId) } as unknown as JsonValue;
@@ -106,7 +111,8 @@ export function buildIntentDecisionInput(request: DecisionRequest, currentMessag
       ...(recentMessages === undefined ? [] : [{ name: 'recentMessages', value: recentMessages as unknown as JsonValue, priority: 'optional' as const, itemized: true }]),
       ...(projection?.conversationTurnRecords === undefined ? [] : [{ name: 'conversationTurns', value: projection.conversationTurnRecords, priority: 'optional' as const, itemized: true, path: ['behaviorContext', 'conversationTurns', 'turns'] }])
     ];
-    return cloneJsonValue(assembleIntentContext({ sections }).context);
+    const assembled = assembleIntentContext({ sections });
+    return { input: cloneJsonValue(assembled.context), diagnostics: assembled.diagnostics };
   } catch (error) {
     if (error instanceof IntentContextBudgetError) throw invalidRequest('上下文超出预算');
     if (error instanceof IntentContextSerializationError) throw stableRequestError('输入必须可 JSON 序列化');

@@ -6,6 +6,7 @@
  */
 import { redactModelRequest, type ModelAuditEntry, type ModelAuditOutcome, type ModelProfile, type ModelRole } from '../model-profile.js';
 import type { JsonValue } from '@iar/contracts';
+import type { ContextBudgetDiagnostics } from './context-budget.js';
 import { createDecisionAuditMetadata, resolveCrossBackendProfile, resolveFallbackProfile, resolvePrimaryProfileForInvocation } from './decision-backend.js';
 import { MODEL_NO_PROFILE_MESSAGE, ModelProviderError, type ModelGatewayError, type ModelGatewayEvent, type ModelGatewayFailure, type ModelGatewayInvocationOptions, type ModelGatewayOptions, type ModelGatewayResult, type ModelInvocation, type ModelOutputValidation, type ModelProvider, type ModelProviderRequest } from './types.js';
 
@@ -138,16 +139,18 @@ export class ModelGateway {
    */
   private async runAttempt<T>(options: AttemptOptions<T>): Promise<AttemptResult<T>> {
     const { role, invocation, profile, provider, validate, useFallback, attempt } = options;
+    let observedContextBudget = invocation.contextBudget;
+    const auditInvocation = (): ModelInvocation => observedContextBudget === undefined ? invocation : { ...invocation, contextBudget: observedContextBudget };
     try {
       // timeout controller 只作用于当前 attempt，不能污染其他 attempt。
-      const raw = await this.withTimeout(provider, { traceId: invocation.traceId, runId: invocation.runId, profile, input: invocation.input, attempt, signal: new AbortController().signal }, profile.timeoutMs);
+      const raw = await this.withTimeout(provider, { traceId: invocation.traceId, runId: invocation.runId, profile, input: invocation.input, attempt, signal: new AbortController().signal, onContextBudget: (diagnostics) => { observedContextBudget = diagnostics; } }, profile.timeoutMs);
       // 原始 provider 输出必须继续经过 role-specific validator。
-      return this.handleOutput({ ...options, raw });
+      return this.handleOutput({ ...options, invocation: auditInvocation(), raw });
     } catch (error) {
       // timeout/provider 异常只保留稳定分类，原始异常正文不进入审计。
       const failure = classifyFailure(error);
       const outcome = failure.code === 'model.timeout' ? 'timeout' : 'provider_failed';
-      const audit = this.auditEntry({ role, invocation, profile, fallbackUsed: useFallback, attempt, outcome, errorCode: failure.code, reason: failure.message });
+      const audit = this.auditEntry({ role, invocation: auditInvocation(), profile, fallbackUsed: useFallback, attempt, outcome, errorCode: failure.code, reason: failure.message });
       return { ok: false, failure, audit, event: { eventName: 'model.failed', audit, errorCode: failure.code } };
     }
   }
@@ -230,9 +233,11 @@ export class ModelGateway {
 
   /** 记录一次不含决策原始 input 的 audit entry。 @param options - audit 构造参数 @returns 脱敏审计快照 @author lvdaxianer@yeah.net @date 2026-10-17 */
   private auditEntry(options: AuditOptions): ModelAuditEntry {
-    const metadata = options.role === 'function.call' || options.role === 'function.select' || options.role === 'plugin.select'
+    const baseMetadata = options.role === 'function.call' || options.role === 'function.select' || options.role === 'plugin.select'
       ? createDecisionAuditMetadata(options.profile, options.invocation.input, options.reason)
       : redactModelRequest({ provider: options.profile.provider, request: options.invocation.input });
+    const budget = sanitizeContextBudget(options.invocation.contextBudget);
+    const metadata = budget === undefined ? baseMetadata : { ...baseMetadata, contextBudget: budget };
     return { traceId: options.invocation.traceId, runId: options.invocation.runId, role: options.role, profileId: options.profile.profileId, profileVersion: options.profile.profileVersion, modelId: options.profile.modelId, modelVersion: options.profile.modelVersion, attempt: options.attempt, outcome: options.outcome, fallbackUsed: options.fallbackUsed, metadata };
   }
 
@@ -289,6 +294,22 @@ function notifyAudit(observer: ModelGatewayOptions['onAudit'], audit: ModelAudit
     observer?.(audit, event);
   } catch {
     // 观测边界故障必须被隔离，不能让模型主链失败。
+  }
+}
+
+/** 预算诊断只允许有限数字、布尔和层计数进入 audit。 */
+function sanitizeContextBudget(value: ContextBudgetDiagnostics | undefined): Record<string, JsonValue> | undefined {
+  try {
+    if (!value || !Number.isSafeInteger(value.budgetChars) || value.budgetChars <= 0 || value.budgetChars > 1_000_000 || !Number.isSafeInteger(value.measuredChars) || value.measuredChars < 0 || value.measuredChars > value.budgetChars || typeof value.truncated !== 'boolean' || !isRecord(value.retained)) return undefined;
+    const retained: Record<string, JsonValue> = {};
+    for (const [name, count] of Object.entries(value.retained)) {
+      if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(name) || !Number.isSafeInteger(count) || count < 0 || count > 1024) continue;
+      retained[name] = count;
+    }
+    return { budgetChars: value.budgetChars, measuredChars: value.measuredChars, truncated: value.truncated, retained };
+  } catch {
+    // provider 传回的诊断也属于不可信边界，清洗失败不能改变模型主流程。
+    return undefined;
   }
 }
 
