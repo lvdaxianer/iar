@@ -56,7 +56,8 @@ export class ScriptedModelProvider implements ModelProvider {
    * @date 2026-10-18
    */
   private extract(text: string, behaviorContext: Record<string, unknown>, pluginDescriptors: PluginScopeDescriptor[], pendingAction: Record<string, unknown> = {}): unknown {
-    const semanticFrame = addPluginId(this.extractFrame(text, behaviorContext, pendingAction), pluginDescriptors);
+    const rawFrame = this.extractFrame(text, behaviorContext, pendingAction);
+    const semanticFrame = addPluginId(normalizeUnderspecifiedQuery(rawFrame, text), pluginDescriptors);
     const workflowDecision = scriptedWorkflowDecision(text, behaviorContext);
     return workflowDecision.event === 'unknown' ? semanticFrame : { semanticFrame, workflowDecision };
   }
@@ -269,6 +270,36 @@ type ScriptedAction = 'query' | 'create' | 'update' | 'delete' | 'transfer' | 'e
 
 function frame(intent: string, slots: Record<string, JsonValue>, confidence: number, action?: ScriptedAction, references: Array<Record<string, JsonValue>> = []): unknown {
   return { schemaVersion: references.length > 0 ? 'iar.semantic-frame/v2' : 'iar.semantic-frame/v1', intent, action: action ?? inferAction(intent, slots), slots, references, confidence };
+}
+
+/**
+ * 对离线模型的模糊查询移除未经当前文本支持的默认 Operation。
+ *
+ * @param raw - 离线模型生成的原始语义帧
+ * @param text - 当前用户文本
+ * @returns 保留当前文本证据后的语义帧
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-25
+ */
+function normalizeUnderspecifiedQuery(raw: unknown, text: string): unknown {
+  if (!isRecord(raw) || raw.action !== 'query' || !isVagueQuery(text)) return raw;
+  const slots = isRecord(raw.slots) ? { ...raw.slots } : {};
+  delete slots.operation;
+  return { ...raw, slots };
+}
+
+/**
+ * 判断查询是否只表达查看意图而没有给出可区分的操作。
+ *
+ * @param text - 当前用户文本
+ * @returns 是否需要让运行时继续澄清操作
+ * @author lvdaxianer@yeah.net
+ * @date 2026-10-25
+ */
+function isVagueQuery(text: string): boolean {
+  const normalized = text.trim();
+  return /(?:帮我|请|麻烦).*(?:看看|看下|看一下|查查|查下|查一下|弄一下|处理一下)s*$/u.test(normalized)
+    || /(?:这边|那边|这里|那里)s*(?:帮我)?(?:看看|看下|看一下|查查|查下|查一下|弄一下|处理一下)s*$/u.test(normalized);
 }
 
 /** 离线 provider 只复制当前候选范围中的固定 Plugin 标识。 */

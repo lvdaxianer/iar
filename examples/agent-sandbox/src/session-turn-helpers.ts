@@ -28,6 +28,9 @@ import type { TurnTimingTracker } from './turn-timing.js';
  */
 export function gateIncompleteSemanticFrame(frame: SemanticFrame, traceId: string, timing: TurnTimingTracker, _userText: string, allowUnmatchedHandling = false): RouteEvidence | undefined {
   const missingField = frame.intent === 'unknown' ? 'intent' : frame.action === 'unknown' ? 'action' : undefined;
+  // Function 已确定但 action 未确定时仍需进入 Function 内部的 Operation
+  // 目录澄清；只有连 Function 都未确定，才允许交给普通兜底 Agent。
+  if (missingField === 'action') return undefined;
   if (missingField === undefined || (allowUnmatchedHandling && missingField === 'intent')) return undefined;
   const evidence: RouteEvidence = { status: 'semantic_incomplete', reasonCode: 'semantic_incomplete', semanticIntent: frame.intent, semanticConfidence: frame.confidence };
   evidence.missingField = missingField;
@@ -172,7 +175,9 @@ export function logRouteResult(traceId: string, route: RouteResult): void {
 export function logActionResult(traceId: string, outcome: ExecuteTurnOutcome): void {
   const pendingConfirmation = outcome.status === 'awaiting_confirmation';
   const succeeded = outcome.status === 'executed';
-  const blockedReason = outcome.status === 'clarification' && outcome.reasonCode === 'parameters_required'
+  const blockedReason = outcome.status === 'clarification' && outcome.reasonCode === 'operation_missing'
+    ? 'operation_missing'
+    : outcome.status === 'clarification' && outcome.reasonCode === 'parameters_required'
     ? 'parameters_required'
     : succeeded ? 'route_matched' : pendingConfirmation ? 'confirmation_required' : outcome.diagnostic ? 'route_contract_invalid' : 'action_failed';
   logRouteDecision(traceId, {
@@ -186,6 +191,7 @@ export function applyRouteDiagnostic(evidence: RouteEvidence, traceId: string, o
   if (outcome.diagnostic === undefined) return;
   evidence.status = 'clarification';
   evidence.reasonCode = outcome.diagnostic.reasonCode;
+  if (outcome.diagnostic.reasonCode === 'operation_missing') evidence.missingField = 'operation';
   if (outcome.diagnostic.reasonCode === 'parameters_required') evidence.missingField = 'parameters';
   if (outcome.diagnostic.expectedOperation !== undefined) evidence.expectedOperation = outcome.diagnostic.expectedOperation;
   if (outcome.diagnostic.actualOperation !== undefined) evidence.actualOperation = outcome.diagnostic.actualOperation;
