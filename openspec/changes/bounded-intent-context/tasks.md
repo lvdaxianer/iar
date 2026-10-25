@@ -17,8 +17,8 @@
 
 ## 4. Long-session verification
 
-- [ ] 4.1 新增长会话意图识别集成场景，覆盖 20～40 轮上下文、当前参数覆盖旧参数、相对追问、预算裁剪和模型失败 fallback；通过新增集成测试验证 fail-closed 行为。
-- [ ] 4.2 运行受影响的 model-gateway、session persistence、workflow evaluation 测试以及完整 `npm test`，并完成 OpenSpec 验证、代码审查和最终差异审计。
+- [x] 4.1 新增长会话意图识别集成场景，覆盖 20～40 轮上下文、当前参数覆盖旧参数、相对追问、预算裁剪和模型失败 fallback；通过新增集成测试验证 fail-closed 行为。
+- [x] 4.2 运行受影响的 model-gateway、session persistence、workflow evaluation 测试以及完整 `npm test`，并完成 OpenSpec 验证、代码审查和最终差异审计。
 
 ## Workflow follow-up
 
