@@ -5,7 +5,7 @@
  * @date 2026-10-18
  */
 import { MAX_CONVERSATION_TURNS, MAX_TRUSTED_FACTS, type BehaviorContext, type ConversationTurn, type JsonValue, type VerifiedFactRecord } from '@iar/contracts';
-import { assembleIntentContext, type ContextBudgetSection } from '@iar/runtime';
+import { assembleIntentContext, type ContextBudgetDiagnostics, type ContextBudgetSection } from '@iar/runtime';
 
 /** 模型可读取的两个有序上下文集合及其独立焦点。 */
 export type OrderedModelContext = {
@@ -110,6 +110,11 @@ arguments 必须是按 inputSchema 字段名填写的 JSON 对象；不要使用
 
 /** 拼装语义抽取输入，当前问题与结构化上下文始终分栏传递。 */
 export function buildSemanticUserPrompt(input: Record<string, unknown>): string {
+  return buildSemanticUserPromptWithBudget(input).prompt;
+}
+
+/** 拼装语义 Prompt 并返回不含原文的预算诊断。 */
+export function buildSemanticUserPromptWithBudget(input: Record<string, unknown>): { prompt: string; diagnostics: ContextBudgetDiagnostics } {
   const behaviorContext = asBehaviorContext(input.behaviorContext);
   const orderedContext = projectOrderedModelContext(behaviorContext);
   const sections: ContextBudgetSection[] = [
@@ -125,7 +130,8 @@ export function buildSemanticUserPrompt(input: Record<string, unknown>): string 
     { name: 'recentMessages', value: (input.recentMessages ?? []) as JsonValue, priority: 'optional', itemized: true },
     { name: 'conversationTurns', value: orderedContext.conversationTurns as unknown as JsonValue, priority: 'optional', itemized: true }
   ];
-  return assembleIntentContext({ sections, serialize: renderSemanticPrompt }).serialized;
+  const assembled = assembleIntentContext({ sections, serialize: renderSemanticPrompt });
+  return { prompt: assembled.serialized, diagnostics: assembled.diagnostics };
 }
 
 function projectSemanticBehaviorContext(context: BehaviorContext | undefined): Record<string, unknown> {

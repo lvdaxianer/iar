@@ -7,6 +7,7 @@
 import type { JsonValue } from '@iar/contracts';
 import type { ModelAuditEntry, ModelAuditOutcome, ModelProfile, ModelProfileRegistry } from '../model-profile.js';
 import type { DecisionBackend } from '../types.js';
+import type { ContextBudgetDiagnostics } from './context-budget.js';
 
 /** 供 provider 读取但不能修改的递归快照类型。 */
 export type DeepReadonly<T> = T extends (...args: never[]) => unknown ? T : T extends readonly (infer U)[] ? readonly DeepReadonly<U>[] : T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } : T;
@@ -25,6 +26,8 @@ export type ModelProviderRequest = {
   attempt: number;
   /** timeout 时由 gateway 触发取消。 */
   signal: AbortSignal;
+  /** provider 完成实际 Prompt 组装后回传的无原文预算诊断。 */
+  onContextBudget?: (diagnostics: ContextBudgetDiagnostics) => void;
 };
 
 /** ModelGateway 注册的最小 provider 协议。 */
@@ -101,6 +104,8 @@ export type ModelInvocation = {
   runId: string;
   /** 交给 provider 的 JSON 输入。 */
   input: JsonValue;
+  /** 仅供 gateway audit 使用的无原文预算诊断，不进入 provider input。 */
+  contextBudget?: ContextBudgetDiagnostics;
 };
 
 /**

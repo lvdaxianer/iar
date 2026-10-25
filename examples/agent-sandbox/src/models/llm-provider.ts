@@ -29,7 +29,7 @@ import { callModel, cancelModelBody, countModelBytes, type ModelTransportTool } 
 import { logModelHttpFailure, logModelInvalidResponse, logModelNetworkFailure, logModelSuccess, runWithModelLogContext } from '../safe-log.js';
 import { callModelStream } from './model-stream-transport.js';
 import { SEMANTIC_SYSTEM_PROMPT, FUNCTION_CALL_SYSTEM_PROMPT, COMPACT_SYSTEM_PROMPT, buildResponseStreamSystemPrompt, buildResponseSystemPrompt,
-  buildCompactionUserPrompt, buildResponseUserPrompt, buildSemanticUserPrompt, readString } from './model-input-transport.js';
+  buildCompactionUserPrompt, buildResponseUserPrompt, buildSemanticUserPromptWithBudget, readString } from './model-input-transport.js';
 
 /** brain provider 的可注入配置。 */
 export type BrainProviderOptions = {
@@ -156,7 +156,9 @@ export class OpenAICompatibleModelProvider implements ModelProvider {
     const input = asRecord(request.input);
     if (request.profile.role === 'function.call' || request.profile.role === 'route.propose') return Array.isArray(input.nestedTools) ? buildNestedFunctionPrompt(input) : buildFunctionPrompt(input);
     if (request.profile.role === 'semantic.extract') {
-      return { system: SEMANTIC_SYSTEM_PROMPT, user: buildSemanticUserPrompt(input), thinking: { type: 'disabled' } };
+      const semanticPrompt = buildSemanticUserPromptWithBudget(input);
+      request.onContextBudget?.(semanticPrompt.diagnostics);
+      return { system: SEMANTIC_SYSTEM_PROMPT, user: semanticPrompt.prompt, thinking: { type: 'disabled' } };
     }
     if (request.profile.role === 'context.compact') {
       return { system: COMPACT_SYSTEM_PROMPT, user: buildCompactionUserPrompt(input), thinking: { type: 'disabled' } };

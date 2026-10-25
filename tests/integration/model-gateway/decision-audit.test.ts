@@ -156,7 +156,16 @@ test('records selected backend and symmetric value contract', async () => {
     assert.ok(event);
     const expectedMetadata: AuditMetadata = { provider: primary.provider, candidateCount: 2, decisionBackend: backend };
     if (backend === 'intent-model') expectedMetadata.promptVersion = 'iar.intent-decision-prompt/v1';
-    assert.deepEqual(entry.metadata, expectedMetadata);
+    const comparableMetadata = { ...(entry.metadata as AuditMetadata) };
+    if (backend === 'intent-model') {
+      const contextBudget = comparableMetadata.contextBudget as Record<string, JsonValue>;
+      assert.equal(contextBudget.budgetChars, 24_000);
+      assert.equal(typeof contextBudget.measuredChars, 'number');
+      assert.equal(contextBudget.truncated, false);
+      assert.deepEqual(contextBudget.retained, {});
+      delete comparableMetadata.contextBudget;
+    }
+    assert.deepEqual(comparableMetadata, expectedMetadata);
     assert.deepEqual(event.audit, entry);
     assert.deepEqual(Object.keys(event).sort(), ['audit', 'eventName']);
   }
@@ -197,8 +206,11 @@ test('keeps Intent metadata on an exact whitelist and redacts secrets', async ()
   assert.equal(providerInput.includes('user-input-secret'), true);
   // metadata 只允许稳定 provider、数量、backend、Prompt 版本和失败原因。
   const metadata = result.audit[0]?.metadata as AuditMetadata;
-  assert.deepEqual(Object.keys(metadata).sort(), ['candidateCount', 'decisionBackend', 'promptVersion', 'provider', 'reason']);
-  assert.deepEqual(metadata, {
+  assert.ok(metadata.contextBudget);
+  const comparableMetadata = { ...metadata };
+  delete comparableMetadata.contextBudget;
+  assert.deepEqual(Object.keys(comparableMetadata).sort(), ['candidateCount', 'decisionBackend', 'promptVersion', 'provider', 'reason']);
+  assert.deepEqual(comparableMetadata, {
     provider: primary.provider,
     candidateCount: 2,
     decisionBackend: 'intent-model',
@@ -282,7 +294,20 @@ test('preserves ordered audit evidence for JEV and Intent Model fallback', async
       { profileId: primary.profileId, profileVersion: primary.profileVersion, modelId: primary.modelId, modelVersion: primary.modelVersion, fallbackUsed: false },
       { profileId: fallback.profileId, profileVersion: fallback.profileVersion, modelId: fallback.modelId, modelVersion: fallback.modelVersion, fallbackUsed: true }
     ]);
-    assert.deepEqual(result.audit.map((entry) => entry.metadata), [expectedPrimaryMetadata, expectedFallbackMetadata]);
+    const comparableAuditMetadata = result.audit.map((entry) => {
+      if (backend === 'intent-model') {
+        const metadata = entry.metadata as AuditMetadata;
+        const contextBudget = metadata.contextBudget as Record<string, JsonValue>;
+        assert.equal(contextBudget.budgetChars, 24_000);
+        assert.equal(typeof contextBudget.measuredChars, 'number');
+        assert.equal(contextBudget.truncated, false);
+        assert.deepEqual(contextBudget.retained, {});
+      }
+      const metadata = { ...(entry.metadata as AuditMetadata) };
+      delete metadata.contextBudget;
+      return metadata;
+    });
+    assert.deepEqual(comparableAuditMetadata, [expectedPrimaryMetadata, expectedFallbackMetadata]);
 
     // 逐条对齐 event.audit，避免空数组上的 every 断言产生假阳性。
     assert.deepEqual(result.events.map((event) => event.audit), result.audit);
@@ -301,7 +326,13 @@ test('preserves ordered audit evidence for JEV and Intent Model fallback', async
     assert.equal(failed.audit.length, 2); assert.equal(failed.events.length, 2);
     assert.deepEqual(failed.audit.map((entry) => ({ profileId: entry.profileId, fallbackUsed: entry.fallbackUsed, outcome: entry.outcome })), [{ profileId: primary.profileId, fallbackUsed: false, outcome: 'provider_failed' }, { profileId: fallback.profileId, fallbackUsed: true, outcome: 'provider_failed' }]);
     assert.deepEqual(failed.events.map((event) => event.eventName), ['model.failed', 'model.failed']); assert.deepEqual(failed.events.map((event) => event.audit), failed.audit);
-    assert.deepEqual(failed.audit.map((entry) => entry.metadata), [expectedPrimaryMetadata, { ...expectedFallbackMetadata, reason: '模型 provider 调用失败' }]);
+    const comparableFailedMetadata = failed.audit.map((entry) => {
+      if (backend === 'intent-model') assert.ok((entry.metadata as AuditMetadata).contextBudget);
+      const metadata = { ...(entry.metadata as AuditMetadata) };
+      delete metadata.contextBudget;
+      return metadata;
+    });
+    assert.deepEqual(comparableFailedMetadata, [expectedPrimaryMetadata, { ...expectedFallbackMetadata, reason: '模型 provider 调用失败' }]);
   }
 });
 

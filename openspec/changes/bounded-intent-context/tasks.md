@@ -12,8 +12,8 @@
 
 ## 3. Safe diagnostics
 
-- [ ] 3.1 为 ModelGateway invocation 增加仅供 audit 的预算诊断快照，并在现有脱敏 audit metadata 中记录大小、裁剪标志和有限层计数；通过 audit 测试验证不出现用户原文、完整 Prompt、候选 ID 或凭证。
-- [ ] 3.2 为 semantic.extract 与 Intent Model 的正常、裁剪、预算失败和 provider fallback 路径补齐稳定观测测试；验证观测回调失败不会改变主流程结果。
+- [x] 3.1 为 ModelGateway invocation 增加仅供 audit 的预算诊断快照，并在现有脱敏 audit metadata 中记录大小、裁剪标志和有限层计数；通过 audit 测试验证不出现用户原文、完整 Prompt、候选 ID 或凭证。
+- [x] 3.2 为 semantic.extract 与 Intent Model 的正常、裁剪、预算失败和 provider fallback 路径补齐稳定观测测试；验证观测回调失败不会改变主流程结果。
 
 ## 4. Long-session verification
 
