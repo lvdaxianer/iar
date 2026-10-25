@@ -9,5 +9,6 @@ export * from './gateway.js';
 export * from './adapters.js';
 export * from './decision-backend.js';
 export * from './intent-prompt.js';
+export * from './context-budget.js';
 export * from './function-call.js';
 export * from '../model-profile.js';
