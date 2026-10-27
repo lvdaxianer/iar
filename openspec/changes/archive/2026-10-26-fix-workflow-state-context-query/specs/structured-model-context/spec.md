@@ -4,12 +4,7 @@
 
 ### Requirement: Models can answer from verified facts without repeating actions
 
-When a current message is a factual follow-up to a verified session result and does not request a new side effect, Runtime SHALL normalize the semantic frame to `intent=unknown` and `action=query` before business routing. It SHALL preserve verified references and route the message to context response or bounded clarification without creating a Function or Plugin.
-
-#### Scenario: Model returns a capability-shaped query intent
-
-- **WHEN** verified facts exist and the model returns a query action with a new-looking intent for a question about the previous result
-- **THEN** Runtime strips untrusted target identity, normalizes the frame to a context query and does not route or execute the invented Function
+The system SHALL separate semantic intent from a fixed action type and give the model only finite, runtime-filtered Plugin/Function candidates. The action type SHALL be one of `query`, `create`, `update`, `delete`, `transfer`, `execute` or `unknown`, never a business-specific operation. When no Function is selected, the response model SHALL answer from verified facts or ask a bounded clarification and SHALL NOT execute a Function.
 
 #### Scenario: Ask for the previous ticket number
 
@@ -45,13 +40,3 @@ When a current message is a factual follow-up to a verified session result and d
 
 - **WHEN** a supported new operation is selected
 - **THEN** existing authorization, policy and confirmation checks remain in force
-
-#### Scenario: Ordinary and streamed context answers agree
-
-- **WHEN** the same verified-fact follow-up is submitted through ordinary and streamed turns
-- **THEN** both paths produce the same context-answer disposition, route evidence and absence of execution
-
-#### Scenario: New operation is not downgraded
-
-- **WHEN** the current message explicitly requests a new operation, parameter change, confirmation or cancellation
-- **THEN** Runtime preserves the operation frame and sends it through the normal route and safety gates

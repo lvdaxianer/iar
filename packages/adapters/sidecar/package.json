@@ -1,6 +1,20 @@
 {
   "name": "@iar/adapters-sidecar",
   "version": "0.1.0",
+  "description": "IAR Sidecar 传输适配器",
+  "license": "MIT",
+  "author": "lvdaxianer <lvdaxianer@yeah.net>",
+  "homepage": "https://github.com/lvdaxianer/iar#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lvdaxianer/iar.git",
+    "directory": "packages/adapters/sidecar"
+  },
+  "keywords": [
+    "iar",
+    "adapters",
+    "sidecar"
+  ],
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -11,7 +25,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "dependencies": {
     "@iar/adapters-service": "0.1.0"
   }

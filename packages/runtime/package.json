@@ -1,6 +1,21 @@
 {
   "name": "@iar/runtime",
   "version": "0.1.0",
+  "description": "IAR 独立运行时：意图决策、策略门、工作流执行与事件重放",
+  "license": "MIT",
+  "author": "lvdaxianer <lvdaxianer@yeah.net>",
+  "homepage": "https://github.com/lvdaxianer/iar#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lvdaxianer/iar.git",
+    "directory": "packages/runtime"
+  },
+  "keywords": [
+    "iar",
+    "runtime",
+    "intent",
+    "workflow"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "exports": {
@@ -10,7 +25,9 @@
     }
   },
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "publishConfig": {
     "access": "public"
   },

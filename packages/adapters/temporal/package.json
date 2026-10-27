@@ -1,6 +1,21 @@
 {
   "name": "@iar/adapters-temporal",
   "version": "0.1.0",
+  "description": "IAR Durable Workflow（Temporal）适配器",
+  "license": "MIT",
+  "author": "lvdaxianer <lvdaxianer@yeah.net>",
+  "homepage": "https://github.com/lvdaxianer/iar#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lvdaxianer/iar.git",
+    "directory": "packages/adapters/temporal"
+  },
+  "keywords": [
+    "iar",
+    "adapters",
+    "temporal",
+    "durable"
+  ],
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -11,7 +26,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "dependencies": {
     "@iar/runtime": "0.1.0"
   }

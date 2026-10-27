@@ -50,7 +50,7 @@ Every projected tool name SHALL contain only ASCII letters, digits, underscore o
 
 ### Requirement: One route call proposes the complete candidate
 
-The primary route SHALL use at most one model call to propose the Plugin tool, nested Function/Operation and named JSON object arguments for the current message. The runtime SHALL distinguish a model-proposed Operation from an Operation explicitly supported by the current user input or an already verified same-session route. When the Function is identified but no unique Operation is supported, the runtime SHALL return a bounded Operation clarification containing only the registered Operations of that Function and SHALL NOT execute or enter confirmation using a default Operation.
+The primary route SHALL use at most one model call to propose the Plugin tool, nested Function/Operation and named JSON object arguments for the current message.
 
 #### Scenario: Query proposal is complete
 
@@ -61,6 +61,10 @@ The primary route SHALL use at most one model call to propose the Plugin tool, n
 
 - **WHEN** no enabled Plugin tool matches the current message
 - **THEN** the runtime returns a bounded clarification or normal response without executing a Function
+
+### Requirement: Operation proposals require verified evidence
+
+The runtime SHALL distinguish a model-proposed Operation from an Operation explicitly supported by the current user input or an already verified same-session route. When the Function is identified but no unique Operation is supported, the runtime SHALL return a bounded Operation clarification containing only the registered Operations of that Function and SHALL NOT execute or enter confirmation using a default Operation.
 
 #### Scenario: Operation is missing from a matched proposal
 

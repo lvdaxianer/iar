@@ -39,12 +39,7 @@ npm run demo:fake-plugin
 npm run demo:sandbox
 ```
 
-也支持 pnpm，但必须先显式安装依赖；`pnpm run` 不会因为启动脚本而自动访问 registry：
-
-```bash
-pnpm install
-pnpm run demo:sandbox
-```
+包管理统一使用 npm，`package-lock.json` 是唯一的锁定来源；CI 使用 `npm ci` 复现依赖树。请不要引入第二个 lockfile（pnpm/yarn），以免依赖版本漂移。
 
 如果默认端口 `8787` 已被已有 sandbox 进程占用，可先确认并结束该进程，或改用其他本地端口：
 
@@ -60,6 +55,7 @@ IAR_SANDBOX_PORT=8788 npm run demo:sandbox
 | `npm run lint` | TypeScript 类型检查，不生成构建产物 |
 | `npm run build` | 编译全部 workspace 包 |
 | `npm test` | 编译并运行完整测试套件 |
+| `npm run test:coverage` | 全量测试并生成 c8 覆盖率报告（`coverage/` 目录） |
 | `npm run demo:fake-plugin` | 运行 fake plugin 生命周期与 replay 示例 |
 | `npm run demo:sandbox` | 启动 Agent Sandbox 交互演示 |
 
@@ -105,6 +101,7 @@ docs/                     # 完整架构说明与实现审计
 - EventLog 是可恢复行为状态的事实来源；上下文压缩不能覆盖关键状态。
 - 短动作默认使用本地确定性运行时；只有明确的定时器、跨服务或补偿需求才进入 Durable Runtime。
 - 插件卸载撤销当前注册但保留历史事件，升级失败时恢复精确的上一版本。
+- `control-plane`（租户控制面与签名分发）目前是库级 API：尚无 Service 宿主、CLI 或示例组合根消费它，集成进宿主之前视为预览级接口，不作为稳定兼容承诺。
 
 ## 决策模型兼容切换
 
@@ -155,9 +152,9 @@ agent-sandbox 的主路由使用 `route.propose` 普通模型，不读取 JEV/In
 
 `POST /api/sessions` 创建独立会话并返回 `sessionId`；随后使用 `/api/sessions/{sessionId}/chat`、`confirm`、`compact`、`state` 和 `reset`，用 `DELETE /api/sessions/{sessionId}` 释放。服务重启后可先调用 `POST /api/sessions/{sessionId}/resume` 恢复最近成功写入的结构化快照，再继续提问。原 `/api/*` 入口仍共用一个兼容会话。默认最多 32 个独立会话、空闲 30 分钟过期，每会话最多 16 个在途或排队请求；达到状态操作预算后需重置。默认使用内置 SQLite Provider，文件路径为 `IAR_SANDBOX_SQLITE_PATH` 或 `./data/iar-sandbox.sqlite`；正常关闭会等待已接受快照写入，进程突然退出前尚未提交的更新可能丢失。
 
-会话持久化通过 `SessionPersistenceProvider` SPI 接入：设置 `IAR_PERSISTENCE_PROVIDER` 和 `IAR_PERSISTENCE_MODULE` 可替换外部 Provider，`IAR_PERSISTENCE_OPTIONS_JSON` 传递 JSON 配置。Provider 接收到的每条消息、事件和快照都携带同一个 `sessionId`；恢复只加载该 ID 的最新有效结构化快照，不把会话原文当作模型指令。详见[会话接口与安全边界](docs/README.md#1221-沙箱会话接口与安全边界)和[Provider 接入规范](docs/README.md#1222-会话持久化-provider-接入规范)。
+会话持久化通过 `SessionPersistenceProvider` SPI 接入：设置 `IAR_PERSISTENCE_PROVIDER` 和 `IAR_PERSISTENCE_MODULE` 可替换外部 Provider，`IAR_PERSISTENCE_OPTIONS_JSON` 传递 JSON 配置。Provider 接收到的每条消息、事件和快照都携带同一个 `sessionId`；恢复只加载该 ID 的最新有效结构化快照，不把会话原文当作模型指令。详见[会话接口与安全边界](docs/架构技术方案/README.md#1221-沙箱会话接口与安全边界)和[Provider 接入规范](docs/架构技术方案/README.md#1222-会话持久化-provider-接入规范)。
 
-会话 ID 仅隔离沙箱状态，不是身份认证或租户授权；持有 ID 的客户端可以读取状态并确认操作。沙箱只适合受信任的本机使用，生产接入必须另外实施认证、逐会话授权和传输保护。调用约束及错误码详见[会话接口与安全边界](docs/README.md#1221-沙箱会话接口与安全边界)。
+会话 ID 仅隔离沙箱状态，不是身份认证或租户授权；持有 ID 的客户端可以读取状态并确认操作。沙箱只适合受信任的本机使用，生产接入必须另外实施认证、逐会话授权和传输保护。调用约束及错误码详见[会话接口与安全边界](docs/架构技术方案/README.md#1221-沙箱会话接口与安全边界)。
 
 ### 与 Pi 集成
 
@@ -221,7 +218,7 @@ Bridge 协议版本为 `iar.pi-bridge/v1`，输入处置包括：
 
 ### 沙箱安全日志
 
-沙箱记录 HTTP 请求审计和模型调用的安全元数据，默认不输出正常模型调用的 DEBUG 日志。拥有进程信号权限的本机运维人员可以向沙箱进程发送 `SIGHUP` 切换模型 DEBUG，重复发送恢复关闭；部署环境须限制进程信号权限并确认没有其他 SIGHUP 处理约定。日志不记录模型输入、输出、请求头、凭据、URL 查询或原始异常。详见[安全与观测方案](docs/README.md#123-观测字段)。
+沙箱记录 HTTP 请求审计和模型调用的安全元数据，默认不输出正常模型调用的 DEBUG 日志。拥有进程信号权限的本机运维人员可以向沙箱进程发送 `SIGHUP` 切换模型 DEBUG，重复发送恢复关闭；部署环境须限制进程信号权限并确认没有其他 SIGHUP 处理约定。日志不记录模型输入、输出、请求头、凭据、URL 查询或原始异常。详见[安全与观测方案](docs/架构技术方案/README.md#123-观测字段)。
 
 安全日志默认异步写入标准错误，宿主可注入专用输出；须独占输出或统一串行写入，共享输出无法保证跨写入者行原子性。默认 `pretty` 输出中文+英文摘要，`json` 供机器解析。每轮包含总耗时、Trace ID、`semantic.extract`、`route.propose`、`route.select`、`action.execute`、`response.reasoning` 和 `response.generate` 等阶段；模型 HTTP 记录额外带受控 `modelRole` 和 timeout/slow 分类。队列有界且满时丢弃，可通过进程内只读状态查询丢弃和卡住情况；输出故障及进程退出可能造成日志丢失，轮转和持久化由宿主负责。
 

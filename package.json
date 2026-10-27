@@ -3,6 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "description": "Intent Action Runtime",
+  "license": "MIT",
+  "author": "lvdaxianer <lvdaxianer@yeah.net>",
+  "homepage": "https://github.com/lvdaxianer/iar#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lvdaxianer/iar.git"
+  },
   "type": "module",
   "workspaces": [
     "packages/*",
@@ -18,6 +25,7 @@
     "pack:all": "npm run build && npm pack --workspaces",
     "pack:verify": "npm run build && npm run verify:packages",
     "test": "npm run build && node scripts/run-tests.mjs",
+    "test:coverage": "npm run build && c8 --reporter=text --reporter=html --exclude='dist/tests/**' --exclude='dist/examples/agent-sandbox/web/**' node scripts/run-tests.mjs",
     "eval:workflow-model": "npm run build && node scripts/run-workflow-model-evaluation.mjs",
     "demo:fake-plugin": "npm run build && node scripts/run-fake-plugin-demo.mjs",
     "demo:sandbox": "npm run build && node scripts/run-agent-sandbox.mjs",
@@ -28,6 +36,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "c8": "^12.0.0",
     "pg-mem": "^3.0.14",
     "typescript": "^7.0.2"
   },

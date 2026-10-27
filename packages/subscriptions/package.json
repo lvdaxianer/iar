@@ -1,6 +1,20 @@
 {
   "name": "@iar/subscriptions",
   "version": "0.1.0",
+  "description": "IAR Hook、StateEvent 与订阅分发",
+  "license": "MIT",
+  "author": "lvdaxianer <lvdaxianer@yeah.net>",
+  "homepage": "https://github.com/lvdaxianer/iar#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lvdaxianer/iar.git",
+    "directory": "packages/subscriptions"
+  },
+  "keywords": [
+    "iar",
+    "subscriptions",
+    "hooks"
+  ],
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -11,7 +25,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "dependencies": {
     "@iar/contracts": "0.1.0"
   }

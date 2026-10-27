@@ -407,6 +407,19 @@ Function 确定后，Registry 只加载该 Function 的已启用、版本固定�
 
 参考实现：`examples/agent-sandbox/src/models/pi-agent-delegate.ts`（配对、模型解析与故障包装）、`examples/agent-sandbox/src/session-turn-helpers.ts`（未命中分流 `resolveNoMatchTurn`、备注记录 `recordAgentExchange`）。
 
+### 5.7 路由路径矩阵与兼容边界
+
+`@iar/runtime` 只暴露一个路由入口 `routeAsync`，内部按输入条件在四条已固化的路径中选择；除主路径外其余三条是兼容契约，保持冻结，新能力只进主路径：
+
+| 路径 | 触发条件 | 实现 | 状态 |
+| --- | --- | --- | --- |
+| 主路径（nested proposal） | 有 `nestedRouteAdapter` 且 semantic.extract 给出已知 action + intent | `routeNestedProposalAsync`（模块级共享实现，`routing.ts`），一次性选择 Plugin/Function/Operation/arguments，运行时完成 ownership、action 类型、规则与授权重校验 | 活跃演进，operation 证据语义只在此维护 |
+| Plugin-first 兼容链路 | 无 nested adapter，按 action 过滤 business 候选后 plugin.select → function.select | `PluginFirstRouter.routeAsync` 旧分支 | 冻结，仅修安全缺陷 |
+| semantic Plugin 提案链路 | 无 nested adapter 但帧内带 `pluginId`，在该 Plugin 内做一次 function.call | `PluginFirstRouter.routePluginProposalAsync` | 冻结 |
+| Function-first 两阶段 | 同步嵌入 API（`TwoStageRouter.route`）与无 nested adapter 的异步调用 | `TwoStageRouter` | 冻结，服务独立嵌入消费方 |
+
+收敛原则：两条路由器类不再互相实例化，主路径只有一份实现；`finalizePluginRoute`、`authorizeCandidates`、`buildRoutingScope` 等最终门禁是所有路径共享的模块级函数。兼容路径的选择顺序差异（Function-first vs Plugin-first）是其对外契约的一部分，不做语义合并。
+
 ## 6. 插件模型与生命周期
 
 ### 6.1 插件注册
@@ -814,41 +827,34 @@ IarRuntime
 | 事件总线 | 进程内 typed event bus | MVP 降低依赖；跨服务时再增加消息适配器 |
 | 工作流 | 本地确定性状态机；可选 Temporal Adapter | 短动作简单可控，长流程再引入 durable execution |
 | 观测 | OpenTelemetry + Pino | 统一 trace、metric、structured log，并避免默认记录原始敏感文本 |
-| 包管理 | npm workspace / pnpm workspace | 核心包按稳定职责收敛；adapters 保持独立，examples 作为根级组合根和示例，不进入 workspace 发布 |
-| 测试 | Vitest + contract tests + replay tests | 验证插件契约、路由重放、压缩前后等价性和幂等行为 |
+| 包管理 | npm workspace（`package-lock.json` 唯一锁定） | 核心包按稳定职责收敛；adapters 保持独立，examples 作为根级组合根和示例，不进入 workspace 发布；不再维护第二套 lockfile |
+| 测试 | `node:test` + contract tests + replay tests | 验证插件契约、路由重放、压缩前后等价性和幂等行为；`run-tests.mjs` 按 CPU 有界并发执行，可用 `IAR_TEST_CONCURRENCY` 覆盖 |
 
-### 11.1 推荐包结构
+### 11.1 当前包结构
 
 ```text
 config/
   models.yaml             # 模型角色与 Provider 配置
-  policies/               # 风险、权限、确认和审批策略
-  routing/                # Function、Rule 和阈值配置
 packages/
-  contracts/          # JSON Schema、TypeScript 类型、错误码和版本
-  plugins/            # SDK、Host、注册、依赖排序与生命周期
-  runtime/            # IAR 主循环、BehaviorContext、路由与策略
-  control-plane/      # tenant control-plane 与远程插件分发
-  observability/      # trace、metric、structured log、audit 与 system plugin
-  storage/            # EventStore、持久化 SPI/Runtime、SQLite Provider
-  subscriptions/      # HookDefinition、StateEvent、Subscription Registry、Dispatcher
-  rule-engine/        # 复合规则与候选 Function 生成
-  decision/           # JEV、通用模型和 Mock Adapter
-  workflow/           # 本地状态机、重试、恢复和幂等
-  storage/            # EventStore、SnapshotStore、RegistryStore 接口
-  adapters/           # Fastify、PostgreSQL、SQLite、Temporal、Sidecar
-  cli/                # install、enable、disable、inspect、replay
+  contracts/              # JSON Schema、TypeScript 类型、错误码和版本
+  plugin/                 # 插件作者 SDK 门面：definePlugin / defineFunction
+  plugins/                # PluginHost、注册、依赖排序与生命周期
+  runtime/                # 主循环、BehaviorContext、路由、决策、Workflow 与观测
+  storage/                # EventStore、持久化 SPI/Runtime、SQLite Provider
+  subscriptions/          # Hook、StateEvent、Subscription Registry、Dispatcher
+  control-plane/          # tenant control-plane 与签名分发（预览级，尚无宿主消费方）
+  cli/                    # install、enable、disable、inspect、replay
+  adapters/
+    executors/ fastify/ pi/ postgres/ service/ sidecar/ temporal/
 examples/
-  agent-sandbox/      # 根级组合根与交互演示
-  plugins/            # fake-plugin、knowledge-query、ticket-create、human-transfer
+  agent-sandbox/          # 根级组合根与交互演示
+  plugins/                # fake-plugin、knowledge-query、ticket-create、human-transfer
 tests/
-  contract/
-  replay/
-  routing/
-  compaction/
+  contract/ compatibility/ distribution/ durable/ integration/
+  replay/ routing/ security/ workflow/
 ```
 
-`plugins/sdk` 和 `plugins/host` 先作为一个内部 package 边界共同演进，避免只有目录差异却产生两个 workspace 包。只有需要独立发布、独立语义化版本或外部插件作者单独安装 SDK 时，才重新拆出 SDK 包；`examples/` 始终不加入 workspace glob。
+`packages/plugin` 是对 `@iar/plugins` SDK 入口的稳定门面，只有在出现独立发布、独立版本兼容承诺或外部插件作者需要单独安装时，才进一步拆分 SDK 包；`examples/` 始终不加入 workspace glob。`control-plane` 目前是库级 API，尚无 Service 宿主、CLI 或示例组合根消费它，接入宿主之前视为预览级接口。
 
 ## 12. 可靠性、安全与观测
 

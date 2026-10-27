@@ -6,7 +6,8 @@
  */
 import { existsSync, readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { cpus } from 'node:os';
 
 // 仅依赖 Node.js 内置模块，使测试入口在干净安装后即可执行。
 // 编译产物由 TypeScript 生成，脚本本身保持为可直接调用的 ESM 文件。
@@ -76,19 +77,46 @@ if (testFiles.length === 0) {
   process.exitCode = 1;
 } else {
   // 测试未显式提供 snapshotPath 时使用独立内存 SQLite，避免多个用例共享开发机默认文件；恢复回归会显式传入临时文件。
-  // 每个文件使用独立 Node 进程串行运行，隔离环境变量、临时端口和 Worker SQLite。
-  for (const testFile of testFiles) {
-    const result = spawnSync(process.execPath, ['--test', testFile], { stdio: 'inherit', env: { ...process.env, IAR_SANDBOX_SQLITE_PATH: ':memory:' } });
-    // 启动失败没有 status，必须显式输出底层错误，便于定位 Node 或权限问题。
-    if (result.error) {
-      console.error(`测试进程启动失败：${result.error.message}`);
-      process.exitCode = 1;
-      break;
+  // 每个文件使用独立 Node 进程按有界并发运行，隔离环境变量、临时端口和 Worker SQLite；并发度可用 IAR_TEST_CONCURRENCY 覆盖。
+  const failures = [];
+  let nextIndex = 0;
+  const envConcurrency = Number.parseInt(process.env.IAR_TEST_CONCURRENCY ?? '', 10);
+  const concurrency = Number.isFinite(envConcurrency) && envConcurrency > 0
+    ? envConcurrency
+    : Math.min(6, Math.max(2, (cpus().length || 2) - 2));
+
+  /** 启动单个测试进程并等待退出，失败信息收集后统一汇总。 */
+  async function runTestFile(testFile) {
+    await new Promise((resolve) => {
+      const child = spawn(process.execPath, ['--test', testFile], { stdio: 'inherit', env: { ...process.env, IAR_SANDBOX_SQLITE_PATH: ':memory:' } });
+      // 启动失败没有退出码，必须显式输出底层错误，便于定位 Node 或权限问题。
+      child.on('error', (error) => {
+        console.error(`测试进程启动失败：${error.message}`);
+        failures.push({ file: testFile, code: 1 });
+        resolve();
+      });
+      child.on('exit', (code, signal) => {
+        if ((code ?? 1) !== 0) failures.push({ file: testFile, code: code ?? 1, signal });
+        resolve();
+      });
+    });
+  }
+
+  /** 并发工作线程持续领取测试文件，直到队列耗尽。 */
+  async function worker() {
+    while (nextIndex < testFiles.length) {
+      const testFile = testFiles[nextIndex++];
+      await runTestFile(testFile);
     }
-    if ((result.status ?? 1) !== 0) {
-      process.exitCode = result.status ?? 1;
-      break;
-    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, worker));
+
+  if (failures.length > 0) {
+    process.exitCode = failures[0].code;
+    console.error(`\n${failures.length} 个测试文件失败：`);
+    for (const failure of failures) console.error(` - ${relative(process.cwd(), failure.file)}`);
+  } else {
     process.exitCode = 0;
   }
 }

@@ -1,6 +1,20 @@
 {
   "name": "@iar/adapters-fastify",
   "version": "0.1.0",
+  "description": "IAR Fastify HTTP 适配器",
+  "license": "MIT",
+  "author": "lvdaxianer <lvdaxianer@yeah.net>",
+  "homepage": "https://github.com/lvdaxianer/iar#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lvdaxianer/iar.git",
+    "directory": "packages/adapters/fastify"
+  },
+  "keywords": [
+    "iar",
+    "adapters",
+    "fastify"
+  ],
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -15,7 +29,9 @@
       "import": "./dist/http-boundary.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "dependencies": {
     "@iar/contracts": "0.1.0",
     "@iar/plugins": "0.1.0",

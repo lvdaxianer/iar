@@ -1,8 +1,21 @@
 {
   "name": "@iar/pi-bridge",
   "version": "0.1.0",
+  "description": "IAR Pi Bridge：把 Pi 输入扩展为可选意图路由层",
+  "license": "MIT",
+  "author": "lvdaxianer <lvdaxianer@yeah.net>",
+  "homepage": "https://github.com/lvdaxianer/iar#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lvdaxianer/iar.git",
+    "directory": "packages/adapters/pi"
+  },
+  "keywords": [
+    "pi-package",
+    "iar",
+    "intent-routing"
+  ],
   "type": "module",
-  "keywords": ["pi-package", "iar", "intent-routing"],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "publishConfig": {
@@ -18,8 +31,12 @@
       "import": "./dist/pi-extension.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "pi": {
-    "extensions": ["./dist/pi-extension.js"]
+    "extensions": [
+      "./dist/pi-extension.js"
+    ]
   }
 }

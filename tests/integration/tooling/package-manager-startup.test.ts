@@ -1,10 +1,11 @@
 /**
- * 验证 pnpm 在本地 workspace 中不把私有包替换为 registry 依赖，并且运行脚本不隐式联网安装。
+ * 验证仓库以 npm 为唯一包管理器：package-lock.json 是唯一锁定来源，
+ * 不存在第二个 lockfile，运行脚本不隐式联网安装依赖。
  * @author lvdaxianer@yeah.net
- * @date 2026-10-19
+ * @date 2026-10-26
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
@@ -13,19 +14,22 @@ function readRootFile(fileName: string): string {
   return readFileSync(resolve(fileName), 'utf8');
 }
 
-/** pnpm workspace 必须包含仓库声明的两个 workspace 层级并启用本地链接。 */
-test('pnpm workspace 显式链接本地包', () => {
-  const config = readRootFile('pnpm-workspace.yaml');
-  assert.match(config, /- packages\/\*/);
-  assert.match(config, /- packages\/adapters\/\*/);
-  assert.match(config, /linkWorkspacePackages:\s*true/);
-  assert.match(config, /verifyDepsBeforeRun:\s*false/);
+/** npm lockfile 必须存在并与 workspace 声明一致。 */
+test('npm lockfile 锁定 workspace 依赖', () => {
+  assert.ok(existsSync(resolve('package-lock.json')));
+  const lock = readRootFile('package-lock.json');
+  assert.match(lock, /"packages\/\*"|"packages\/adapters\/\*"/);
 });
 
-/** pnpm run 不应因为 registry 暂时不可用而在脚本前自动安装依赖。 */
-test('pnpm run 不隐式安装依赖', () => {
-  const workspaceConfig = readRootFile('pnpm-workspace.yaml');
+/** 只允许一个 lockfile：pnpm/yarn/bun 的锁定文件都不应进入仓库。 */
+test('不存在第二个 lockfile', () => {
+  for (const fileName of ['pnpm-lock.yaml', 'pnpm-workspace.yaml', 'yarn.lock', 'bun.lockb', 'bun.lock']) {
+    assert.equal(existsSync(resolve(fileName)), false, `${fileName} 不应存在`);
+  }
+});
+
+/** npm 运行脚本不应因为 registry 暂时不可用而在脚本前自动安装依赖。 */
+test('npm run 不隐式安装依赖', () => {
   const npmConfig = readRootFile('.npmrc');
-  assert.match(workspaceConfig, /verifyDepsBeforeRun:\s*false/);
-  assert.doesNotMatch(npmConfig, /verify-deps-before-run|link-workspace-packages/);
+  assert.doesNotMatch(npmConfig, /verify-deps-before-run/);
 });

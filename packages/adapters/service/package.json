@@ -1,6 +1,20 @@
 {
   "name": "@iar/adapters-service",
   "version": "0.1.0",
+  "description": "IAR Service API 适配器",
+  "license": "MIT",
+  "author": "lvdaxianer <lvdaxianer@yeah.net>",
+  "homepage": "https://github.com/lvdaxianer/iar#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lvdaxianer/iar.git",
+    "directory": "packages/adapters/service"
+  },
+  "keywords": [
+    "iar",
+    "adapters",
+    "service"
+  ],
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -11,7 +25,9 @@
     }
   },
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "dependencies": {
     "@iar/adapters-fastify": "0.1.0",
     "@iar/contracts": "0.1.0",

@@ -26,7 +26,7 @@ The rule engine SHALL support `ALL`, `ANY`, and `NONE`, record matched rules, ex
 
 ### Requirement: Decisions are constrained and typed
 
-Function and Plugin decision providers SHALL receive finite candidates and structured constraints derived from validated Plugin packages, and SHALL return a validated choice, rejection, or `needs_clarification` result with score, threshold, reason, and decision version. JEV and the Intent Model backend SHALL both return the same `iar.decision/v1` result shape. When both backends are configured for the same decision stage, the runtime SHALL select JEV; when JEV is absent, the runtime SHALL select the Intent Model backend.
+Function and Plugin decision providers SHALL receive finite candidates and structured constraints derived from validated Plugin packages, and SHALL return a validated choice, rejection, or `needs_clarification` result with score, threshold, reason, and decision version. JEV and the Intent Model backend SHALL both return the same `iar.decision/v1` result shape.
 
 #### Scenario: JEV is preferred when both backends are configured
 
@@ -78,7 +78,7 @@ A model decision SHALL NOT add capabilities, alter input schemas, change Functio
 
 ### Requirement: Intent Model uses the configured environment-backed Provider
 
-The Intent Model decision adapter SHALL be executable through an explicitly injected provider whose endpoint, API key, and model ID can be independently overridden by environment variables. The provider SHALL preserve the fixed Intent Prompt and shared `iar.decision/v1` validation boundary.
+The Intent Model decision adapter SHALL run through an explicitly injected provider whose endpoint, API key, and model ID can be independently overridden by environment variables, while preserving the fixed Intent Prompt and the shared `iar.decision/v1` validation boundary. When both decision backends are configured for the same decision stage, the runtime SHALL select JEV; when JEV is absent, the runtime SHALL select the Intent Model backend.
 
 #### Scenario: Environment-backed Intent Model remains JEV-compatible
 
@@ -98,3 +98,27 @@ Plugin package metadata SHALL be projected into a decision request only after th
 
 - **WHEN** a Plugin package contains a Function not present in the current decision candidate list
 - **THEN** the decision adapter cannot add that Function or its Plugin provider to the request's candidate IDs
+
+### Requirement: Semantic completeness gates bounded routing
+
+The runtime SHALL distinguish an incomplete semantic frame from an empty candidate set and SHALL prevent Function or Plugin decision providers from being invoked when required routing fields are missing.
+
+#### Scenario: Missing semantic field stops the route
+- **WHEN** the extracted frame lacks a required action, intent, or canonical route identity
+- **THEN** the runtime returns a stable incomplete-frame reason and does not invoke route proposal, Plugin selection, or execution
+
+#### Scenario: Empty candidates remain a distinct route result
+- **WHEN** the semantic frame is complete but no enabled and authorized candidate satisfies it
+- **THEN** the runtime returns a no-candidate reason distinct from incomplete extraction and does not execute a Function
+
+### Requirement: Recovery preserves the existing authority boundary
+
+The runtime SHALL accept recovered fields only after they are validated against the current finite session state, registered Plugin/Function contracts, authorization, policy and confirmation rules.
+
+#### Scenario: User supplies the missing field
+- **WHEN** a user answers a runtime-generated clarification with a value that maps to one finite allowed field
+- **THEN** the runtime re-runs the normal route and policy gates before any execution
+
+#### Scenario: User supplies an unknown field value
+- **WHEN** a clarification answer does not map to the finite allowed values
+- **THEN** the runtime keeps the action unexecuted and returns another bounded clarification or unavailable result

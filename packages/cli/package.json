@@ -1,6 +1,19 @@
 {
   "name": "@iar/cli",
   "version": "0.1.0",
+  "description": "IAR 插件安装、启用、检查与重放 CLI",
+  "license": "MIT",
+  "author": "lvdaxianer <lvdaxianer@yeah.net>",
+  "homepage": "https://github.com/lvdaxianer/iar#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lvdaxianer/iar.git",
+    "directory": "packages/cli"
+  },
+  "keywords": [
+    "iar",
+    "cli"
+  ],
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -11,7 +24,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "dependencies": {
     "@iar/adapters-service": "0.1.0"
   }

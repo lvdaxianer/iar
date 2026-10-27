@@ -4,17 +4,7 @@
 
 ### Requirement: Models can answer from verified facts without repeating actions
 
-The system SHALL separate semantic intent from a fixed action type and give the model only finite, runtime-filtered Plugin/Function candidates. The action type SHALL be one of `query`, `create`, `update`, `delete`, `transfer`, `execute` or `unknown`, never a business-specific operation. When no Function is selected, the response model SHALL answer from verified facts or ask a bounded clarification and SHALL NOT execute a Function. A verified fact or recent message SHALL not supply a missing object for a new generic query unless the current user message contains a validated historical reference.
-
-#### Scenario: Unspecified generic query does not reuse an old fact
-
-- **WHEN** the session contains a successful prior result and the current user asks to “查询一下” without an object or historical reference
-- **THEN** the runtime asks for the query target and does not claim a result from the prior fact or initiate a side effect
-
-#### Scenario: Explicit historical query still uses the fact
-
-- **WHEN** the current user explicitly asks about “刚才那个结果” or another validated historical reference
-- **THEN** the response may use only the resolved fact and SHALL not create or repeat the prior action
+The system SHALL separate semantic intent from a fixed action type and give the model only finite, runtime-filtered Plugin/Function candidates. The action type SHALL be one of `query`, `create`, `update`, `delete`, `transfer`, `execute` or `unknown`, never a business-specific operation. When no Function is selected, the response model SHALL answer from verified facts or ask a bounded clarification and SHALL NOT execute a Function.
 
 #### Scenario: Ask for the previous ticket number
 

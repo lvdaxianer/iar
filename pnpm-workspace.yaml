@@ -1,8 +1,0 @@
-packages:
-  - packages/*
-  - packages/adapters/*
-
-# 私有 @iar/* 包必须优先从当前仓库链接，不能回退到公共 registry。
-linkWorkspacePackages: true
-# 运行脚本前不隐式联网安装，依赖由显式 install 命令管理。
-verifyDepsBeforeRun: false
